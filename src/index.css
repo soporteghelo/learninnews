@@ -1,0 +1,584 @@
+@import "tailwindcss";
+
+/* ============================================ */
+/* GLOBAL STYLES                                */
+/* ============================================ */
+
+@theme {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+
+  --color-accent-400: #a78bfa;
+  --color-accent-500: #8b5cf6;
+  --color-accent-600: #7c3aed;
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+
+  --animate-fade-in: fade-in 0.5s ease-out;
+  --animate-slide-up: slide-up 0.4s ease-out;
+  --animate-slide-right: slide-right 0.4s ease-out;
+  --animate-scale-in: scale-in 0.3s ease-out;
+  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  min-height: 100vh;
+  color: #e2e8f0;
+}
+
+/* ============================================ */
+/* SCROLLBAR                                    */
+/* ============================================ */
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+/* ============================================ */
+/* SAFE AREAS (notch, dynamic island)           */
+/* ============================================ */
+
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ============================================ */
+/* GLASSMORPHISM                                */
+/* ============================================ */
+
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.glass-card {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+/* ============================================ */
+/* GRADIENTS                                    */
+/* ============================================ */
+
+.gradient-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+}
+
+.gradient-success {
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+}
+
+.gradient-warning {
+  background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+}
+
+.gradient-danger {
+  background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+}
+
+.gradient-orange {
+  background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
+}
+
+.gradient-blue {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+}
+
+.gradient-yellow {
+  background: linear-gradient(135deg, #ca8a04 0%, #eab308 100%);
+}
+
+.gradient-green {
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+}
+
+/* ============================================ */
+/* ANIMATIONS                                   */
+/* ============================================ */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-right {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.06) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* ============================================ */
+/* MARKDOWN CONTENT STYLES                      */
+/* ============================================ */
+
+.markdown-content {
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: #cbd5e1;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* --- Headings --- */
+.markdown-content h1 {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #f8fafc;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid rgba(59, 130, 246, 0.2);
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.markdown-content h2 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-top: 1.75rem;
+  margin-bottom: 0.6rem;
+  padding-left: 0.75rem;
+  border-left: 3px solid #3b82f6;
+  line-height: 1.4;
+}
+
+.markdown-content h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+
+.markdown-content h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #a78bfa;
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+}
+
+/* First heading should not have top margin */
+.markdown-content > h1:first-child,
+.markdown-content > h2:first-child,
+.markdown-content > h3:first-child {
+  margin-top: 0;
+}
+
+/* --- Paragraphs --- */
+.markdown-content p {
+  margin-bottom: 0.875rem;
+  line-height: 1.8;
+  color: #cbd5e1;
+}
+
+/* --- Bold & Italic --- */
+.markdown-content strong {
+  color: #f1f5f9;
+  font-weight: 700;
+}
+
+.markdown-content em {
+  color: #93c5fd;
+  font-style: italic;
+}
+
+/* --- Lists --- */
+.markdown-content ul,
+.markdown-content ol {
+  margin-left: 0.5rem;
+  margin-bottom: 1rem;
+  padding-left: 1rem;
+}
+
+.markdown-content ul {
+  list-style-type: none;
+}
+
+.markdown-content ol {
+  list-style-type: decimal;
+}
+
+.markdown-content ul > li {
+  position: relative;
+  padding-left: 1.25rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.7;
+  color: #cbd5e1;
+}
+
+.markdown-content ul > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.65em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+}
+
+.markdown-content ol > li {
+  margin-bottom: 0.5rem;
+  line-height: 1.7;
+  color: #cbd5e1;
+  padding-left: 0.25rem;
+}
+
+.markdown-content ol > li::marker {
+  color: #3b82f6;
+  font-weight: 700;
+}
+
+/* Nested lists */
+.markdown-content ul ul,
+.markdown-content ol ol,
+.markdown-content ul ol,
+.markdown-content ol ul {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.markdown-content ul ul > li::before {
+  background: #64748b;
+  width: 4px;
+  height: 4px;
+}
+
+/* --- Blockquotes --- */
+.markdown-content blockquote {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid #a78bfa;
+  background: rgba(167, 139, 250, 0.08);
+  border-radius: 0 0.5rem 0.5rem 0;
+  color: #c4b5fd;
+  font-style: italic;
+}
+
+.markdown-content blockquote p {
+  margin-bottom: 0;
+  color: inherit;
+}
+
+/* --- Horizontal Rule --- */
+.markdown-content hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(148, 163, 184, 0.3), transparent);
+  margin: 1.5rem 0;
+}
+
+/* --- Code --- */
+.markdown-content code {
+  background: rgba(148, 163, 184, 0.15);
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.3rem;
+  font-size: 0.85em;
+  color: #93c5fd;
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+}
+
+.markdown-content pre {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin: 1rem 0;
+  overflow-x: auto;
+}
+
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+/* --- Tables --- */
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+}
+
+.markdown-content th {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  font-weight: 700;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid rgba(59, 130, 246, 0.3);
+}
+
+.markdown-content td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
+}
+
+.markdown-content tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* --- Links --- */
+.markdown-content a {
+  color: #60a5fa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.2s;
+}
+
+.markdown-content a:hover {
+  color: #93c5fd;
+}
+
+/* --- Images --- */
+.markdown-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+  margin: 1rem 0;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+/* ============================================ */
+/* BUTTON STYLES                                */
+/* ============================================ */
+
+.btn-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  color: white;
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.75rem;
+  transition: all 0.2s;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 25px rgba(37, 99, 235, 0.3);
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  font-weight: 500;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transition: all 0.2s;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-secondary:active {
+  transform: scale(0.97);
+}
+
+/* ============================================ */
+/* PROGRESS BAR                                 */
+/* ============================================ */
+
+.progress-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #7c3aed);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+/* ============================================ */
+/* LIGHT MODE OVERRIDES                         */
+/* ============================================ */
+
+html.light-mode body {
+  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 50%, #f8fafc 100%);
+  color: #1e293b;
+}
+
+/* Glass effects */
+html.light-mode .glass {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+html.light-mode .glass-strong {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+html.light-mode .glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Text colors */
+html.light-mode .text-white { color: #0f172a !important; }
+html.light-mode .text-slate-200 { color: #334155 !important; }
+html.light-mode .text-slate-300 { color: #475569 !important; }
+html.light-mode .text-slate-400 { color: #64748b !important; }
+html.light-mode .text-slate-500 { color: #94a3b8 !important; }
+
+/* Backgrounds */
+html.light-mode .bg-slate-950 { background-color: #f1f5f9 !important; }
+html.light-mode .bg-slate-900 { background-color: #e2e8f0 !important; }
+html.light-mode .bg-slate-800 { background-color: #cbd5e1 !important; }
+
+/* Borders */
+html.light-mode .border-white\/10,
+html.light-mode .border-white\/5 {
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Buttons */
+html.light-mode .btn-secondary {
+  background: rgba(0, 0, 0, 0.05);
+  color: #334155;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+html.light-mode .btn-secondary:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* Background opacity modifiers */
+html.light-mode .bg-white\/5 { background-color: rgba(0, 0, 0, 0.03) !important; }
+html.light-mode .bg-white\/10 { background-color: rgba(0, 0, 0, 0.05) !important; }
+
+/* Markdown content */
+html.light-mode .markdown-content { color: #475569; }
+html.light-mode .markdown-content h1 { color: #0f172a; border-bottom-color: rgba(59, 130, 246, 0.3); }
+html.light-mode .markdown-content h2 { color: #1e293b; }
+html.light-mode .markdown-content h3 { color: #64748b; }
+html.light-mode .markdown-content h4 { color: #7c3aed; }
+html.light-mode .markdown-content p { color: #475569; }
+html.light-mode .markdown-content strong { color: #0f172a; }
+html.light-mode .markdown-content em { color: #2563eb; }
+html.light-mode .markdown-content ul > li { color: #475569; }
+html.light-mode .markdown-content ol > li { color: #475569; }
+html.light-mode .markdown-content blockquote { background: rgba(167, 139, 250, 0.08); color: #7c3aed; }
+html.light-mode .markdown-content code { background: rgba(0, 0, 0, 0.06); color: #2563eb; }
+html.light-mode .markdown-content pre { background: #f8fafc; border-color: rgba(0, 0, 0, 0.08); }
+html.light-mode .markdown-content th { background: rgba(59, 130, 246, 0.1); color: #1d4ed8; }
+html.light-mode .markdown-content td { color: #475569; border-bottom-color: rgba(0, 0, 0, 0.06); }
+html.light-mode .markdown-content a { color: #2563eb; }
+html.light-mode .markdown-content hr { background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.15), transparent); }
+
+/* Quiz option bg adjustments */
+html.light-mode .bg-slate-900\/95 { background-color: rgba(255, 255, 255, 0.95) !important; }
+
+/* Custom Overrides for Learning Mode */
+html.light-mode .video-comment-text { color: #0f172a !important; }
+html.light-mode .pdf-button-primary-text { color: #582a00 !important; }
+html.light-mode .pdf-button-secondary-text { color: #7c4a00 !important; }
