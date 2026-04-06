@@ -72,12 +72,18 @@ export default function Dashboard({
         className="sticky top-0 z-30 glass-strong px-4 py-3 sm:px-6"
       >
         <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <div>
+          <div onClick={onChangeAudience} className="cursor-pointer hover:opacity-80 transition-opacity">
             <h1 className="text-lg font-bold text-white">{APP_CONFIG.name}</h1>
             <p className="text-xs text-slate-400 capitalize">{audience}</p>
           </div>
           <div className="flex items-center gap-2">
-            <div /> {/* spacer — controls are in the global floating bar */}
+            <button 
+              onClick={onOpenAdmin}
+              className="p-2 text-slate-400 hover:text-white transition-colors"
+              title="Panel de Administración"
+            >
+              <TrendingUp className="w-5 h-5 rotate-45" /> {/* Using TrendingUp as a tech-looking icon */}
+            </button>
           </div>
         </div>
       </motion.header>

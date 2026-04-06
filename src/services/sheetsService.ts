@@ -524,22 +524,3 @@ export async function updateIngresoProgress(data: {
   }
 }
 
-export async function extractPdfTextFromDrive(fileId: string): Promise<{ success: boolean; text?: string; message: string }> {
-  try {
-    const result = await postToAppsScript({
-      action: 'extractText',
-      fileId,
-    });
-    return {
-      success: result.status === 'ok',
-      text: (result as any).text,
-      message: result.message || 'Texto extraído correctamente',
-    };
-  } catch (error) {
-    console.error('Error extracting text from PDF:', error);
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : 'Error desconocido',
-    };
-  }
-}

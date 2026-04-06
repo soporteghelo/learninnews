@@ -6,15 +6,13 @@ import {
   Plus, Copy, Search, BookOpen, HelpCircle,
   CheckCircle2, Loader2, Lock, Eye, EyeOff, RefreshCw,
   Wifi, WifiOff, ChevronDown, ChevronUp,
-  FileText, Settings, Video, Link2, MessageSquare, Undo2, Sparkles
+  FileText, Settings, Video, Link2, MessageSquare, Undo2
 } from 'lucide-react';
 import { ADMIN_CONFIG } from '../config/app.config';
-
 import {
   saveQuizToSheets, deleteQuizFromSheets,
   saveContentToSheets, deleteContentFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  extractPdfTextFromDrive
 } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
@@ -61,7 +59,6 @@ export default function AdminPanel({
 
   // General
   const [isSaving, setIsSaving] = useState(false);
-  const [isExtractingPrompt, setIsExtractingPrompt] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Connection test
@@ -232,88 +229,6 @@ export default function AdminPanel({
     setDraftQuestions(prev => [...prev, newQ]);
   };
 
-  const handleGeneratePrompt = async (pdfUrl: string, cod: string) => {
-    alert('DEBUG: Click capturado.\nURL: ' + (pdfUrl || 'VACÍA') + '\nCOD: ' + cod);
-    console.log('--- GENERATE PROMPT DEBUG ---');
-    console.log('PDF URL:', pdfUrl);
-    console.log('COD:', cod);
-
-    if (!pdfUrl || pdfUrl.trim() === '') {
-      const msg = 'Debes ingresar una URL de PDF de Google Drive antes de generar el prompt.';
-      alert('⚠️ ATENCIÓN ⚠️\n\n' + msg);
-      setError(msg);
-      return;
-    }
-
-    // Extract ID from Google Drive URL
-    let fileId = '';
-    const dMatch = pdfUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
-    const idMatch = pdfUrl.match(/[?&]id=([a-zA-Z0-9-_]+)/);
-    if (dMatch) fileId = dMatch[1];
-    else if (idMatch) fileId = idMatch[1];
-
-    if (!fileId) {
-      const msg = 'URL de Google Drive no válida. No se pudo extraer el ID del archivo.\n\nAsegúrate de usar el enlace de compartir del archivo (Ej: .../file/d/ID/view).';
-      alert('❌ URL INVÁLIDA ❌\n\n' + msg);
-      setError(msg);
-      return;
-    }
-
-    setIsExtractingPrompt(cod);
-    setError(null);
-
-    try {
-      console.log('Iniciando extracción de texto para PDF:', fileId);
-      const result = await extractPdfTextFromDrive(fileId);
-      
-      if (!result.success) {
-        throw new Error(result.message);
-      }
-
-      if (!result.text || result.text.length < 10) {
-        throw new Error('El PDF no parece contener texto legible o está protegido.');
-      }
-
-      const promptHead = `A partir del siguiente contenido, elabora un cuestionario de 20 preguntas con un nivel de dificultad intermedio a avanzado.
-
-Para cada pregunta, incluye:
-
-Cuatro alternativas de respuesta (A, B, C y D), claramente formuladas.
-Indica cuál es la respuesta correcta.
-
-Además, después de cada pregunta, proporciona un feedback detallado que:
-
-Explique por qué la respuesta correcta es la adecuada.
-Aclare por qué las otras opciones no lo son (si aplica).
-Refuerce el concepto con una breve explicación teórica o contextual.
-
-Asegúrate de que las preguntas evalúen comprensión profunda, análisis y aplicación del contenido, no solo memorización.
-
----
-CONTENIDO EXTRAÍDO DEL PDF:
----
-`;
-      const fullPrompt = promptHead + result.text;
-      
-      try {
-        await navigator.clipboard.writeText(fullPrompt);
-        alert('✨ ¡ÉXITO! ✨\n\nEl prompt detallado se ha generado y copiado automáticamente a tu portapapeles.\n\nYa puedes pegarlo (Ctrl+V) en tu ChatGPT o Gemini.');
-        setStatusMessage({ type: 'success', text: 'Prompt de IA copiado al portapapeles.' });
-      } catch (clipErr) {
-        console.error('Error copying to clipboard:', clipErr);
-        // Fallback: show in a prompt so they can copy it manually if browser blocks it
-        window.prompt('El navegador bloqueó la copia automática. Por favor, selecciona y copia el contenido abajo:', fullPrompt);
-      }
-
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error desconocido';
-      console.error('PDF Extraction Error:', err);
-      alert('❌ ERROR EN LA EXTRACCIÓN ❌\n\n' + msg + '\n\nIMPORTANTE: Asegúrate de haber habilitado "Google Drive API" en tu Apps Script y haber creado una "Nueva Implementación".');
-      setError(`Error: ${msg}`);
-    } finally {
-      setIsExtractingPrompt(null);
-    }
-  };
 
   // ========== SAVE ALL ==========
   const handleSaveContent = async () => {
@@ -853,28 +768,6 @@ CONTENIDO EXTRAÍDO DEL PDF:
                                         <FileText className="w-3 h-3 text-[#582a00]" />
                                         PDF <span className="text-[#737781]">(URL de Google Drive)</span>
                                       </div>
-                                      <motion.button
-                                        initial={false}
-                                        animate={isExtractingPrompt === c.cod ? { scale: [1, 1.02, 1], opacity: [1, 0.7, 1] } : {}}
-                                        transition={isExtractingPrompt === c.cod ? { repeat: Infinity, duration: 1.5 } : {}}
-                                        onClick={() => handleGeneratePrompt(c.pdf || '', c.cod)}
-                                        disabled={!!isExtractingPrompt}
-                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 ${
-                                          isExtractingPrompt === c.cod 
-                                            ? 'bg-blue-600 text-white shadow-lg' 
-                                            : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
-                                        }`}
-                                        title="Generar prompt de preguntas para IA basado en el texto de este PDF"
-                                      >
-                                        {isExtractingPrompt === c.cod ? (
-                                          <Loader2 className="w-4 h-4 animate-spin" />
-                                        ) : (
-                                          <Sparkles className="w-4 h-4" />
-                                        )}
-                                        <span className="font-black tracking-tight uppercase text-[10px]">
-                                          {isExtractingPrompt === c.cod ? 'PROCESANDO PDF...' : 'GENERAR PROMPT QUIZ'}
-                                        </span>
-                                      </motion.button>
                                     </label>
                                     <input
                                       type="url"
@@ -910,7 +803,7 @@ CONTENIDO EXTRAÍDO DEL PDF:
                       <BookOpen className="w-8 h-8 text-[#737781]" />
                     </div>
                     <p className="text-sm font-medium text-[#424750]">No hay contenido educativo aún.</p>
-                    <p className="text-xs text-[#737781] mt-1">Genera secciones con IA o añade manualmente.</p>
+                    <p className="text-xs text-[#737781] mt-1">Añade secciones manualmente con el botón +</p>
                   </div>
                 )}
 

@@ -6,19 +6,7 @@
  * NUNCA hardcodear valores en componentes o servicios.
  */
 
-const GEMINI_API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
 const APPS_SCRIPT_URL = (import.meta as any).env?.VITE_APPS_SCRIPT_URL || '';
-
-// =============================================
-// 1. AI_CONFIG - Solo para módulo Admin
-// =============================================
-export const AI_CONFIG = {
-  provider: 'gemini' as const,
-  apiKey: GEMINI_API_KEY,
-  model: 'gemini-2.0-flash-lite',
-  maxTokens: 30000,
-  temperature: 0.7,
-} as const;
 
 // =============================================
 // 2. SHEETS_CONFIG - Google Sheets como BD
@@ -38,10 +26,10 @@ export const SHEETS_CONFIG = {
 // 3. APP_CONFIG - Info general de la app
 // =============================================
 export const APP_CONFIG = {
-  name: 'LearnDrive AI',
+  name: 'LearnDrive',
   tagline: 'Tu tutor personal de aprendizaje',
   description: 'Plataforma de aprendizaje corporativo móvil',
-  version: '2.0.0',
+  version: '2.1.0',
   storage: {
     prefix: 'learndrive_',
     keys: {
@@ -58,9 +46,6 @@ export const APP_CONFIG = {
 // =============================================
 export const ADMIN_CONFIG = {
   password: '123456',
-  quiz_generation_count: 5,
-  content_generation_chunk_size: 3,
-  content_sections_per_batch: 2,
 } as const;
 
 // =============================================
@@ -258,15 +243,6 @@ export function getStorageKey(key: string): string {
   return `${APP_CONFIG.storage.prefix}${key}`;
 }
 
-export function validateApiConfig(): { valid: boolean; error?: string } {
-  if (!AI_CONFIG.apiKey) {
-    return {
-      valid: false,
-      error: 'API Key no configurada. Define VITE_GEMINI_API_KEY en tu archivo .env',
-    };
-  }
-  return { valid: true };
-}
 
 export function getSheetUrl(sheetName: string): string {
   const cacheBust = `&_t=${Date.now()}`;
