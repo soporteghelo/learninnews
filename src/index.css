@@ -201,6 +201,13 @@ body {
   overflow-wrap: break-word;
 }
 
+@media (min-width: 1024px) {
+  .markdown-content {
+    font-size: 1.05rem;
+    line-height: 1.9;
+  }
+}
+
 /* --- Headings --- */
 .markdown-content h1 {
   font-size: 1.6rem;
@@ -582,3 +589,25 @@ html.light-mode .bg-slate-900\/95 { background-color: rgba(255, 255, 255, 0.95) 
 html.light-mode .video-comment-text { color: #0f172a !important; }
 html.light-mode .pdf-button-primary-text { color: #582a00 !important; }
 html.light-mode .pdf-button-secondary-text { color: #7c4a00 !important; }
+
+/* ============================================ */
+/* CUSTOM SCROLLBAR                             */
+/* ============================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}

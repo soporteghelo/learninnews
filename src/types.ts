@@ -1,5 +1,13 @@
 export type AudienceType = 'Obrero' | 'Empleado' | 'Energías' | 'Conductor';
 
+export interface AppDynamicConfig {
+  title: string;
+  message: string;
+  contact: string;
+  adminPass: string;
+  status: 'Activo' | 'Inactivo';
+}
+
 export interface UserSession {
   dni: string;
   apellidos: string;
@@ -64,6 +72,10 @@ export interface Message {
 }
 
 // Admin types
+export interface TopicDraft extends LearnTopic {
+  _status: 'new' | 'modified' | 'deleted' | 'unchanged';
+}
+
 export interface QuizDraft extends QuizQuestion {
   _status: 'new' | 'modified' | 'deleted' | 'unchanged';
   _originalQuestion?: string;
@@ -89,7 +101,7 @@ export interface ConnectionTestResult {
   geminiApi: { ok: boolean; error?: string };
 }
 
-export type AdminTab = 'overview' | 'content' | 'quiz';
+export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz';
 
 export type AppView =
   | 'login'

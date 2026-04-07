@@ -12,11 +12,12 @@ import { ADMIN_CONFIG } from '../config/app.config';
 import {
   saveQuizToSheets, deleteQuizFromSheets,
   saveContentToSheets, deleteContentFromSheets,
+  saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
 } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
-  ContentDraft, AdminTab, ConnectionTestResult
+  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult
 } from '../types';
 
 interface AdminPanelProps {
@@ -25,6 +26,7 @@ interface AdminPanelProps {
   allQuizQuestions: QuizQuestion[];
   onBack: () => void;
   onRefreshData: () => Promise<void> | void;
+  adminPass?: string;
 }
 
 export default function AdminPanel({
@@ -33,6 +35,7 @@ export default function AdminPanel({
   allQuizQuestions,
   onBack,
   onRefreshData,
+  adminPass,
 }: AdminPanelProps) {
   // Auth
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -41,9 +44,17 @@ export default function AdminPanel({
   const [error, setError] = useState<string | null>(null);
 
   // Navigation
-  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [activeTab, setActiveTab] = useState<AdminTab>('topics');
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
   const [isTopicSelectorOpen, setIsTopicSelectorOpen] = useState(false);
+
+  // Topics management
+  const [draftTopics, setDraftTopics] = useState<TopicDraft[]>([]);
+  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setDraftTopics(topics.map(t => ({...t, _status: 'unchanged'})));
+  }, [topics]);
 
   // Content management
   const [draftContent, setDraftContent] = useState<ContentDraft[]>([]);
@@ -54,7 +65,7 @@ export default function AdminPanel({
   const [expandedQuestions, setExpandedQuestions] = useState<Set<string>>(new Set());
 
   // Delete confirmation
-  const [confirmDelete, setConfirmDelete] = useState<{ type: 'content' | 'quiz'; id: string; label: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'topic' | 'content' | 'quiz'; id: string; label: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // General
@@ -68,7 +79,8 @@ export default function AdminPanel({
   // Auth
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === ADMIN_CONFIG.password) {
+    const targetPass = adminPass || ADMIN_CONFIG.password;
+    if (password === targetPass) {
       setIsAuthenticated(true);
       setError(null);
     } else {
@@ -139,6 +151,38 @@ export default function AdminPanel({
     setConfirmDelete({ type: 'content', id: cod, label: c.tema || cod });
   };
 
+  // ========== TOPIC CRUD ==========
+  const handleUpdateTopic = (id: string, updates: Partial<TopicDraft>) => {
+    setDraftTopics(prev => prev.map(t => {
+      if (t.id === id) {
+        return { ...t, ...updates, _status: t._status === 'new' ? 'new' : 'modified' };
+      }
+      return t;
+    }));
+  };
+
+  const handleDeleteTopic = (id: string) => {
+    const t = draftTopics.find(dt => dt.id === id);
+    if (!t) return;
+    setConfirmDelete({ type: 'topic', id, label: t.title || id });
+  };
+
+  const handleAddTopicManual = () => {
+    const newT: TopicDraft = {
+      id: `MOD-${Date.now()}`,
+      title: 'Nuevo Módulo...',
+      audience: 'Todos',
+      details: '',
+      summary: '',
+      keyPoints: [],
+      order: draftTopics.length + 1,
+      active: true,
+      _status: 'new',
+    };
+    setDraftTopics(prev => [...prev, newT]);
+    setExpandedTopics(prev => new Set(prev).add(newT.id));
+  };
+
   const confirmDeleteAction = async () => {
     if (!confirmDelete) return;
     const { type, id } = confirmDelete;
@@ -146,7 +190,24 @@ export default function AdminPanel({
     setError(null);
 
     try {
-      if (type === 'content') {
+      if (type === 'topic') {
+        const t = draftTopics.find(dt => dt.id === id);
+        if (t?._status === 'new') {
+          setDraftTopics(prev => prev.filter(dt => dt.id !== id));
+        } else {
+          const result = await deleteTopicFromSheets([id]);
+          if (!result.success) {
+            setError(`Error al eliminar: ${result.message}`);
+            setIsDeleting(false);
+            setConfirmDelete(null);
+            return;
+          }
+          setDraftTopics(prev => prev.filter(dt => dt.id !== id));
+          setStatusMessage({ type: 'success', text: 'Módulo eliminado' });
+          if (selectedTopicId === id) setSelectedTopicId('');
+          await onRefreshData();
+        }
+      } else if (type === 'content') {
         const c = draftContent.find(dc => dc.cod === id);
         if (c?._status === 'new') {
           setDraftContent(prev => prev.filter(dc => dc.cod !== id));
@@ -231,6 +292,29 @@ export default function AdminPanel({
 
 
   // ========== SAVE ALL ==========
+  const handleSaveTopics = async () => {
+    setIsSaving(true);
+    setError(null);
+    const toSave = draftTopics.filter(t => t._status === 'new' || t._status === 'modified');
+    try {
+      if (toSave.length > 0) {
+        const result = await saveTopicToSheets(toSave);
+        if (!result.success) {
+          setError(`Error al guardar temas: ${result.message}`);
+          setIsSaving(false);
+          return;
+        }
+      }
+      setStatusMessage({ type: 'success', text: 'Módulos sincronizados correctamente' });
+      setDraftTopics(prev => prev.map(t => ({ ...t, _status: 'unchanged' as const })));
+      await onRefreshData();
+    } catch (err) {
+      setError(`Error al sincronizar temas: ${err instanceof Error ? err.message : 'desconocido'}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSaveContent = async () => {
     setIsSaving(true);
     setError(null);
@@ -314,6 +398,11 @@ export default function AdminPanel({
   };
 
   // ========== UNDO UNSAVED CHANGES ==========
+  const handleUndoTopics = () => {
+    setDraftTopics(topics.map(t => ({...t, _status: 'unchanged' as const})));
+    setStatusMessage({ type: 'success', text: 'Cambios de módulos descartados' });
+  };
+
   const handleUndoContent = () => {
     const existingChunks = allChunks
       .filter(c => c.idMain === selectedTopicId)
@@ -364,7 +453,7 @@ export default function AdminPanel({
               </button>
             </div>
             {error && <p className="text-[#ba1a1a] text-sm font-semibold text-center bg-[#ffdad6]/20 py-2 rounded-lg">{error}</p>}
-            <button type="submit" className="w-full bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-white py-4 rounded-xl text-base font-bold shadow-lg shadow-[#1b4d89]/20 hover:scale-[1.02] active:scale-[0.98] transition-all">Acceder al Panel</button>
+            <button type="submit" className="w-full bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-[#ffffff] py-4 rounded-xl text-base font-bold shadow-lg shadow-[#1b4d89]/20 hover:scale-[1.02] active:scale-[0.98] transition-all">Acceder al Panel</button>
             <button type="button" onClick={onBack} className="w-full text-[#737781] text-sm font-semibold hover:text-[#00366b] transition-colors">Volver</button>
           </form>
         </motion.div>
@@ -440,12 +529,32 @@ export default function AdminPanel({
         </AnimatePresence>
 
         {/* Page Header */}
-        <div className="mb-6">
-          <h2 className="text-xl leading-tight font-bold text-[#00366b] mb-1">Gestión de Contenidos</h2>
-          <p className="text-[#424750] text-sm max-w-2xl">Configure y sincronice la arquitectura de contenidos educativos del sistema industrial.</p>
+        <div className="mb-6 flex items-center gap-2">
+          {([
+            { key: 'topics', label: 'Módulos' },
+            { key: 'overview', label: 'Resumen' },
+            { key: 'content', label: 'Contenidos' },
+            { key: 'quiz', label: 'Quizzes' },
+          ] as { key: AdminTab; label: string }[]).map(tab => (
+            <button
+              key={tab.key}
+              disabled={tab.key !== 'topics' && !selectedTopicId}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-2 text-sm font-bold rounded-xl transition-all ${
+                activeTab === tab.key
+                  ? 'bg-[#1b4d89] text-[#ffffff] shadow-md'
+                  : tab.key !== 'topics' && !selectedTopicId
+                  ? 'bg-transparent text-[#c3c6d1] cursor-not-allowed hidden sm:block'
+                  : 'bg-transparent text-[#737781] hover:bg-[#f3f4f5] hover:text-[#00366b]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {/* Topic Selector - Custom Modern Dropdown */}
+        {activeTab !== 'topics' && (
         <div className="mb-5 relative">
           <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.2em] block mb-2 px-1">Módulo Activo</label>
           <button
@@ -458,7 +567,7 @@ export default function AdminPanel({
               <div className={`p-2 rounded-xl flex-shrink-0 ${selectedTopicId ? 'bg-[#1b4d89]/10 text-[#1b4d89]' : 'bg-slate-100 text-slate-400'}`}>
                 <BookOpen className="w-5 h-5" />
               </div>
-              <span className={`truncate ${selectedTopicId ? 'text-[#00366b]' : 'text-slate-400'}`}>
+              <span className={`${selectedTopicId ? 'text-[#00366b]' : 'text-slate-400'}`}>
                 {selectedTopicId 
                   ? topics.find(t => t.id === selectedTopicId)?.title 
                   : 'Selecciona un módulo del sistema...'}
@@ -500,7 +609,7 @@ export default function AdminPanel({
                           }}
                           className={`w-full text-left p-4 rounded-xl transition-all flex flex-col gap-2 group ${
                             isActiveTopic 
-                              ? 'bg-[#1b4d89] text-white shadow-lg shadow-[#1b4d89]/20' 
+                              ? 'bg-[#1b4d89] text-[#ffffff] shadow-lg shadow-[#1b4d89]/20' 
                               : 'hover:bg-[#1b4d89]/5 text-[#424750] hover:text-[#00366b]'
                           }`}
                         >
@@ -508,7 +617,7 @@ export default function AdminPanel({
                             <span className="font-bold text-sm leading-tight">{t.title}</span>
                             {!t.active && (
                               <span className={`text-[9px] font-black tracking-tighter px-1.5 py-0.5 rounded-md uppercase ${
-                                isActiveTopic ? 'bg-white/20 text-white' : 'bg-red-100 text-red-600'
+                                isActiveTopic ? 'bg-white/20 text-[#ffffff]' : 'bg-red-100 text-red-600'
                               }`}>
                                 Inactivo
                               </span>
@@ -521,7 +630,7 @@ export default function AdminPanel({
                                 key={i} 
                                 className={`text-[9px] px-1.5 py-0.5 rounded-lg border font-medium ${
                                   isActiveTopic 
-                                    ? 'bg-white/10 border-white/20 text-white/90' 
+                                    ? 'bg-white/10 border-white/20 text-[#ffffff]/90' 
                                     : 'bg-slate-100 border-slate-200 text-slate-500 group-hover:bg-white group-hover:border-[#1b4d89]/20'
                                 }`}
                               >
@@ -538,6 +647,7 @@ export default function AdminPanel({
             )}
           </AnimatePresence>
         </div>
+        )}
 
         {/* Notifications */}
         <AnimatePresence>
@@ -557,28 +667,132 @@ export default function AdminPanel({
           )}
         </AnimatePresence>
 
-        {/* Tab Navigation */}
-        {selectedTopicId && (
-          <>
-            <div className="flex gap-2 mb-5 bg-[#f3f4f5] p-1.5 rounded-xl border border-[#e1e3e4]">
-              {([
-                { key: 'overview' as AdminTab, label: 'Resumen', icon: <Search className="w-4 h-4" /> },
-                { key: 'content' as AdminTab, label: `Contenido (${activeContentCount})`, icon: <BookOpen className="w-4 h-4" /> },
-                { key: 'quiz' as AdminTab, label: `Quiz (${activeQuizCount})`, icon: <HelpCircle className="w-4 h-4" /> },
-              ]).map(tab => (
-                <motion.button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
-                    activeTab === tab.key ? 'bg-[#00366b] text-white shadow-md' : 'text-[#737781] hover:text-[#00366b] hover:bg-white/50'
-                  }`}
-                >
-                  {tab.icon} {tab.label}
-                </motion.button>
-              ))}
+        {/* Tab Navigation is now at the top*/}
+        
+        {/* ====== TAB: TOPICS ====== */}
+        {activeTab === 'topics' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-[#f3f4f5] rounded-xl p-4 border border-[#e1e3e4]">
+              <h2 className="text-sm font-bold text-[#00366b] flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-[#1b4d89]" />
+                Historial de Módulos (Temas)
+                <span className="text-xs bg-[#e1e3e4] text-[#424750] px-3 py-1.5 rounded-lg font-mono font-bold">{draftTopics.length}</span>
+              </h2>
             </div>
+            
+            <div className="space-y-3">
+              {draftTopics.map(t => {
+                const isExpanded = expandedTopics.has(t.id);
+                return (
+                  <motion.div
+                    layout
+                    key={t.id}
+                    className={`bg-[#f3f4f5] rounded-xl border-l-4 transition-all overflow-hidden hover:shadow-lg hover:shadow-[#1b4d89]/5 ${
+                      t._status === 'new' ? 'border-[#006d36]' :
+                      t._status === 'modified' ? 'border-[#1b4d89]' : 'border-[#c3c6d1]'
+                    }`}
+                  >
+                    {/* Header */}
+                    <div className="p-5 flex items-start justify-between gap-4 cursor-pointer hover:bg-white/50 transition-colors" onClick={() => setExpandedTopics(prev => { const n = new Set(prev); if (n.has(t.id)) n.delete(t.id); else n.add(t.id); return n; })}>
+                      <div className="flex-1 min-w-0 pt-1">
+                        <h3 className="font-bold text-[#00366b] text-base leading-tight mb-3">{t.title}</h3>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setSelectedTopicId(t.id); setActiveTab('overview'); }} 
+                          className="px-4 py-2 text-xs font-bold text-[#1b4d89] bg-[#1b4d89]/10 rounded-xl hover:bg-[#1b4d89] hover:text-[#ffffff] transition-all active:scale-95 flex items-center gap-2 w-fit shadow-sm"
+                        >
+                          Ver Detalles
+                        </button>
+                      </div>
+                      <div className="flex flex-col items-end gap-5">
+                        <div className="flex items-center gap-2">
+                          {t._status !== 'unchanged' && (
+                            <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md ${t._status === 'new' ? 'bg-[#006d36]/10 text-[#006d36]' : 'bg-[#1b4d89]/10 text-[#1b4d89]'}`}>
+                              {t._status === 'new' ? 'NUEVO' : 'MODIFICADO'}
+                            </span>
+                          )}
+                          <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest ${t.active ? 'bg-[#9af7af]/40 text-[#006d36]' : 'bg-red-100 text-red-600'}`}>
+                            {t.active ? 'Activo' : 'Inactivo'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button onClick={(e) => { e.stopPropagation(); handleDeleteTopic(t.id); }} className="p-2.5 flex-shrink-0 rounded-xl text-[#737781] hover:text-[#ba1a1a] hover:bg-[#ffdad6]/20 transition-colors shadow-sm bg-white/50">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                          {isExpanded ? <ChevronUp className="w-6 h-6 text-[#424750] flex-shrink-0" /> : <ChevronDown className="w-6 h-6 text-[#424750] flex-shrink-0" />}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded settings */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                          <div className="px-5 pb-6 space-y-4 border-t border-[#e1e3e4] pt-5 bg-white">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Título</label>
+                                <input type="text" value={t.title} onChange={e => handleUpdateTopic(t.id, { title: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">ID (Debe ser único)</label>
+                                <input type="text" value={t.id} disabled={t._status !== 'new'} onChange={e => handleUpdateTopic(t.id, { id: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-mono disabled:opacity-50 border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Detalles / Descripción Corta</label>
+                                <textarea value={t.details} onChange={e => handleUpdateTopic(t.id, { details: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" rows={2}></textarea>
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Puntos Clave (separados por enter)</label>
+                                <textarea value={t.keyPoints?.join('\n') || ''} onChange={e => handleUpdateTopic(t.id, { keyPoints: e.target.value.split('\n').filter(Boolean) })} placeholder="- Punto 1&#10;- Punto 2" className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" rows={3}></textarea>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Audiencia (coma separada)</label>
+                                <input type="text" value={t.audience} onChange={e => handleUpdateTopic(t.id, { audience: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                              </div>
+                              <div className="flex gap-4">
+                                <div className="flex-1">
+                                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Orden</label>
+                                  <input type="number" value={t.order || 99} onChange={e => handleUpdateTopic(t.id, { order: parseInt(e.target.value) || 99 })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                                </div>
+                                <div className="flex-1">
+                                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Estado</label>
+                                  <div className="flex items-center gap-2 mt-3">
+                                    <input type="checkbox" checked={t.active} onChange={e => handleUpdateTopic(t.id, { active: e.target.checked })} className="w-5 h-5 accent-[#1b4d89] rounded" />
+                                    <span className="text-sm font-semibold">{t.active ? 'Activo (Visible)' : 'Oculto'}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })}
+            </div>
+            
+            {(draftTopics.filter(t => t._status !== 'unchanged').length > 0) && (
+              <div className="sticky bottom-8 flex flex-col sm:flex-row gap-3 z-40 bg-white p-4 rounded-xl border-2 border-[#e1e3e4] shadow-[0_8px_32px_rgba(0,27,60,0.08)]">
+                <button onClick={handleUndoTopics} className="flex items-center justify-center gap-2 px-4 py-3 bg-[#ffdad6]/30 rounded-xl text-[#ba1a1a] font-semibold text-sm hover:bg-[#ffdad6]/60 transition-all">
+                  <Undo2 className="w-4 h-4" /> Deshacer
+                </button>
+                <button
+                  disabled={isSaving}
+                  onClick={handleSaveTopics}
+                  className="flex-[2] py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-[#ffffff] shadow-lg shadow-[#1b4d89]/20 hover:shadow-xl flex items-center justify-center gap-2"
+                >
+                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                  Sincronizar Módulos
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {selectedTopicId && activeTab !== 'topics' && (
+          <>
+
 
             {/* ====== TAB: OVERVIEW ====== */}
             {activeTab === 'overview' && selectedTopic && (
@@ -652,7 +866,6 @@ export default function AdminPanel({
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
                               <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-[#1b4d89]/10 text-[#1b4d89] tracking-wider">{c.contexto}</span>
-                              <span className="text-[10px] text-[#737781] font-mono">{c.cod}</span>
                               {c._status !== 'unchanged' && (
                                 <span className={`text-[10px] font-bold uppercase tracking-wider ${
                                   c._status === 'new' ? 'text-[#006d36]' : 'text-[#1b4d89]'
@@ -661,7 +874,7 @@ export default function AdminPanel({
                                 </span>
                               )}
                             </div>
-                            <h3 className="font-bold text-[#00366b] text-base truncate">{c.tema}</h3>
+                            <h3 className="font-bold text-[#00366b] text-base">{c.tema}</h3>
                           </div>
                           <div className="flex items-center gap-2">
                             <button onClick={(e) => { e.stopPropagation(); handleDeleteContent(c.cod); }} className="p-2 rounded-lg text-[#737781] hover:text-[#ba1a1a] hover:bg-[#ffdad6]/20 transition-colors">
@@ -930,7 +1143,7 @@ export default function AdminPanel({
                                         <button
                                           onClick={() => handleUpdateQuestion(q.idQuiz, { correctAnswer: letter as any })}
                                           className={`absolute left-0 top-0 bottom-0 w-12 flex items-center justify-center font-black rounded-l-xl transition-all ${
-                                            isCorrect ? 'bg-[#006d36] text-white shadow-md' : 'bg-[#e7e8e9] text-[#737781] hover:bg-[#d9dadb]'
+                                            isCorrect ? 'bg-[#006d36] text-[#ffffff] shadow-md' : 'bg-[#e7e8e9] text-[#737781] hover:bg-[#d9dadb]'
                                           }`}
                                         >
                                           {letter}
@@ -997,7 +1210,7 @@ export default function AdminPanel({
                       disabled={isSaving || quizChanges === 0}
                       onClick={handleSaveQuiz}
                       className={`flex-[2] py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] ${
-                        isSaving || quizChanges === 0 ? 'bg-[#e1e3e4] text-[#737781] cursor-not-allowed' : 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-white shadow-lg shadow-[#1b4d89]/20 hover:shadow-xl hover:shadow-[#1b4d89]/30'
+                        isSaving || quizChanges === 0 ? 'bg-[#e1e3e4] text-[#737781] cursor-not-allowed' : 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-[#ffffff] shadow-lg shadow-[#1b4d89]/20 hover:shadow-xl hover:shadow-[#1b4d89]/30'
                       }`}
                     >
                       {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
@@ -1022,21 +1235,22 @@ export default function AdminPanel({
       </div>
 
       {/* Floating Action Button (FAB) */}
-      {selectedTopicId && (activeTab === 'content' || activeTab === 'quiz') && (
+      {(activeTab === 'topics' || (selectedTopicId && (activeTab === 'content' || activeTab === 'quiz'))) && (
         <motion.button
           initial={{ scale: 0, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0, opacity: 0 }}
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
-          onClick={activeTab === 'content' ? handleAddContentManual : handleAddQuizManual}
+          onClick={activeTab === 'content' ? handleAddContentManual : activeTab === 'quiz' ? handleAddQuizManual : handleAddTopicManual}
           className={`fixed bottom-8 right-8 w-16 h-16 rounded-full shadow-[0_8px_24px_rgba(0,27,60,0.2)] flex items-center justify-center transition-all z-50 hover:shadow-[0_12px_32px_rgba(0,27,60,0.3)] ${
+            activeTab === 'topics' ? 'bg-gradient-to-r from-[#582a00] to-[#8c4a00]' :
             activeTab === 'content' ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89]' :
             'bg-gradient-to-r from-[#006d36] to-[#005227]'
           }`}
-          title={activeTab === 'content' ? 'Añadir sección manual' : 'Añadir pregunta manual'}
+          title={activeTab === 'content' ? 'Añadir sección manual' : activeTab === 'quiz' ? 'Añadir pregunta manual' : 'Añadir nuevo módulo'}
         >
-          <Plus className="w-8 h-8 text-white" strokeWidth={3} />
+          <Plus className="w-8 h-8 text-[#ffffff]" strokeWidth={3} />
         </motion.button>
       )}
 
@@ -1064,7 +1278,7 @@ export default function AdminPanel({
                 <div>
                   <h3 className="text-lg font-bold text-[#00366b]">Confirmar eliminación</h3>
                   <p className="text-sm text-[#737781]">
-                    {confirmDelete.type === 'content' ? 'Sección de contenido' : 'Pregunta de quiz'}
+                    {confirmDelete.type === 'topic' ? 'Módulo y su contenido' : confirmDelete.type === 'content' ? 'Sección de contenido' : 'Pregunta de quiz'}
                   </p>
                 </div>
               </div>
@@ -1085,7 +1299,7 @@ export default function AdminPanel({
                 <button
                   onClick={confirmDeleteAction}
                   disabled={isDeleting}
-                  className="flex-1 py-3 rounded-xl bg-[#ba1a1a] text-white font-semibold text-sm hover:bg-[#93000a] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="flex-1 py-3 rounded-xl bg-[#ba1a1a] text-[#ffffff] font-semibold text-sm hover:bg-[#93000a] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {isDeleting ? (
                     <>

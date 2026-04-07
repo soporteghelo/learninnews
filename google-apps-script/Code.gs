@@ -15,6 +15,7 @@ const SPREADSHEET_ID = '1fXcrk-6YSA5NcgDbCBinu4WaPpyJMRK0og6miVE8ZZw';
 const QUIZ_SHEET_NAME = 'QUIZ';
 const DATA_SHEET_NAME = 'DATA';
 const INGRESOS_SHEET_NAME = 'INGRESOS';
+const LEARN_SHEET_NAME = 'LEARN';
 
 function doPost(e) {
   try {
@@ -45,6 +46,14 @@ function doPost(e) {
       const sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
       if (!sheet) return createResponse({ status: 'error', message: 'Hoja INGRESOS no encontrada' });
       return updateIngreso(sheet, data.ingreso);
+    } else if (data.action === 'upsertTopic') {
+      const sheet = ss.getSheetByName(LEARN_SHEET_NAME);
+      if (!sheet) return createResponse({ status: 'error', message: 'Hoja LEARN no encontrada' });
+      return upsertTopic(sheet, data.topics);
+    } else if (data.action === 'deleteTopic') {
+      const sheet = ss.getSheetByName(LEARN_SHEET_NAME);
+      if (!sheet) return createResponse({ status: 'error', message: 'Hoja LEARN no encontrada' });
+      return deleteTopic(sheet, data.topicIds);
     } else if (data.action === 'extractText') {
       return extractPdfText(data.fileId);
     }
@@ -170,6 +179,63 @@ function deleteContent(sheet, codIds) {
   }
 
   return createResponse({ status: 'ok', message: 'Contenido eliminado correctamente' });
+}
+
+function upsertTopic(sheet, topics) {
+  var firstRow = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0];
+  if (!firstRow[0] || String(firstRow[0]).trim() === '') {
+    var learnHeaders = ['Id', 'Titulo', 'Publico', 'Detalles', 'Resumen', 'PuntosClave', 'Orden', 'Activo'];
+    sheet.getRange(1, 1, 1, learnHeaders.length).setValues([learnHeaders]);
+  }
+
+  topics.forEach(function(t) {
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0];
+    var colMap = {};
+    headers.forEach(function(h, i) { colMap[h] = i; });
+
+    var idCol = colMap['Id'];
+    var rowIndex = -1;
+    if (idCol !== undefined) {
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][idCol]).trim() === String(t.Id).trim()) {
+          rowIndex = i + 1;
+          break;
+        }
+      }
+    }
+
+    var rowData = [];
+    headers.forEach(function(h) {
+      rowData.push(t[h] !== undefined ? t[h] : '');
+    });
+
+    if (rowIndex > 1) {
+      sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
+    } else {
+      sheet.appendRow(rowData);
+    }
+  });
+
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Temas procesados correctamente' });
+}
+
+function deleteTopic(sheet, topicIds) {
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var idIndex = headers.indexOf('Id');
+
+  if (idIndex === -1) return createResponse({ status: 'error', message: 'Columna Id no encontrada' });
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (topicIds.indexOf(data[i][idIndex]) !== -1) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Temas eliminados correctamente' });
 }
 
 function registerIngreso(sheet, ingreso) {

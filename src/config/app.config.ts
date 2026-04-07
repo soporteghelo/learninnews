@@ -18,6 +18,7 @@ export const SHEETS_CONFIG = {
     data: 'DATA',
     quiz: 'QUIZ',
     ingresos: 'INGRESOS',
+    config: 'CONFIG',
   },
   useMockDataOnError: true,
 } as const;

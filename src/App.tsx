@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Sun, Moon, Settings, Users, X, AlertCircle, LogOut } from 'lucide-react';
+import { Sun, Moon, Settings, Users, X, AlertCircle, LogOut, Loader2 } from 'lucide-react';
 import { 
   fetchLearnTopics, 
   fetchDataChunks, 
@@ -8,6 +8,8 @@ import {
   registerIngreso,
   updateIngresoProgress,
   fetchIngresoByDni,
+  fetchAppDynamicConfig,
+  fetchGlobalKnownUsers,
 } from './services/sheetsService';
 import { getStorageKey, APP_CONFIG } from './config/app.config';
 import type { 
@@ -17,17 +19,28 @@ import type {
   UserProgress, 
   UserSession,
   AudienceType, 
-  AppView 
+  AppView,
+  AppDynamicConfig 
 } from './types';
 
-// Components
+// Regular imports for immediate load
 import LoginScreen from './components/LoginScreen';
 import Onboarding from './components/Onboarding';
 import Dashboard from './components/Dashboard';
 import CourseDetail from './components/CourseDetail';
-import LearningMode from './components/LearningMode';
-import QuizMode from './components/QuizMode';
-import AdminPanel from './components/AdminPanel';
+
+// Lazy loaded components for code splitting
+const LearningMode = lazy(() => import('./components/LearningMode'));
+const QuizMode = lazy(() => import('./components/QuizMode'));
+const AdminPanel = lazy(() => import('./components/AdminPanel'));
+
+// Loading Fallback Component
+const ViewLoader = () => (
+  <div className="flex flex-col items-center justify-center min-h-screen bg-[#f8f9fa] safe-area-top safe-area-bottom">
+    <Loader2 className="w-12 h-12 text-[#1b4d89] animate-spin mb-4" />
+    <p className="text-[#424750] text-sm font-semibold tracking-wider uppercase">Cargando módulo...</p>
+  </div>
+);
 
 function driveEmbedUrl(url: string, _type: 'video' | 'pdf'): string {
   if (!url) return '';
@@ -74,12 +87,14 @@ export default function App() {
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
   const [progress, setProgress] = useState<UserProgress[]>([]);
   const [selectedTopic, setSelectedTopic] = useState<LearnTopic | null>(null);
+  const [appConfig, setAppConfig] = useState<AppDynamicConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('learn-theme');
     return saved !== 'light';
   });
   const [mediaOverlay, setMediaOverlay] = useState<{ url: string; type: 'video' | 'pdf' } | null>(null);
+  const [globalKnownUsers, setGlobalKnownUsers] = useState<Record<string, { apellidos: string, nombres: string }>>({});
 
   // Apply theme class to html
   useEffect(() => {
@@ -91,15 +106,19 @@ export default function App() {
   useEffect(() => {
     const initApp = async () => {
       try {
-        const [loadedTopics, loadedChunks, loadedQuiz] = await Promise.all([
+        const [loadedTopics, loadedChunks, loadedQuiz, loadedConfig, loadedUsers] = await Promise.all([
           fetchLearnTopics(),
           fetchDataChunks(),
-          fetchQuizQuestions()
+          fetchQuizQuestions(),
+          fetchAppDynamicConfig(),
+          fetchCachedGlobalUsers()
         ]);
 
         setTopics(loadedTopics);
         setChunks(loadedChunks);
         setQuizQuestions(loadedQuiz);
+        setAppConfig(loadedConfig);
+        setGlobalKnownUsers(loadedUsers);
 
         // Load session from storage
         const storedSession = localStorage.getItem(getStorageKey(APP_CONFIG.storage.keys.session));
@@ -121,6 +140,34 @@ export default function App() {
         setIsLoading(false);
       }
     };
+
+    async function fetchCachedGlobalUsers() {
+      const STORAGE_KEY = 'learndrive_global_users_cache';
+      const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+      
+      try {
+        const cached = localStorage.getItem(STORAGE_KEY);
+        if (cached) {
+          const { data, timestamp } = JSON.parse(cached);
+          if (Date.now() - timestamp < CACHE_TTL) {
+            // Background update if cache exists but half-way old
+            if (Date.now() - timestamp > CACHE_TTL / 2) {
+              fetchGlobalKnownUsers().then(fresh => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({ data: fresh, timestamp: Date.now() }));
+                setGlobalKnownUsers(fresh);
+              }).catch(console.error);
+            }
+            return data;
+          }
+        }
+      } catch (e) {
+        console.warn('Cache error:', e);
+      }
+
+      const fresh = await fetchGlobalKnownUsers();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ data: fresh, timestamp: Date.now() }));
+      return fresh;
+    }
 
     initApp();
   }, []);
@@ -344,6 +391,34 @@ export default function App() {
     );
   }
 
+  if (appConfig?.status === 'Inactivo') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+        <motion.div
+           initial={{ scale: 0 }}
+           animate={{ scale: 1 }}
+           className="w-20 h-20 rounded-full bg-amber-500/10 flex items-center justify-center mb-6 border border-amber-500/20"
+        >
+          <AlertCircle className="w-10 h-10 text-amber-500" />
+        </motion.div>
+        <h1 className="text-2xl font-black text-white mb-2 uppercase tracking-tighter">Acceso Restringido</h1>
+        <p className="text-slate-400 max-w-xs leading-relaxed mb-8">
+          La plataforma se encuentra fuera de servicio temporalmente. Por Favor, contacta con soporte para más información.
+        </p>
+        {appConfig.contact && (
+          <a 
+            href={`https://wa.me/${appConfig.contact.replace(/\+/g, '')}?text=Hola, la app ${appConfig.title} aparece como Inactiva. Necesito información.`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-8 py-4 bg-white text-slate-950 rounded-2xl font-black text-xs tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl shadow-white/10"
+          >
+            CONTACTAR SOPORTE
+          </a>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`min-h-screen text-slate-200 selection:bg-blue-500/30 selection:text-blue-200 ${darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
       {/* Top-right floating buttons — hidden in admin view (admin has its own header) */}
@@ -352,52 +427,48 @@ export default function App() {
           {view === 'dashboard' && (
             <button
               onClick={handleChangeAudience}
-              className="w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg backdrop-blur-xl border"
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg backdrop-blur-xl border ${darkMode ? 'border-white' : 'border-black'}`}
               style={{
                 background: darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-                borderColor: darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)',
               }}
               aria-label="Cambiar perfil"
               title="Cambiar perfil"
             >
-              <Users className="w-4 h-4" style={{ color: darkMode ? '#94a3b8' : '#374151' }} />
+              <Users className="w-4 h-4" style={{ color: darkMode ? '#ffffff' : '#000000' }} />
             </button>
           )}
           {userSession && (view === 'dashboard' || view === 'courseDetail') && (
             <button
                onClick={handleLogout}
-               className="w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg backdrop-blur-xl border"
+               className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg backdrop-blur-xl border ${darkMode ? 'border-white' : 'border-black'}`}
                style={{
                  background: darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-                 borderColor: darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)',
                }}
                aria-label="Cerrar sesión"
                title="Cerrar sesión"
             >
-              <LogOut className="w-4 h-4" style={{ color: darkMode ? '#f87171' : '#dc2626' }} />
+              <LogOut className="w-4 h-4" style={{ color: darkMode ? '#ffffff' : '#000000' }} />
             </button>
           )}
           <button
             onClick={() => setView('admin')}
-            className="w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg backdrop-blur-xl border"
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg backdrop-blur-xl border ${darkMode ? 'border-white' : 'border-black'}`}
             style={{
               background: darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-              borderColor: darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)',
             }}
             aria-label="Admin"
           >
-            <Settings className="w-4 h-4" style={{ color: darkMode ? '#94a3b8' : '#374151' }} />
+            <Settings className="w-4 h-4" style={{ color: darkMode ? '#ffffff' : '#000000' }} />
           </button>
           <button
             onClick={() => setDarkMode(!darkMode)}
-            className="w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg backdrop-blur-xl border"
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg backdrop-blur-xl border ${darkMode ? 'border-white' : 'border-black'}`}
             style={{
               background: darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-              borderColor: darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)',
             }}
             aria-label="Cambiar tema"
           >
-            {darkMode ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
+            {darkMode ? <Sun className="w-4 h-4" style={{ color: '#ffffff' }} /> : <Moon className="w-4 h-4" style={{ color: '#000000' }} />}
           </button>
         </div>
       )}
@@ -405,7 +476,12 @@ export default function App() {
       <AnimatePresence mode="wait">
         {view === 'login' && (
           <motion.div key="login" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <LoginScreen onLogin={handleLogin} isRegistering={isRegistering} />
+            <LoginScreen 
+              config={appConfig} 
+              onLogin={handleLogin} 
+              isRegistering={isRegistering} 
+              globalKnownUsers={globalKnownUsers} 
+            />
           </motion.div>
         )}
 
@@ -445,38 +521,45 @@ export default function App() {
 
         {view === 'learning' && selectedTopic && (
           <motion.div key="learning" className="fixed inset-0 z-50">
-            <LearningMode 
-              topic={selectedTopic}
-              chunks={chunks.filter(c => c.idMain === selectedTopic.id)}
-              initialChunkIndex={progress.find(p => p.topicId === selectedTopic.id)?.currentChunk || 0}
-              onBack={() => setView('courseDetail')}
-              onFinish={() => handleFinishModule(selectedTopic.id)}
-              onSaveProgress={(idx) => handleSaveProgress(selectedTopic.id, idx)}
-              onOpenMedia={(url, type) => setMediaOverlay({ url, type })}
-            />
+            <Suspense fallback={<ViewLoader />}>
+              <LearningMode 
+                topic={selectedTopic}
+                chunks={chunks.filter(c => c.idMain === selectedTopic.id)}
+                initialChunkIndex={progress.find(p => p.topicId === selectedTopic.id)?.currentChunk || 0}
+                onBack={() => setView('courseDetail')}
+                onFinish={() => handleFinishModule(selectedTopic.id)}
+                onSaveProgress={(idx) => handleSaveProgress(selectedTopic.id, idx)}
+                onOpenMedia={(url, type) => setMediaOverlay({ url, type })}
+              />
+            </Suspense>
           </motion.div>
         )}
 
         {view === 'quiz' && selectedTopic && (
           <motion.div key="quiz" className="fixed inset-0 z-50">
-            <QuizMode 
-              topic={selectedTopic}
-              questions={quizQuestions}
-              onBack={() => setView('courseDetail')}
-              onComplete={(score) => handleQuizComplete(selectedTopic.id, score)}
-            />
+            <Suspense fallback={<ViewLoader />}>
+              <QuizMode 
+                topic={selectedTopic}
+                questions={quizQuestions}
+                onBack={() => setView('courseDetail')}
+                onComplete={(score) => handleQuizComplete(selectedTopic.id, score)}
+              />
+            </Suspense>
           </motion.div>
         )}
 
         {view === 'admin' && (
           <motion.div key="admin">
-            <AdminPanel 
-              topics={topics}
-              allChunks={chunks}
-              allQuizQuestions={quizQuestions}
-              onBack={() => audience ? setView('dashboard') : setView('login')}
-              onRefreshData={handleRefreshData}
-            />
+            <Suspense fallback={<ViewLoader />}>
+              <AdminPanel 
+                topics={topics}
+                allChunks={chunks}
+                allQuizQuestions={quizQuestions}
+                onBack={() => audience ? setView('dashboard') : setView('login')}
+                onRefreshData={handleRefreshData}
+                adminPass={appConfig?.adminPass}
+              />
+            </Suspense>
           </motion.div>
         )}
       </AnimatePresence>

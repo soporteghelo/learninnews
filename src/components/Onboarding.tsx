@@ -52,7 +52,7 @@ export default function Onboarding({ onSelectAudience }: OnboardingProps) {
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
-        className="relative z-10 w-full max-w-lg"
+        className="relative z-10 w-full max-w-lg lg:max-w-2xl"
       >
         {/* Header */}
         <div className="text-center mb-8 sm:mb-10">

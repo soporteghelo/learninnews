@@ -66,12 +66,13 @@ export default function Dashboard({
   return (
     <div className="min-h-screen safe-area-top safe-area-bottom">
       {/* Header */}
+      {/* Header */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         className="sticky top-0 z-30 glass-strong px-4 py-3 sm:px-6"
       >
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div onClick={onChangeAudience} className="cursor-pointer hover:opacity-80 transition-opacity">
             <h1 className="text-lg font-bold text-white">{APP_CONFIG.name}</h1>
             <p className="text-xs text-slate-400 capitalize">{audience}</p>
@@ -88,53 +89,53 @@ export default function Dashboard({
         </div>
       </motion.header>
 
-      <div className="max-w-3xl mx-auto px-4 py-5 sm:px-6 space-y-5">
+      <div className="max-w-6xl mx-auto px-4 py-6 sm:px-8 space-y-8">
         {/* Stats */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="grid grid-cols-3 gap-3"
+          className="grid grid-cols-3 gap-4 md:gap-6"
         >
-          <div className="glass-card rounded-xl p-3 text-center">
-            <BookOpen className="w-5 h-5 text-blue-400 mx-auto mb-1" />
-            <p className="text-lg font-bold text-white">{filteredTopics.length}</p>
-            <p className="text-xs text-slate-400">Cursos</p>
+          <div className="glass-card rounded-2xl p-4 text-center">
+            <BookOpen className="w-5 h-5 text-blue-400 mx-auto mb-2" />
+            <p className="text-xl font-bold text-white">{filteredTopics.length}</p>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight">Cursos</p>
           </div>
-          <div className="glass-card rounded-xl p-3 text-center">
-            <CheckCircle className="w-5 h-5 text-emerald-400 mx-auto mb-1" />
-            <p className="text-lg font-bold text-white">{totalCompleted}</p>
-            <p className="text-xs text-slate-400">Completados</p>
+          <div className="glass-card rounded-2xl p-4 text-center">
+            <CheckCircle className="w-5 h-5 text-emerald-400 mx-auto mb-2" />
+            <p className="text-xl font-bold text-white">{totalCompleted}</p>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight">Hechos</p>
           </div>
-          <div className="glass-card rounded-xl p-3 text-center">
-            <Award className="w-5 h-5 text-amber-400 mx-auto mb-1" />
-            <p className="text-lg font-bold text-white">
+          <div className="glass-card rounded-2xl p-4 text-center">
+            <Award className="w-5 h-5 text-amber-400 mx-auto mb-2" />
+            <p className="text-xl font-bold text-white">
               {avgScore !== null ? `${avgScore}%` : '—'}
             </p>
-            <p className="text-xs text-slate-400">Promedio</p>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight">Calificación</p>
           </div>
         </motion.div>
 
         {/* Section title */}
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-blue-400" />
-          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
-            Tus cursos
+          <h2 className="text-sm font-bold text-slate-300 uppercase tracking-widest">
+            Tus cursos cargados
           </h2>
         </div>
 
-        {/* Course list */}
+        {/* Course list - Grid responsivo adaptado para Desktop ampliado */}
         {filteredTopics.length === 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="glass-card rounded-2xl p-8 text-center"
+            className="glass-card rounded-2xl p-12 text-center"
           >
-            <BookOpen className="w-12 h-12 text-slate-500 mx-auto mb-3" />
-            <p className="text-slate-400">No hay cursos disponibles para tu perfil</p>
+            <BookOpen className="w-16 h-16 text-slate-700 mx-auto mb-4" />
+            <p className="text-slate-500 font-medium">No hay lecciones disponibles para tu perfil</p>
           </motion.div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 lg:gap-6 xl:gap-8">
             {filteredTopics.map((topic, index) => {
               const prog = getTopicProgress(topic.id);
               const chunkCount = getChunkCount(topic.id);
@@ -148,14 +149,14 @@ export default function Dashboard({
                   transition={{ delay: 0.15 + index * 0.06 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => onSelectTopic(topic)}
-                  className="w-full glass-card rounded-2xl p-4 sm:p-5 text-left
-                    hover:border-white/20 transition-all duration-200 group"
+                  className="w-full glass-card rounded-xl p-3.5 text-left border border-white/5
+                    hover:border-blue-500/30 hover:bg-white/5 transition-all duration-300 group shadow-lg relative overflow-hidden"
                 >
-                  <div className="flex items-start gap-3">
-                    {/* Status indicator */}
+                  <div className="flex items-center gap-3">
+                    {/* Icon container */}
                     <div
                       className={`
-                        w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5
+                        w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0
                         ${prog?.completed
                           ? 'bg-emerald-500/20 text-emerald-400'
                           : prog
@@ -175,45 +176,55 @@ export default function Dashboard({
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-white text-sm sm:text-base mb-1 truncate">
-                        {topic.title}
-                      </h3>
-                      <p className="text-xs sm:text-sm text-slate-400 line-clamp-2 mb-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="font-bold text-white text-sm truncate">
+                          {topic.title}
+                        </h3>
+                        {prog?.completed ? (
+                          <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-1 flex-shrink-0">
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> COMPLETO
+                          </span>
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-blue-400 transition-all flex-shrink-0" />
+                        )}
+                      </div>
+                      
+                      <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5 mb-1.5">
                         {topic.details}
                       </p>
 
-                      {/* Meta */}
-                      <div className="flex items-center gap-3 text-xs text-slate-500">
-                        <span>{chunkCount} lecciones</span>
-                        {quizCount > 0 && <span>{quizCount} preguntas</span>}
+                      {/* Meta chips */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[8px] uppercase font-bold text-slate-400 tracking-wider">
+                          {chunkCount} Lecc
+                        </span>
+                        {quizCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[8px] uppercase font-bold text-slate-400 tracking-wider">
+                            {quizCount} Pregs
+                          </span>
+                        )}
                         {prog?.quizScore !== undefined && (
-                          <span className={`font-medium ${
-                            prog.quizScore >= 70 ? 'text-emerald-400' : 'text-amber-400'
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] uppercase font-bold tracking-wider ${
+                            prog.quizScore >= 70 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
                           }`}>
-                            Score: {prog.quizScore}%
+                            PTS: {prog.quizScore}%
                           </span>
                         )}
                       </div>
-
-                      {/* Progress bar */}
-                      {prog && !prog.completed && prog.currentChunk !== undefined && chunkCount > 0 && (
-                        <div className="mt-2 progress-bar">
-                          <div
-                            className="progress-bar-fill"
-                            style={{
-                              width: `${Math.round(
-                                ((prog.currentChunk + 1) / chunkCount) * 100
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                      )}
                     </div>
-
-                    {/* Arrow */}
-                    <ChevronRight className="w-5 h-5 text-slate-500 flex-shrink-0 mt-1
-                      group-hover:text-white group-hover:translate-x-1 transition-all" />
                   </div>
+
+                  {/* Absolute Progress bar edge footer */}
+                  {prog && !prog.completed && prog.currentChunk !== undefined && chunkCount > 0 && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-800/50">
+                      <div
+                        className="h-full bg-blue-500 shadow-[0_0_8px_rgba(37,99,235,0.5)] transition-all duration-500"
+                        style={{
+                          width: `${Math.round(((prog.currentChunk + 1) / chunkCount) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  )}
                 </motion.button>
               );
             })}

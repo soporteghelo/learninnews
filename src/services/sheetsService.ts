@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
-import { SHEETS_CONFIG, MOCK_DATA_CONFIG, getSheetUrl, APPS_SCRIPT_CONFIG } from '../config/app.config';
-import type { LearnTopic, DataChunk, QuizQuestion, UserProgress } from '../types';
+import { SHEETS_CONFIG, MOCK_DATA_CONFIG, getSheetUrl, APPS_SCRIPT_CONFIG, APP_CONFIG, ADMIN_CONFIG } from '../config/app.config';
+import type { LearnTopic, DataChunk, QuizQuestion, UserProgress, AppDynamicConfig } from '../types';
 
 // =============================================
 // HELPER: POST to Apps Script (handles redirects)
@@ -75,6 +75,58 @@ export async function fetchLearnTopics(): Promise<LearnTopic[]> {
     console.warn('Error fetching LEARN sheet:', error);
     if (MOCK_DATA_CONFIG.enabled) return getMockTopics();
     return [];
+  }
+}
+
+// =============================================
+// WRITE TOPIC TO SHEETS (via Apps Script)
+// =============================================
+
+export async function saveTopicToSheets(
+  topics: LearnTopic[]
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const result = await postToAppsScript({
+      action: 'upsertTopic',
+      topics: topics.map((t) => ({
+        Id: t.id,
+        Titulo: t.title,
+        Publico: t.audience,
+        Detalles: t.details,
+        Resumen: t.summary || '',
+        PuntosClave: t.keyPoints ? t.keyPoints.join('|') : '',
+        Orden: t.order || 999,
+        Activo: t.active ? 'SI' : 'NO',
+      })),
+    });
+    return {
+      success: result.status === 'ok',
+      message: result.message || 'Temas guardados correctamente',
+    };
+  } catch (error) {
+    console.error('Error saving topics to Sheets:', error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Error desconocido',
+    };
+  }
+}
+
+export async function deleteTopicFromSheets(
+  topicIds: string[]
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'deleteTopic', topicIds });
+    return {
+      success: result.status === 'ok',
+      message: result.message || 'Temas eliminados correctamente',
+    };
+  } catch (error) {
+    console.error('Error deleting topic from Sheets:', error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Error desconocido',
+    };
   }
 }
 
@@ -387,8 +439,81 @@ function getMockQuiz(): QuizQuestion[] {
 }
 
 // =============================================
+// APP CONFIG - Configuración dinámica
+// =============================================
+
+export async function fetchAppDynamicConfig(): Promise<AppDynamicConfig> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.config);
+  const defaultConfig: AppDynamicConfig = {
+    title: APP_CONFIG.name,
+    message: 'Identifícate para comenzar tu capacitación',
+    contact: '',
+    adminPass: ADMIN_CONFIG.password,
+    status: 'Activo',
+  };
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return defaultConfig;
+    const csvText = await response.text();
+
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const row = results.data[0] as any;
+          if (!row || !row.Titulo) {
+            resolve(defaultConfig);
+            return;
+          }
+          resolve({
+            title: row.Titulo || defaultConfig.title,
+            message: row.Mensaje || defaultConfig.message,
+            contact: row.Contacto || '',
+            adminPass: row.PassAdmin || defaultConfig.adminPass,
+            status: (row.Estatus || 'Activo') === 'Inactivo' ? 'Inactivo' : 'Activo',
+          });
+        },
+        error: () => resolve(defaultConfig),
+      });
+    });
+  } catch {
+    return defaultConfig;
+  }
+}
+
+// =============================================
 // INGRESOS - Registro de sesión y progreso
 // =============================================
+
+/** Helper to get current time in Peru (UTC-5) formatted for Sheets as DD/MM/AAAA - (HH:mm:ss) */
+function getPeruTimeFormatted(): string {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('es-PE', {
+      timeZone: 'America/Lima',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    
+    const parts = formatter.formatToParts(now);
+    const d = parts.find(p => p.type === 'day')?.value;
+    const m = parts.find(p => p.type === 'month')?.value;
+    const y = parts.find(p => p.type === 'year')?.value;
+    const h = parts.find(p => p.type === 'hour')?.value;
+    const min = parts.find(p => p.type === 'minute')?.value;
+    const s = parts.find(p => p.type === 'second')?.value;
+
+    return `${d}/${m}/${y} - (${h}:${min}:${s})`;
+  } catch (e) {
+    return new Date().toISOString();
+  }
+}
 
 export interface IngresoRecord {
   id: string;
@@ -470,11 +595,11 @@ export async function registerIngreso(data: {
         Apellidos: data.apellidos,
         Nombres: data.nombres,
         DNI: data.dni,
-        Inicio: new Date().toISOString(),
+        Inicio: getPeruTimeFormatted(),
         Avance: '0%',
         Publico: data.publico,
         Nota: '',
-        UltimoAcceso: new Date().toISOString(),
+        UltimoAcceso: getPeruTimeFormatted(),
         Dispositivo: getDeviceInfo(),
         ModulosCompletados: '0',
         IntentosQuiz: '0',
@@ -507,7 +632,7 @@ export async function updateIngresoProgress(data: {
         DNI: data.dni,
         Avance: data.avance,
         Nota: data.nota,
-        UltimoAcceso: new Date().toISOString(),
+        UltimoAcceso: getPeruTimeFormatted(),
         Dispositivo: getDeviceInfo(),
         ModulosCompletados: String(data.modulosCompletados ?? ''),
         IntentosQuiz: String(data.intentosQuiz ?? ''),
@@ -524,3 +649,40 @@ export async function updateIngresoProgress(data: {
   }
 }
 
+export async function fetchGlobalKnownUsers(): Promise<Record<string, { apellidos: string, nombres: string }>> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.ingresos);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return {};
+    const csvText = await response.text();
+
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const users: Record<string, { apellidos: string, nombres: string }> = {};
+          
+          // INGRESOS often has multiple entries for the same user.
+          // Since it's a log, later entries are more likely to have updated names.
+          // By iterating through the whole list, we naturally "override" older entries.
+          results.data.forEach((row: any) => {
+            const dni = String(row.DNI || row.Id || '').trim();
+            const ape = (row.Apellidos || '').trim();
+            const nom = (row.Nombres || '').trim();
+            
+            if (dni && (ape || nom)) {
+              users[dni] = {
+                apellidos: ape.toUpperCase(),
+                nombres: nom.toUpperCase()
+              };
+            }
+          });
+          resolve(users);
+        },
+        error: () => resolve({}),
+      });
+    });
+  } catch {
+    return {};
+  }
+}
