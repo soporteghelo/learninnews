@@ -199,6 +199,87 @@ ${text}`;
     }
   };
 
+  const handleGenerateContentPrompt = async (c: ContentDraft) => {
+    if (!c.pdf) {
+      setError('❌ No hay una URL de PDF configurada.');
+      return;
+    }
+
+    setIsExtracting(`content-${c.cod}`);
+    setError(null);
+    setStatusMessage(null);
+    
+    try {
+      console.log('--- Iniciando Extracción Local (Tecnología Extractor) ---', c.pdf);
+      
+      const response = await fetch('/api/extract-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveUrl: c.pdf })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error en el servidor local de extracción');
+      }
+
+      const data = await response.json();
+      const text = data.text;
+
+      if (!text || text.length < 10) {
+        throw new Error('No se pudo extraer texto suficiente del PDF.');
+      }
+
+      const promptTemplate = `Redacta el siguiente contenido con un estilo claro, fluido y agradable de leer, como si formara parte de un manual corporativo moderno. Evita un tono robótico o excesivamente técnico; el texto debe sentirse natural, profesional y fácil de comprender. Mantén toda la información original, sin omitir detalles. Mejora la redacción, la coherencia y la conexión entre ideas para lograr una lectura más armoniosa.
+
+Formato de salida (OBLIGATORIO) Devuelve TODO el contenido dentro de un bloque de código usando triple backticks (\`\`\`), para que el Markdown no se renderice y se puedan ver explícitamente los símbolos como #, ## y ###.
+
+NO renderices el Markdown. Debe verse como texto plano.
+
+Estructura requerida
+Usa # para el título principal
+Usa ## para subtítulos
+Usa ### para subsecciones
+Desarrolla el contenido en párrafos claros
+Usa listas con - solo cuando aporten claridad
+
+Formato de texto
+Usa negritas para conceptos clave
+Usa cursivas para énfasis
+Mantén buena jerarquía visual
+Evita bloques de texto largos
+
+Tono y estilo
+Profesional pero cercano
+Explicativo y natural
+Adecuado para capacitación corporativa
+
+Restricciones
+No omitir información
+No agregar contenido nuevo
+No incluir explicaciones fuera del resultado
+No usar ningún formato fuera del bloque de código
+
+CONTENIDO:
+${text}`;
+
+      // Copiar al portapapeles
+      await navigator.clipboard.writeText(promptTemplate);
+      
+      const successMsg = '✅ ¡Éxito! Prompt de contenido generado y copiado al portapapeles.';
+      setStatusMessage({ type: 'success', text: successMsg });
+      window.alert(successMsg + "\n\nYa puedes pegarlo en tu IA favorita.");
+
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('Extraction Error:', err);
+      setError('Error en el generador: ' + errMsg);
+      window.alert("❌ Falló la extracción: " + errMsg + "\n\nTip: Asegúrate de haber reiniciado el servidor (npm run dev) tras los cambios.");
+    } finally {
+      setIsExtracting(null);
+    }
+  };
+
   // ========== CONTENT CRUD ==========
   const handleUpdateContent = (cod: string, updates: Partial<DataChunk>) => {
     setDraftContent(prev => prev.map(c => {
@@ -1091,22 +1172,41 @@ ${text}`;
                                       </div>
                                       
                                       {c.pdf && (
-                                        <button
-                                          onClick={() => handleGenerateAiPrompt(c)}
-                                          disabled={isExtracting !== null}
-                                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                                            isExtracting === c.cod 
-                                              ? 'bg-slate-100 text-slate-400' 
-                                              : 'bg-[#582a00]/10 text-[#582a00] hover:bg-[#582a00] hover:text-white shadow-sm'
-                                          }`}
-                                        >
-                                          {isExtracting === c.cod ? (
-                                            <Loader2 className="w-3 h-3 animate-spin" />
-                                          ) : (
-                                            <Wand2 className="w-3 h-3" />
-                                          )}
-                                          {isExtracting === c.cod ? 'EXTRAYENDO...' : 'GENERAR PROMPT IA'}
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            onClick={() => handleGenerateAiPrompt(c)}
+                                            disabled={isExtracting !== null}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                                              isExtracting === c.cod 
+                                                ? 'bg-slate-100 text-slate-400' 
+                                                : 'bg-[#582a00]/10 text-[#582a00] hover:bg-[#582a00] hover:text-white shadow-sm'
+                                            }`}
+                                          >
+                                            {isExtracting === c.cod ? (
+                                              <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                              <Wand2 className="w-3 h-3" />
+                                            )}
+                                            {isExtracting === c.cod ? 'EXTRAYENDO...' : 'PROMPT QUIZ'}
+                                          </button>
+                                          
+                                          <button
+                                            onClick={() => handleGenerateContentPrompt(c)}
+                                            disabled={isExtracting !== null}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                                              isExtracting === `content-${c.cod}`
+                                                ? 'bg-slate-100 text-slate-400' 
+                                                : 'bg-[#1b4d89]/10 text-[#1b4d89] hover:bg-[#1b4d89] hover:text-white shadow-sm'
+                                            }`}
+                                          >
+                                            {isExtracting === `content-${c.cod}` ? (
+                                              <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                              <Wand2 className="w-3 h-3" />
+                                            )}
+                                            {isExtracting === `content-${c.cod}` ? 'EXTRAYENDO...' : 'PROMPT CONTENIDO'}
+                                          </button>
+                                        </div>
                                       )}
                                     </label>
                                     <input
