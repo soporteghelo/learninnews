@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BookOpen, CheckCircle, Award,
-  ChevronRight, TrendingUp, Clock
+  ChevronRight, TrendingUp, Clock, ExternalLink
 } from 'lucide-react';
 import { APP_CONFIG } from '../config/app.config';
 import type { LearnTopic, DataChunk, QuizQuestion, UserProgress, AudienceType } from '../types';
@@ -16,6 +16,8 @@ interface DashboardProps {
   onSelectTopic: (topic: LearnTopic) => void;
   onChangeAudience: () => void;
   onOpenAdmin: () => void;
+  onClaimCertificate: () => void;
+  userSession: any;
 }
 
 export default function Dashboard({
@@ -27,6 +29,8 @@ export default function Dashboard({
   onSelectTopic,
   onChangeAudience,
   onOpenAdmin,
+  onClaimCertificate,
+  userSession,
 }: DashboardProps) {
   const filteredTopics = useMemo(() => {
     return topics
@@ -52,16 +56,24 @@ export default function Dashboard({
     return quizQuestions.filter((q) => q.idMain === topicId).length;
   };
 
+  // Passing score: 19/20 = 95%
+  const PASSING_SCORE = 19;
+  const MAX_SCORE = 20;
+
   const totalCompleted = progress.filter((p) => p.completed).length;
   const avgScore =
     progress.filter((p) => p.quizScore !== undefined).length > 0
-      ? Math.round(
+      ? parseFloat((
           progress
             .filter((p) => p.quizScore !== undefined)
             .reduce((sum, p) => sum + (p.quizScore || 0), 0) /
-            progress.filter((p) => p.quizScore !== undefined).length
-        )
+          progress.filter((p) => p.quizScore !== undefined).length
+        ).toFixed(1))
       : null;
+
+  const allModulesCompleted = filteredTopics.length > 0 && totalCompleted >= filteredTopics.length;
+  const meetsScoreThreshold = avgScore !== null && avgScore >= PASSING_SCORE;
+  const canClaimCertificate = allModulesCompleted && meetsScoreThreshold;
 
   return (
     <div className="min-h-screen safe-area-top safe-area-bottom">
@@ -108,13 +120,91 @@ export default function Dashboard({
             <p className="text-xs text-slate-400 font-medium uppercase tracking-tight">Hechos</p>
           </div>
           <div className="glass-card rounded-2xl p-4 text-center">
-            <Award className="w-5 h-5 text-amber-400 mx-auto mb-2" />
-            <p className="text-xl font-bold text-white">
-              {avgScore !== null ? `${avgScore}%` : '—'}
+            <Award className={`w-5 h-5 mx-auto mb-2 ${meetsScoreThreshold ? 'text-emerald-400' : avgScore !== null ? 'text-amber-400' : 'text-amber-400'}`} />
+            <p className={`font-bold leading-none ${meetsScoreThreshold ? 'text-emerald-400' : 'text-white'}`}>
+              <span className="text-xl">{avgScore !== null ? avgScore : '—'}</span>
+              {avgScore !== null && <span className="text-xs text-slate-500 font-bold">/{MAX_SCORE}</span>}
             </p>
-            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight">Calificación</p>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight mt-1">Calificación</p>
+            <p className="text-[9px] text-slate-500 font-bold tracking-widest mt-0.5">MÍN. {PASSING_SCORE}/20</p>
           </div>
         </motion.div>
+
+        {/* Certificate Section — shown when all modules are done */}
+        {allModulesCompleted && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="relative overflow-hidden group"
+          >
+            {/* Background glow — green if passed, amber if not */}
+            <div className={`absolute inset-0 opacity-20 group-hover:opacity-30 transition-opacity rounded-2xl bg-gradient-to-r ${
+              canClaimCertificate || userSession?.certificadoUrl
+                ? 'from-blue-600 to-indigo-600'
+                : 'from-amber-600 to-orange-600'
+            }`} />
+
+            <div className={`relative glass-card rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 ${
+              canClaimCertificate || userSession?.certificadoUrl ? 'border-blue-500/30' : 'border-amber-500/30'
+            }`}>
+              <div className="flex items-center gap-4">
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center border ${
+                  canClaimCertificate || userSession?.certificadoUrl
+                    ? 'bg-blue-500/20 border-blue-500/30'
+                    : 'bg-amber-500/20 border-amber-500/30'
+                }`}>
+                  <Award className={`w-8 h-8 ${
+                    canClaimCertificate || userSession?.certificadoUrl ? 'text-blue-400' : 'text-amber-400'
+                  }`} />
+                </div>
+                <div>
+                  {userSession?.certificadoUrl ? (
+                    <>
+                      <h3 className="text-xl font-black text-white uppercase tracking-tighter">¡Certificado Disponible!</h3>
+                      <p className="text-slate-400 text-sm max-w-sm">Ya puedes visualizar y descargar tu certificado oficial "ANEXO 04" desde Google Drive.</p>
+                    </>
+                  ) : canClaimCertificate ? (
+                    <>
+                      <h3 className="text-xl font-black text-white uppercase tracking-tighter">¡Aprobado! Genera tu Certificado</h3>
+                      <p className="text-slate-400 text-sm max-w-sm">Completaste todos los módulos con nota aprobatoria ({avgScore}/{MAX_SCORE} ≥ {PASSING_SCORE}/{MAX_SCORE}). Ya puedes emitir tu ANEXO 04 oficial.</p>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="text-xl font-black text-amber-400 uppercase tracking-tighter">Nota Insuficiente</h3>
+                      <p className="text-slate-400 text-sm max-w-sm">
+                        Tu nota actual es <span className="font-black text-amber-400">{avgScore ?? 0}/{MAX_SCORE}</span>. Necesitas al menos <span className="font-black text-white">{PASSING_SCORE}/{MAX_SCORE}</span> para generar el certificado. Repasa los quizzes.
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto shrink-0">
+                {userSession?.certificadoUrl ? (
+                  <a
+                    href={userSession.certificadoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-8 py-4 bg-white text-slate-950 rounded-xl font-black text-xs tracking-widest hover:scale-105 active:scale-95 transition-all text-center"
+                  >
+                    VER MI CERTIFICADO
+                  </a>
+                ) : canClaimCertificate ? (
+                  <button
+                    onClick={onClaimCertificate}
+                    className="px-8 py-4 bg-blue-600 text-white rounded-xl font-black text-xs tracking-widest hover:bg-blue-500 hover:shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:scale-105 active:scale-95 transition-all"
+                  >
+                    GENERAR ANEXO 04
+                  </button>
+                ) : (
+                  <div className="px-8 py-4 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-xl font-black text-xs tracking-widest text-center cursor-not-allowed">
+                    BLOQUEADO — {avgScore ?? 0}/{MAX_SCORE} (mín. {PASSING_SCORE})
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Section title */}
         <div className="flex items-center gap-2">
@@ -205,9 +295,9 @@ export default function Dashboard({
                         )}
                         {prog?.quizScore !== undefined && (
                           <span className={`px-1.5 py-0.5 rounded text-[8px] uppercase font-bold tracking-wider ${
-                            prog.quizScore >= 70 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                            prog.quizScore >= 19 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
                           }`}>
-                            PTS: {prog.quizScore}%
+                            PTS: {prog.quizScore}/20
                           </span>
                         )}
                       </div>
@@ -231,6 +321,31 @@ export default function Dashboard({
           </div>
         )}
       </div>
+
+      {/* Floating "Ver Mi Certificado" button — always visible when URL exists */}
+      {userSession?.certificadoUrl && (
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, type: 'spring', stiffness: 260, damping: 20 }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"
+        >
+          <a
+            href={userSession.certificadoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 px-6 py-3.5 rounded-2xl font-black text-xs tracking-widest uppercase shadow-2xl
+              bg-gradient-to-r from-blue-600 to-indigo-600 text-white
+              hover:from-blue-500 hover:to-indigo-500 hover:scale-105 active:scale-95 transition-all
+              border border-white/20 backdrop-blur-xl"
+            style={{ boxShadow: '0 0 30px rgba(37,99,235,0.45)' }}
+          >
+            <Award className="w-4 h-4 text-yellow-300 flex-shrink-0" />
+            Ver Mi Certificado
+            <ExternalLink className="w-3.5 h-3.5 opacity-70 flex-shrink-0" />
+          </a>
+        </motion.div>
+      )}
     </div>
   );
 }

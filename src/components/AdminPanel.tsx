@@ -6,19 +6,21 @@ import {
   Plus, Copy, Search, BookOpen, HelpCircle,
   CheckCircle2, Loader2, Lock, Eye, EyeOff, RefreshCw,
   Wifi, WifiOff, ChevronDown, ChevronUp,
-  FileText, Settings, Video, Link2, MessageSquare, Undo2
+  FileText, Settings, Video, Link2, MessageSquare, Undo2,
+  Wand2
 } from 'lucide-react';
 import { ADMIN_CONFIG } from '../config/app.config';
 import {
   saveQuizToSheets, deleteQuizFromSheets,
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
-  testSheetsConnection, testAppsScriptConnection,
+  testSheetsConnection, testAppsScriptConnection
 } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
   ContentDraft, TopicDraft, AdminTab, ConnectionTestResult
 } from '../types';
+
 
 interface AdminPanelProps {
   topics: LearnTopic[];
@@ -70,6 +72,7 @@ export default function AdminPanel({
 
   // General
   const [isSaving, setIsSaving] = useState(false);
+  const [isExtracting, setIsExtracting] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Connection test
@@ -133,6 +136,67 @@ export default function AdminPanel({
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+  };
+
+  // ========== AI PROMPT GENERATION ==========
+
+  const handleGenerateAiPrompt = async (c: ContentDraft) => {
+    if (!c.pdf) {
+      setError('❌ No hay una URL de PDF configurada.');
+      return;
+    }
+
+    setIsExtracting(c.cod);
+    setError(null);
+    setStatusMessage(null);
+    
+    try {
+      console.log('--- Iniciando Extracción Local (Tecnología Extractor) ---', c.pdf);
+      
+      const response = await fetch('/api/extract-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveUrl: c.pdf })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error en el servidor local de extracción');
+      }
+
+      const data = await response.json();
+      const text = data.text;
+
+      if (!text || text.length < 10) {
+        throw new Error('No se pudo extraer texto suficiente del PDF.');
+      }
+
+      const promptTemplate = `Elabora un cuestionario en texto plano basado en el contenido que adjuntaré. El cuestionario debe cumplir con las siguientes condiciones:
+
+Incluir preguntas de opción múltiple con 4 alternativas cada una.
+Solo una alternativa debe ser correcta.
+Indicar claramente cuál es la respuesta correcta en cada pregunta.
+Proporcionar un feedback detallado, claro y contundente para cada pregunta, explicando por qué la respuesta correcta es válida y por qué las demás no lo son.
+Mantener un nivel de dificultad intermedio a avanzado, priorizando el análisis, la comprensión profunda y la aplicación del contenido.
+
+CONTENIDO:
+${text}`;
+
+      // Copiar al portapapeles
+      await navigator.clipboard.writeText(promptTemplate);
+      
+      const successMsg = '✅ ¡Éxito! Prompt generado y copiado al portapapeles.';
+      setStatusMessage({ type: 'success', text: successMsg });
+      window.alert(successMsg + "\n\nYa puedes pegarlo en tu IA favorita.");
+
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('Extraction Error:', err);
+      setError('Error en el generador: ' + errMsg);
+      window.alert("❌ Falló la extracción: " + errMsg + "\n\nTip: Asegúrate de haber reiniciado el servidor (npm run dev) tras los cambios.");
+    } finally {
+      setIsExtracting(null);
+    }
   };
 
   // ========== CONTENT CRUD ==========
@@ -493,6 +557,50 @@ export default function AdminPanel({
       </header>
 
       <div className="max-w-7xl mx-auto px-4 pt-6 pb-8">
+        {/* Global Notifications Section - STATIC FOR RELIABILITY */}
+        <div className="space-y-4 mb-8">
+          {error && (
+            <div className="bg-[#ffdad6] text-[#410002] p-4 rounded-xl border border-[#ba1a1a]/20 flex items-start justify-between shadow-sm">
+              <div className="flex items-start gap-3">
+                <WifiOff className="w-5 h-5 text-[#ba1a1a] mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider mb-1">Error Detectado</p>
+                  <p className="text-sm font-medium leading-relaxed">{error}</p>
+                </div>
+              </div>
+              <button onClick={() => setError(null)} className="p-1 hover:bg-[#ba1a1a]/10 rounded-lg transition-colors">
+                <Trash2 className="w-4 h-4 text-[#ba1a1a]" />
+              </button>
+            </div>
+          )}
+
+          {statusMessage && (
+            <div className={`p-4 rounded-xl border flex items-start justify-between shadow-sm animate-in fade-in slide-in-from-top-2 duration-300 ${
+              statusMessage.type === 'success' 
+                ? 'bg-[#9af7af]/20 text-[#00391c] border-[#006d36]/20' 
+                : 'bg-[#f3f4f5] text-[#424750] border-[#c3c6d1]/30'
+            }`}>
+              <div className="flex items-start gap-3">
+                {statusMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-5 h-5 text-[#006d36] mt-0.5 flex-shrink-0" />
+                ) : (
+                  <FileText className="w-5 h-5 text-[#424750] mt-0.5 flex-shrink-0" />
+                )}
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider mb-1">
+                    {statusMessage.type === 'success' ? 'Éxito' : 'Notificación'}
+                  </p>
+                  <p className="text-sm font-medium leading-relaxed">{statusMessage.text}</p>
+                </div>
+              </div>
+              <button onClick={() => setStatusMessage(null)} className="p-1 hover:black/5 rounded-lg transition-colors">
+                <Plus className="w-4 h-4 rotate-45" />
+              </button>
+            </div>
+          )}
+        </div>
+        
+        {/* Connection Test Results */}
         {/* Connection Test Results */}
         <AnimatePresence>
           {testResults && (
@@ -981,6 +1089,25 @@ export default function AdminPanel({
                                         <FileText className="w-3 h-3 text-[#582a00]" />
                                         PDF <span className="text-[#737781]">(URL de Google Drive)</span>
                                       </div>
+                                      
+                                      {c.pdf && (
+                                        <button
+                                          onClick={() => handleGenerateAiPrompt(c)}
+                                          disabled={isExtracting !== null}
+                                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                                            isExtracting === c.cod 
+                                              ? 'bg-slate-100 text-slate-400' 
+                                              : 'bg-[#582a00]/10 text-[#582a00] hover:bg-[#582a00] hover:text-white shadow-sm'
+                                          }`}
+                                        >
+                                          {isExtracting === c.cod ? (
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                          ) : (
+                                            <Wand2 className="w-3 h-3" />
+                                          )}
+                                          {isExtracting === c.cod ? 'EXTRAYENDO...' : 'GENERAR PROMPT IA'}
+                                        </button>
+                                      )}
                                     </label>
                                     <input
                                       type="url"

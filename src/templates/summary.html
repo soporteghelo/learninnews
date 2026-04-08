@@ -1,0 +1,25 @@
+<!--
+  EXAM SUMMARY TEMPLATE (ANEXO 04 SUPPLEMENT)
+  This is pure HTML for the second page of the certificate.
+-->
+<div style="width: 210mm; min-height: 297mm; background: white; padding: 20mm; box-sizing: border-box; page-break-before: always; font-family: 'Montserrat', sans-serif;">
+    <!-- Header -->
+    <div style="border-bottom: 2px solid #1b4d89; margin-bottom: 20px; padding-bottom: 10px;">
+        <h2 style="margin: 0; color: #1b4d89; text-transform: uppercase; font-size: 16pt; letter-spacing: 1px;">
+            Detalle de Evaluación de Módulos (ANEXO 04)
+        </h2>
+        <p style="margin: 4px 0 0; font-size: 9pt; color: #666;">
+            Participante: <b>{{user_full_name}}</b> · DNI: {{user_dni}} · Fecha: {{current_date}}
+        </p>
+    </div>
+
+    <!-- Modules grid -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 8.5pt;">
+        {{modules_content}}
+    </div>
+
+    <!-- Footer -->
+    <div style="margin-top: 30px; font-size: 7.5pt; color: #777; text-align: center; border-top: 1px solid #ccc; padding-top: 12px;">
+        Documento complementario al ANEXO 04. Generado automáticamente el {{current_date}} · Participante: {{user_full_name}} ({{user_dni}})
+    </div>
+</div>

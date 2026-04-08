@@ -472,6 +472,10 @@ export async function fetchAppDynamicConfig(): Promise<AppDynamicConfig> {
             contact: row.Contacto || '',
             adminPass: row.PassAdmin || defaultConfig.adminPass,
             status: (row.Estatus || 'Activo') === 'Inactivo' ? 'Inactivo' : 'Activo',
+            logoCertificado: row.LogoCertificado || '',
+            firmaRepresentante: row.FirmaRepresentante || '',
+            nombreRepresentante: row.NombreRepresentante || '',
+            cargoRepresentante: row.CargoRepresentante || '',
           });
         },
         error: () => resolve(defaultConfig),
@@ -530,6 +534,35 @@ export interface IngresoRecord {
   intentosQuiz: string;
   tiempoTotal: string;
   progressJson: string;
+  certificadoUrl?: string;
+}
+
+export async function fetchCertificateLinkByDni(dni: string): Promise<string> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.certificates);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return '';
+    const csvText = await response.text();
+
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const match = results.data.find((row: any) => String(row.DNI || '').trim() === String(dni).trim());
+          if (!match) {
+            resolve('');
+            return;
+          }
+
+          const row = match as any;
+          resolve(String(row.LinkCertificado || row.PDF_URL || '').trim());
+        },
+        error: () => resolve(''),
+      });
+    });
+  } catch {
+    return '';
+  }
 }
 
 /** Fetch user record from INGRESOS sheet by DNI (read-only via CSV) */
@@ -562,6 +595,7 @@ export async function fetchIngresoByDni(dni: string): Promise<IngresoRecord | nu
             intentosQuiz: row.IntentosQuiz || '',
             tiempoTotal: row.TiempoTotal || '',
             progressJson: row.ProgressJSON || '',
+            certificadoUrl: row.CertificadoUrl || '',
           });
         },
         error: () => resolve(null),
@@ -684,5 +718,46 @@ export async function fetchGlobalKnownUsers(): Promise<Record<string, { apellido
     });
   } catch {
     return {};
+  }
+}
+
+// =============================================
+// CERTIFICADOS - Guardar PDF en Drive
+// =============================================
+
+export async function saveCertificate(data: {
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  pdfBase64: string;
+  signatureBase64?: string;
+  selfieBase64?: string;
+  cargo?: string;
+  celular?: string;
+  nota?: string;
+}): Promise<{ success: boolean; url?: string; message?: string }> {
+  try {
+    const result = await postToAppsScript({
+      action: 'saveCertificate',
+      ...data
+    });
+    
+    if (result.status === 'ok') {
+      return { success: true, url: (result as any).url };
+    }
+    if (result.message && (
+      result.message.includes('Drive para emitir certificados') ||
+      result.message.includes('DriveApp.getFolderById') ||
+      result.message.includes('auth/drive')
+    )) {
+      return {
+        success: false,
+        message: 'El backend de Apps Script no tiene permiso para guardar en Google Drive. Debes abrir el proyecto Apps Script, aceptar los permisos de Drive y volver a desplegar la aplicación web.'
+      };
+    }
+    return { success: false, message: result.message || 'Error al guardar certificado' };
+  } catch (error) {
+    console.error('Error in saveCertificate service:', error);
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
   }
 }

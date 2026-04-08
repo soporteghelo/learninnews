@@ -6,6 +6,11 @@ export interface AppDynamicConfig {
   contact: string;
   adminPass: string;
   status: 'Activo' | 'Inactivo';
+  // Certificate branding (from CONFIG sheet)
+  logoCertificado?: string;
+  firmaRepresentante?: string;
+  nombreRepresentante?: string;
+  cargoRepresentante?: string;
 }
 
 export interface UserSession {
@@ -14,6 +19,9 @@ export interface UserSession {
   nombres: string;
   audience: AudienceType;
   inicio: string; // ISO date
+  certificadoUrl?: string; // Persistent Drive link to certificate
+  cargo?: string;
+  celular?: string;
 }
 
 export interface LearnTopic {
@@ -110,4 +118,5 @@ export type AppView =
   | 'courseDetail'
   | 'learning'
   | 'quiz'
-  | 'admin';
+  | 'admin'
+  | 'certificateClaim';

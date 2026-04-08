@@ -56,8 +56,8 @@ export default function QuizMode({
       setShowFeedback(false);
     } else {
       setIsFinished(true);
-      const totalCorrect = score + (selectedOption === currentQuestion.correctAnswer ? 1 : 0); 
-      onComplete(Math.round((totalCorrect / totalQuestions) * 100));
+      // `score` already includes all correct answers (incremented in handleSelect before this click)
+      onComplete(parseFloat(((score / totalQuestions) * 20).toFixed(1)));
     }
   };
 
@@ -77,8 +77,8 @@ export default function QuizMode({
   }
 
   if (isFinished) {
-    const percentage = Math.round((score / totalQuestions) * 100);
-    const passed = percentage >= 70;
+    const scoreOutOf20 = parseFloat(((score / totalQuestions) * 20).toFixed(1));
+    const passed = scoreOutOf20 >= 14; // 70% of 20 = 14
 
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 safe-area-top safe-area-bottom">
@@ -99,8 +99,10 @@ export default function QuizMode({
 
           <div className="flex justify-center items-center gap-8 mb-10">
             <div className="text-center">
-              <p className="text-xs text-slate-500 uppercase font-bold tracking-widest mb-1">Resultado</p>
-              <p className={`text-4xl font-black ${passed ? 'text-emerald-400' : 'text-rose-400'}`}>{percentage}%</p>
+              <p className="text-xs text-slate-500 uppercase font-bold tracking-widest mb-1">Nota</p>
+              <p className={`text-4xl font-black ${passed ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {scoreOutOf20}<span className="text-xl text-slate-500">/20</span>
+              </p>
             </div>
             <div className="w-px h-10 bg-white/10" />
             <div className="text-center">

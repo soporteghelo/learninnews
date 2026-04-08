@@ -8,6 +8,7 @@ import {
   registerIngreso,
   updateIngresoProgress,
   fetchIngresoByDni,
+  fetchCertificateLinkByDni,
   fetchAppDynamicConfig,
   fetchGlobalKnownUsers,
 } from './services/sheetsService';
@@ -33,6 +34,7 @@ import CourseDetail from './components/CourseDetail';
 const LearningMode = lazy(() => import('./components/LearningMode'));
 const QuizMode = lazy(() => import('./components/QuizMode'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
+const CertificateClaim = lazy(() => import('./components/CertificateClaim'));
 
 // Loading Fallback Component
 const ViewLoader = () => (
@@ -124,15 +126,32 @@ export default function App() {
         const storedSession = localStorage.getItem(getStorageKey(APP_CONFIG.storage.keys.session));
         if (storedSession) {
           const session: UserSession = JSON.parse(storedSession);
-          setUserSession(session);
-          setAudience(session.audience);
+          const liveCertificateUrl = await fetchCertificateLinkByDni(session.dni);
+          const syncedSession: UserSession = {
+            ...session,
+            certificadoUrl: liveCertificateUrl || undefined,
+          };
+          setUserSession(syncedSession);
+          localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(syncedSession));
+          setAudience(syncedSession.audience);
           setView('dashboard');
         }
 
-        // Load progress from storage
+        // Load progress from storage — migrate legacy percentage scores (>20) to /20 scale
         const storedProgress = localStorage.getItem(getStorageKey(APP_CONFIG.storage.keys.progress));
         if (storedProgress) {
-          setProgress(JSON.parse(storedProgress));
+          const raw: UserProgress[] = JSON.parse(storedProgress);
+          const migrated = raw.map(p => ({
+            ...p,
+            quizScore: p.quizScore !== undefined && p.quizScore > 20
+              ? parseFloat(((p.quizScore / 100) * 20).toFixed(1))
+              : p.quizScore,
+          }));
+          // Persist migrated data so it isn't re-converted next load
+          if (raw.some(p => p.quizScore !== undefined && p.quizScore > 20)) {
+            localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(migrated));
+          }
+          setProgress(migrated);
         }
       } catch (err) {
         console.error('App initialization error:', err);
@@ -180,6 +199,7 @@ export default function App() {
       const existingRecord = await fetchIngresoByDni(dni);
       
       if (existingRecord) {
+        const liveCertificateUrl = await fetchCertificateLinkByDni(dni);
         // Restore session from sheet
         const session: UserSession = {
           dni,
@@ -187,14 +207,21 @@ export default function App() {
           nombres: existingRecord.nombres || nombres,
           audience: (existingRecord.publico || '') as AudienceType,
           inicio: existingRecord.inicio || new Date().toISOString(),
+          certificadoUrl: liveCertificateUrl || undefined,
         };
         setUserSession(session);
         localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(session));
 
-        // Restore progress if exists
+        // Restore progress if exists — migrate legacy % scores (>20) to /20 scale
         if (existingRecord.progressJson) {
           try {
-            const restoredProgress: UserProgress[] = JSON.parse(existingRecord.progressJson);
+            const raw: UserProgress[] = JSON.parse(existingRecord.progressJson);
+            const restoredProgress = raw.map(p => ({
+              ...p,
+              quizScore: p.quizScore !== undefined && p.quizScore > 20
+                ? parseFloat(((p.quizScore / 100) * 20).toFixed(1))
+                : p.quizScore,
+            }));
             setProgress(restoredProgress);
             localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(restoredProgress));
           } catch { /* ignore parse errors */ }
@@ -343,15 +370,17 @@ export default function App() {
       if (userSession) {
         const totalTopics = topics.filter(t => t.active !== false && t.audience.toLowerCase().includes((audience || '').toLowerCase())).length;
         const completedTopics = newProg.filter(p => p.completed).length;
-        const avgScore = newProg.filter(p => p.quizScore !== undefined).map(p => p.quizScore!);
-        const avgNota = avgScore.length > 0 ? Math.round(avgScore.reduce((a, b) => a + b, 0) / avgScore.length) : 0;
+        const quizScores = newProg.filter(p => p.quizScore !== undefined).map(p => p.quizScore!);
+        // avgNota is stored out of 20; convert to % for sheets readability
+        const avgNotaOutOf20 = quizScores.length > 0 ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : 0;
+        const avgNotaPct = Math.round((avgNotaOutOf20 / 20) * 100);
         const avancePct = totalTopics > 0 ? Math.round((completedTopics / totalTopics) * 100) : 0;
         const totalQuizAttempts = newProg.filter(p => p.quizScore !== undefined).length;
 
         updateIngresoProgress({
           dni: userSession.dni,
           avance: `${avancePct}%`,
-          nota: `${avgNota}%`,
+          nota: `${avgNotaPct}%`,
           modulosCompletados: completedTopics,
           intentosQuiz: totalQuizAttempts,
           progress: newProg,
@@ -499,10 +528,31 @@ export default function App() {
               chunks={chunks}
               quizQuestions={quizQuestions}
               progress={progress}
-              onSelectTopic={handleSelectTopic}
+               onSelectTopic={handleSelectTopic}
               onChangeAudience={handleChangeAudience}
               onOpenAdmin={() => setView('admin')}
+              onClaimCertificate={() => setView('certificateClaim')}
+              userSession={userSession}
             />
+          </motion.div>
+        )}
+
+        {view === 'certificateClaim' && userSession && (
+          <motion.div key="certificate" className="fixed inset-0 z-50">
+            <Suspense fallback={<ViewLoader />}>
+              <CertificateClaim 
+                userSession={userSession}
+                onBack={() => setView('dashboard')}
+                appConfig={appConfig}
+                progress={progress}
+                quizQuestions={quizQuestions}
+                onSuccess={(url: string) => {
+                  const updatedSession = { ...userSession, certificadoUrl: url };
+                  setUserSession(updatedSession);
+                  localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(updatedSession));
+                }}
+              />
+            </Suspense>
           </motion.div>
         )}
 

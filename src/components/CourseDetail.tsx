@@ -144,16 +144,22 @@ export default function CourseDetail({
                   <div className="flex items-center justify-between glass px-4 py-3 rounded-xl border border-white/5 bg-slate-900/50">
                     <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Nota Actual:</span>
                     <div className="flex items-baseline gap-1">
-                      <span className={`text-2xl font-black ${
-                        (progress?.quizScore ?? 0) >= 80 
-                          ? 'text-emerald-400' 
-                          : (progress?.quizScore ?? 0) > 0 
-                            ? 'text-rose-400' 
-                            : 'text-slate-100'
-                      }`}>
-                        {(((progress?.quizScore ?? 0) / 100) * 20).toFixed(1).replace(/\.0$/, '')}
-                      </span>
-                      <span className="text-xs font-bold text-slate-500">/ 20</span>
+                      {(() => {
+                        // Clamp: legacy data stored as % (>20) gets converted on the fly
+                        const raw = progress?.quizScore ?? 0;
+                        const score = raw > 20 ? parseFloat(((raw / 100) * 20).toFixed(1)) : raw;
+                        const isGood = score >= 16;
+                        return (
+                          <>
+                            <span className={`text-2xl font-black ${
+                              score > 0 ? (isGood ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-100'
+                            }`}>
+                              {Number(score.toFixed(1))}
+                            </span>
+                            <span className="text-xs font-bold text-slate-500">/ 20</span>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

@@ -1,0 +1,108 @@
+<div
+    style="width: 210mm; height: 297mm; background: white; position: relative; overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; padding: 20mm; font-family: 'Montserrat', sans-serif;">
+
+    <!-- Double border -->
+    <div
+        style="position: absolute; top: 10mm; left: 10mm; right: 10mm; bottom: 10mm; border: 5px double #1b4d89; pointer-events: none;">
+    </div>
+
+    <!-- Corner TL -->
+    <div
+        style="position: absolute; top: 0; left: 0; width: 40mm; height: 40mm; border-top: 10px solid #1b4d89; border-left: 10px solid #1b4d89; z-index: 1;">
+    </div>
+
+    <!-- Corner BR -->
+    <div
+        style="position: absolute; bottom: 0; right: 0; width: 40mm; height: 40mm; border-bottom: 10px solid #1b4d89; border-right: 10px solid #1b4d89; z-index: 1;">
+    </div>
+
+    <div style="text-align: center; margin-top: 10mm; flex-grow: 1; display: flex; flex-direction: column;">
+
+        <!-- LOGO (CONSTRUIDO CON PROXY) -->
+        <div
+            style="display: flex; justify-content: center; align-items: center; min-height: 34mm; margin-bottom: 14px;">
+            <img src="{{certificate_logo_src}}"
+                style="max-height: 92px; max-width: 340px; object-fit: contain; display: block;"
+                alt="Logo Corporativo" />
+        </div>
+
+        <!-- Title -->
+        <h1
+            style="font-family: 'Cinzel Decorative', Cinzel, Georgia, serif; color: #1b4d89; font-size: 34pt; margin: 0 0 8px; letter-spacing: 3px; font-weight: 700;">
+            ANEXO 04
+        </h1>
+
+        <div
+            style="font-size: 13pt; font-weight: 400; color: #5a6472; margin-bottom: 26px; text-transform: uppercase; letter-spacing: 4px;">
+            Certificado de Aprobación
+        </div>
+
+        <p style="font-style: italic; margin-bottom: 8px; font-size: 11pt; color: #555;">
+            Se otorga el presente documento a:
+        </p>
+
+        <div
+            style="font-size: 24pt; font-weight: 700; color: #111; display: inline-block; padding: 0 36px 8px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+            {{user_full_name}}
+        </div>
+
+        <div style="font-size: 11pt; color: #1b4d89; font-weight: 600; margin-bottom: 22px; text-transform: uppercase;">
+            Cargo: {{user_cargo}}
+        </div>
+
+        <p style="font-size: 12pt; line-height: 1.75; color: #374151; max-width: 560px; margin: 0 auto 26px;">
+            Por haber completado satisfactoriamente el curso de entrenamiento
+            <span style="font-weight: 700; color: #1b4d89;">ANEXO 04</span>,
+            demostrando compromiso y excelencia académica en todos los módulos evaluados.
+        </p>
+
+        <!-- Details -->
+        <div
+            style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 500px; margin: 0 auto 34px; font-size: 10.5pt; text-align: left; background: #f8fbff; padding: 14px; border-radius: 10px; border: 1px dashed #4b6fa8;">
+            <div><b style="color: #1b4d89;">DNI:</b> {{user_dni}}</div>
+            <div><b style="color: #1b4d89;">Celular:</b> {{user_celular}}</div>
+            <div><b style="color: #1b4d89;">Perfil:</b> {{user_audience}}</div>
+            <div><b style="color: #1b4d89;">Emitido:</b> {{current_date}}</div>
+            <div style="grid-column: span 2;"><b style="color: #1b4d89;">Estado:</b> <span
+                    style="color: #16a34a; font-weight: 700;">APROBADO ✓</span></div>
+        </div>
+
+        <!-- Signatures -->
+        <div
+            style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; padding: 0 8mm 10mm; gap: 8mm;">
+
+            <!-- Selfie -->
+            <div style="text-align: center; width: 130px;">
+                <div
+                    style="width: 100px; height: 130px; border: 1px solid #1b4d89; margin: 0 auto 6px; overflow: hidden; background: #f8fbff;">
+                    <img src="{{selfie_src}}" style="width: 100%; height: 100%; object-fit: cover;" />
+                </div>
+                <div style="font-size: 7.5pt; font-weight: 700; color: #1b4d89;">V. BIOMÉTRICA</div>
+                <div style="font-size: 5.5pt; color: #666;">{{timestamp}}</div>
+            </div>
+
+            <!-- Firma participante -->
+            <div style="text-align: center; width: 170px;">
+                <img src="{{participant_signature_src}}"
+                    style="max-width: 140px; max-height: 70px; border-bottom: 1.5px solid #111;" />
+                <div style="font-size: 9pt; font-weight: 700; color: #1b4d89;">Firma del Participante</div>
+                <div style="font-size: 8pt; color: #555;">{{user_full_name}}</div>
+            </div>
+
+            <!-- Firma representante -->
+            <div style="text-align: center; width: 170px;">
+                <img src="{{representative_signature_src}}"
+                    style="max-width: 150px; max-height: 72px; border-bottom: 1.5px solid #111;" />
+                <div style="font-size: 9pt; font-weight: 700; color: #1b4d89;">Emitido por</div>
+                <div style="font-size: 9.5pt; font-weight: 700;">{{representative_name}}</div>
+                <div style="font-size: 7.5pt; color: #666;">{{representative_cargo}}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div
+        style="position: absolute; bottom: 18mm; left: 12mm; right: 12mm; text-align: center; font-size: 8.5pt; color: #64748b;">
+        Este documento ANEXO 04 tiene validez oficial y ha sido firmado digitalmente. ID: {{user_dni}}-{{current_year}}
+    </div>
+</div>
