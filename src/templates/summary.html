@@ -1,0 +1,55 @@
+<style>@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700&family=Montserrat:wght@300;400;500;600;700;800;900&display=swap');</style>
+<div style="width:210mm;background:white;font-family:'Montserrat',sans-serif;box-sizing:border-box;">
+
+  <!-- CABECERA -->
+  <div style="background:linear-gradient(135deg,#091a3e 0%,#163060 45%,#1e4fa8 100%);padding:7mm 13mm 6mm;position:relative;overflow:hidden;">
+    <div style="position:absolute;top:0;left:0;right:0;height:3px;background:#c8a84b;"></div>
+    <div style="position:absolute;top:-8mm;right:-5mm;width:32mm;height:32mm;border-radius:50%;border:6px solid rgba(255,255,255,0.05);"></div>
+    <div style="position:absolute;top:2mm;right:14mm;width:16mm;height:16mm;border-radius:50%;border:3px solid rgba(200,168,75,0.1);"></div>
+    <div style="margin-bottom:3mm;">
+      <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(200,168,75,0.5);border-radius:100px;padding:3px 14px;background:rgba(200,168,75,0.08);">
+        <span style="color:#c8a84b;font-size:8pt;">✦</span>
+        <span style="font-size:6.5pt;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.7);">Detalle de Evaluación</span>
+        <span style="color:#c8a84b;font-size:8pt;">✦</span>
+      </div>
+    </div>
+    <h1 style="font-family:'Playfair Display',Georgia,serif;font-size:18pt;font-weight:700;color:white;margin:0 0 3mm;line-height:1.2;letter-spacing:0.3px;">
+      {{course_title}}
+    </h1>
+    <div style="display:flex;align-items:center;gap:10mm;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:5px;">
+        <span style="font-size:6.5pt;color:rgba(200,168,75,0.8);font-weight:700;text-transform:uppercase;letter-spacing:1.5px;">Participante</span>
+        <span style="color:rgba(255,255,255,0.25);font-size:8pt;">|</span>
+        <span style="font-size:8pt;font-weight:700;color:white;">{{user_full_name}}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;">
+        <span style="font-size:6.5pt;color:rgba(200,168,75,0.8);font-weight:700;text-transform:uppercase;letter-spacing:1.5px;">DNI</span>
+        <span style="color:rgba(255,255,255,0.25);font-size:8pt;">|</span>
+        <span style="font-size:8pt;font-weight:700;color:white;">{{user_dni}}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;">
+        <span style="font-size:6.5pt;color:rgba(200,168,75,0.8);font-weight:700;text-transform:uppercase;letter-spacing:1.5px;">Fecha</span>
+        <span style="color:rgba(255,255,255,0.25);font-size:8pt;">|</span>
+        <span style="font-size:8pt;font-weight:700;color:white;">{{current_date}}</span>
+      </div>
+    </div>
+    <div style="position:absolute;bottom:0;left:0;right:0;height:2.5px;background:#c8a84b;"></div>
+  </div>
+
+  <!-- BARRAS LATERALES (solo en cabecera) -->
+  <div style="height:3px;background:#1b4d89;"></div>
+
+  <!-- CONTENIDO Q&A -->
+  <div style="padding:7mm 13mm 6mm;font-size:8.5pt;line-height:1.6;">
+    {{modules_content}}
+  </div>
+
+  <!-- PIE -->
+  <div style="background:linear-gradient(135deg,#091a3e 0%,#163060 100%);padding:4px 13mm;display:flex;align-items:center;justify-content:center;position:relative;">
+    <div style="position:absolute;top:0;left:0;right:0;height:2px;background:#c8a84b;"></div>
+    <span style="font-size:7pt;color:rgba(255,255,255,0.55);letter-spacing:2px;text-transform:uppercase;font-weight:500;">
+      Documento complementario al certificado &nbsp;·&nbsp; {{user_full_name}} ({{user_dni}}) &nbsp;·&nbsp; {{current_date}}
+    </span>
+  </div>
+
+</div>

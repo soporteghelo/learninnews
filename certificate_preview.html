@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Preview Certificado</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Montserrat:wght@300;400;500;600;700;800;900&display=swap"
+    rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #b0b8c8;
+      display: flex;
+      justify-content: center;
+      padding: 40px;
+      min-height: 100vh;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div style="
+  width: 210mm;
+  height: 297mm;
+  position: relative;
+  overflow: hidden;
+  background: #fefdfb;
+  box-shadow: 0 30px 90px rgba(0,0,0,0.45);
+  display: flex;
+  flex-direction: column;
+  font-family: 'Montserrat', sans-serif;
+">
+
+    <!-- ░░░ MARCA DE AGUA ░░░ -->
+    <div
+      style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:0;overflow:hidden;">
+      <div
+        style="font-size:78pt;font-weight:900;color:rgba(15,45,107,0.022);text-transform:uppercase;letter-spacing:18px;transform:rotate(-28deg);font-family:'Montserrat',sans-serif;white-space:nowrap;user-select:none;">
+        CERTIFICADO</div>
+    </div>
+
+    <!-- ░░░ BARRAS LATERALES DEGRADADAS ░░░ -->
+    <div
+      style="position:absolute;left:0;top:0;bottom:0;width:6px;background:linear-gradient(180deg,#c8a84b 0%,#0f2d6b 22%,#1b4d89 78%,#c8a84b 100%);z-index:30;">
+    </div>
+    <div
+      style="position:absolute;right:0;top:0;bottom:0;width:6px;background:linear-gradient(180deg,#c8a84b 0%,#0f2d6b 22%,#1b4d89 78%,#c8a84b 100%);z-index:30;">
+    </div>
+
+    <!-- ░░░ MARCO DOBLE: AZUL EXTERIOR + ORO INTERIOR ░░░ -->
+    <div style="position:absolute;inset:8mm;border:2.5px solid #1b4d89;z-index:20;pointer-events:none;"></div>
+    <div style="position:absolute;inset:11.5mm;border:1px solid rgba(200,168,75,0.55);z-index:20;pointer-events:none;">
+    </div>
+
+    <!-- ░░░ ORNAMENTOS DE ESQUINAS ░░░ -->
+    <!-- Arriba Izquierda -->
+    <div style="position:absolute;top:6.5mm;left:6.5mm;z-index:21;pointer-events:none;">
+      <div style="position:absolute;width:15mm;height:2.5px;background:#c8a84b;top:0;left:0;"></div>
+      <div style="position:absolute;width:2.5px;height:15mm;background:#c8a84b;top:0;left:0;"></div>
+      <div style="position:absolute;width:7px;height:7px;border-radius:50%;background:#c8a84b;top:-2px;left:-2px;">
+      </div>
+    </div>
+    <!-- Arriba Derecha -->
+    <div style="position:absolute;top:6.5mm;right:6.5mm;z-index:21;pointer-events:none;">
+      <div style="position:absolute;width:15mm;height:2.5px;background:#c8a84b;top:0;right:0;"></div>
+      <div style="position:absolute;width:2.5px;height:15mm;background:#c8a84b;top:0;right:0;"></div>
+      <div style="position:absolute;width:7px;height:7px;border-radius:50%;background:#c8a84b;top:-2px;right:-2px;">
+      </div>
+    </div>
+    <!-- Abajo Izquierda -->
+    <div style="position:absolute;bottom:6.5mm;left:6.5mm;z-index:21;pointer-events:none;">
+      <div style="position:absolute;width:15mm;height:2.5px;background:#c8a84b;bottom:0;left:0;"></div>
+      <div style="position:absolute;width:2.5px;height:15mm;background:#c8a84b;bottom:0;left:0;"></div>
+      <div style="position:absolute;width:7px;height:7px;border-radius:50%;background:#c8a84b;bottom:-2px;left:-2px;">
+      </div>
+    </div>
+    <!-- Abajo Derecha -->
+    <div style="position:absolute;bottom:6.5mm;right:6.5mm;z-index:21;pointer-events:none;">
+      <div style="position:absolute;width:15mm;height:2.5px;background:#c8a84b;bottom:0;right:0;"></div>
+      <div style="position:absolute;width:2.5px;height:15mm;background:#c8a84b;bottom:0;right:0;"></div>
+      <div style="position:absolute;width:7px;height:7px;border-radius:50%;background:#c8a84b;bottom:-2px;right:-2px;">
+      </div>
+    </div>
+
+    <!-- ═══════════════════ CABECERA ═══════════════════ -->
+    <div style="
+    background: linear-gradient(135deg, #091a3e 0%, #163060 45%, #1e4fa8 100%);
+    height: 46mm;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+  ">
+      <!-- Círculos decorativos -->
+      <div
+        style="position:absolute;top:-14mm;right:-10mm;width:48mm;height:48mm;border-radius:50%;border:9px solid rgba(255,255,255,0.05);">
+      </div>
+      <div
+        style="position:absolute;top:-4mm;right:12mm;width:24mm;height:24mm;border-radius:50%;border:5px solid rgba(200,168,75,0.12);">
+      </div>
+      <div
+        style="position:absolute;bottom:-12mm;left:-6mm;width:36mm;height:36mm;border-radius:50%;border:7px solid rgba(255,255,255,0.04);">
+      </div>
+      <div
+        style="position:absolute;top:8mm;left:10mm;width:16mm;height:16mm;border-radius:50%;border:3px solid rgba(200,168,75,0.08);">
+      </div>
+      <!-- Línea oro superior -->
+      <div
+        style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,#c8a84b 20%,#f0d98a 50%,#c8a84b 80%,transparent);">
+      </div>
+      <!-- Caja blanca del logo -->
+      <div
+        style="background:white;border-radius:11px;padding:7px 24px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(0,0,0,0.3);margin-bottom:8px;">
+        <img src="https://via.placeholder.com/270x68?text=LOGO+EMPRESA"
+          style="max-height:52px;max-width:230px;object-fit:contain;display:block;" alt="Logo">
+      </div>
+      <!-- Subtítulo header -->
+      <p
+        style="color:rgba(255,255,255,0.4);font-size:5.5pt;letter-spacing:4.5px;text-transform:uppercase;font-weight:600;font-family:'Montserrat',sans-serif;">
+        Sistema de Capacitación AESA CL</p>
+      <!-- Línea oro inferior -->
+      <div
+        style="position:absolute;bottom:0;left:0;right:0;height:2.5px;background:linear-gradient(90deg,transparent,#c8a84b 25%,#f0d98a 50%,#c8a84b 75%,transparent);">
+      </div>
+    </div>
+
+    <!-- ═══════════════════ CUERPO PRINCIPAL ═══════════════════ -->
+    <div
+      style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 17mm;overflow:hidden;z-index:1;">
+
+      <!-- Badge tipo -->
+      <div style="margin-bottom:5mm;">
+        <div
+          style="display:inline-flex;align-items:center;gap:11px;border:1.5px solid #c8a84b;border-radius:100px;padding:5px 26px;background:linear-gradient(135deg,rgba(200,168,75,0.07),rgba(200,168,75,0.03));">
+          <span style="color:#c8a84b;font-size:10pt;line-height:1;">✦</span>
+          <span
+            style="font-size:8pt;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:#1b4d89;font-family:'Montserrat',sans-serif;">Certificado
+            de Aprobación</span>
+          <span style="color:#c8a84b;font-size:10pt;line-height:1;">✦</span>
+        </div>
+      </div>
+
+      <!-- Título del curso -->
+      <h1
+        style="font-family:'Playfair Display',Georgia,serif;font-size:26pt;font-weight:700;color:#0f2d6b;text-align:center;line-height:1.2;margin-bottom:4mm;letter-spacing:0.3px;">
+        INDUCCIÓN GENERAL NEXA
+      </h1>
+
+      <!-- Divisor diamante -->
+      <div style="display:flex;align-items:center;gap:7px;width:100%;max-width:130mm;margin-bottom:5mm;">
+        <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,#c8a84b);"></div>
+        <div style="width:9px;height:9px;background:#c8a84b;transform:rotate(45deg);flex-shrink:0;"></div>
+        <div
+          style="width:6px;height:6px;background:#fefdfb;border:1.5px solid #c8a84b;transform:rotate(45deg);flex-shrink:0;">
+        </div>
+        <div style="width:9px;height:9px;background:#c8a84b;transform:rotate(45deg);flex-shrink:0;"></div>
+        <div style="flex:1;height:1px;background:linear-gradient(90deg,#c8a84b,transparent);"></div>
+      </div>
+
+      <!-- "Se otorga" -->
+      <p
+        style="font-family:'Playfair Display',Georgia,serif;font-size:11pt;font-style:italic;color:#64748b;margin-bottom:3mm;text-align:center;">
+        Se otorga el presente certificado a:
+      </p>
+
+      <!-- Nombre del participante -->
+      <div
+        style="font-family:'Playfair Display',Georgia,serif;font-size:28pt;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:1.5px;text-align:center;margin-bottom:3mm;line-height:1.1;">
+        NUMERO 1 USUARIO
+      </div>
+
+      <!-- Cargo pill oscuro con texto dorado -->
+      <div
+        style="background:linear-gradient(135deg,#0f2d6b,#1b4d89);border-radius:100px;padding:5px 26px;margin-bottom:6mm;border:1px solid rgba(200,168,75,0.3);">
+        <span
+          style="font-size:9.5pt;font-weight:700;color:#e8d5a3;letter-spacing:2.5px;text-transform:uppercase;font-family:'Montserrat',sans-serif;">CAPACITADOR
+          SSSMA</span>
+      </div>
+
+      <!-- Descripción -->
+      <p
+        style="font-size:11pt;line-height:1.8;color:#374151;max-width:148mm;text-align:center;margin-bottom:6mm;font-weight:400;font-family:'Montserrat',sans-serif;">
+        Por haber completado satisfactoriamente el curso de entrenamiento
+        <strong style="color:#0f2d6b;font-weight:700;">INDUCCIÓN GENERAL NEXA</strong>,
+        demostrando compromiso, disciplina y excelencia académica en materia de seguridad y salud ocupacional.
+      </p>
+
+      <!-- Tarjetas de datos -->
+      <div style="width:100%;max-width:152mm;display:flex;gap:3mm;margin-bottom:5.5mm;">
+        <div
+          style="flex:1;background:linear-gradient(160deg,#f0f5ff,#e6eeff);border:1px solid #c7d7f5;border-radius:9px;padding:4mm 2mm;text-align:center;">
+          <div
+            style="font-size:7pt;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:2mm;font-family:'Montserrat',sans-serif;">
+            DNI</div>
+          <div style="font-size:12pt;font-weight:800;color:#0f2d6b;font-family:'Montserrat',sans-serif;">11111111</div>
+        </div>
+        <div
+          style="flex:1.5;background:linear-gradient(160deg,#f0f5ff,#e6eeff);border:1px solid #c7d7f5;border-radius:9px;padding:4mm 2mm;text-align:center;">
+          <div
+            style="font-size:7pt;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:2mm;font-family:'Montserrat',sans-serif;">
+            Celular</div>
+          <div style="font-size:12pt;font-weight:800;color:#0f2d6b;font-family:'Montserrat',sans-serif;">983113140</div>
+        </div>
+        <div
+          style="flex:1;background:linear-gradient(160deg,#f0f5ff,#e6eeff);border:1px solid #c7d7f5;border-radius:9px;padding:4mm 2mm;text-align:center;">
+          <div
+            style="font-size:7pt;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:2mm;font-family:'Montserrat',sans-serif;">
+            Perfil</div>
+          <div style="font-size:12pt;font-weight:800;color:#0f2d6b;font-family:'Montserrat',sans-serif;">Obrero</div>
+        </div>
+        <div
+          style="flex:1.3;background:linear-gradient(160deg,#f0f5ff,#e6eeff);border:1px solid #c7d7f5;border-radius:9px;padding:4mm 2mm;text-align:center;">
+          <div
+            style="font-size:7pt;color:#6b7280;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:2mm;font-family:'Montserrat',sans-serif;">
+            Emitido</div>
+          <div style="font-size:12pt;font-weight:800;color:#0f2d6b;font-family:'Montserrat',sans-serif;">19/05/2026
+          </div>
+        </div>
+      </div>
+
+      <!-- Sello APROBADO -->
+      <div
+        style="display:inline-flex;align-items:center;gap:11px;border:2.5px solid #16a34a;border-radius:8px;padding:6px 30px;background:rgba(22,163,74,0.04);box-shadow:0 0 0 5px rgba(22,163,74,0.06);">
+        <div style="width:10px;height:10px;background:#16a34a;border-radius:50%;flex-shrink:0;"></div>
+        <span
+          style="font-size:14pt;font-weight:900;color:#16a34a;letter-spacing:5px;font-family:'Montserrat',sans-serif;">APROBADO</span>
+        <span style="font-size:16pt;color:#16a34a;font-weight:900;line-height:1;">✓</span>
+        <div style="width:10px;height:10px;background:#16a34a;border-radius:50%;flex-shrink:0;"></div>
+      </div>
+
+    </div>
+
+    <!-- Separador dorado antes de firmas -->
+    <div
+      style="margin:4.5mm 14mm 0;height:1px;background:linear-gradient(90deg,transparent,#c8a84b 15%,#f0d98a 50%,#c8a84b 85%,transparent);flex-shrink:0;z-index:1;">
+    </div>
+
+    <!-- ═══════════════════ ZONA DE FIRMAS ═══════════════════ -->
+    <div style="padding:4mm 13mm 4.5mm;flex-shrink:0;z-index:1;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:4mm;">
+
+        <!-- Foto participante (óvalo con anillo dorado) -->
+        <div style="text-align:center;flex-shrink:0;">
+          <div style="
+          width: 84px;
+          height: 110px;
+          border-radius: 50% 50% 50% 50% / 42% 42% 58% 58%;
+          border: 2.5px solid #c8a84b;
+          overflow: hidden;
+          background: #f0f5ff;
+          margin: 0 auto 4px;
+          box-shadow: 0 0 0 5px rgba(200,168,75,0.13), 0 4px 14px rgba(0,0,0,0.18);
+        ">
+            <img src="https://via.placeholder.com/84x110?text=FOTO" style="width:100%;height:100%;object-fit:cover;">
+          </div>
+          <div
+            style="font-size:8pt;font-weight:800;color:#0f2d6b;letter-spacing:1.5px;text-transform:uppercase;font-family:'Montserrat',sans-serif;">
+            Participante</div>
+          <div style="font-size:6.5pt;color:#9ca3af;margin-top:1px;font-family:'Montserrat',sans-serif;">19/5/2026,
+            7:30:48 p. m.</div>
+        </div>
+
+        <!-- Firma participante -->
+        <div style="text-align:center;flex:1;">
+          <img src="https://via.placeholder.com/128x54?text=FIRMA+PARTICIPANTE"
+            style="max-width:128px;max-height:54px;display:block;margin:0 auto;">
+          <div style="border-top:1.5px solid #c8a84b;padding-top:5px;max-width:155px;margin:4px auto 0;">
+            <div style="font-size:9pt;font-weight:700;color:#0f2d6b;font-family:'Montserrat',sans-serif;">Firma del
+              Participante</div>
+            <div style="font-size:8.5pt;color:#374151;font-weight:600;font-family:'Montserrat',sans-serif;">NUMERO 1
+              USUARIO</div>
+          </div>
+        </div>
+
+        <!-- Firma representante -->
+        <div style="text-align:center;flex:1;">
+          <img src="https://via.placeholder.com/138x54?text=FIRMA+EMPRESA"
+            style="max-width:138px;max-height:54px;display:block;margin:0 auto;">
+          <div style="border-top:1.5px solid #c8a84b;padding-top:5px;max-width:160px;margin:4px auto 0;">
+            <div style="font-size:9pt;font-weight:700;color:#0f2d6b;font-family:'Montserrat',sans-serif;">Emitido por
+            </div>
+            <div style="font-size:10pt;font-weight:800;color:#0f172a;font-family:'Montserrat',sans-serif;">Angel Torres
+              Joaquin</div>
+            <div style="font-size:8pt;color:#6b7280;font-family:'Montserrat',sans-serif;">Capacitador SSMA JUNIOR</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════════════════ PIE DE PÁGINA ═══════════════════ -->
+    <div
+      style="background:linear-gradient(135deg,#091a3e 0%,#163060 100%);padding:5px 13mm;flex-shrink:0;display:flex;align-items:center;justify-content:center;position:relative;z-index:1;">
+      <div
+        style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#c8a84b 25%,#f0d98a 50%,#c8a84b 75%,transparent);">
+      </div>
+      <span
+        style="font-size:8pt;color:rgba(255,255,255,0.6);letter-spacing:2.5px;text-transform:uppercase;font-weight:500;font-family:'Montserrat',sans-serif;">
+        ✦ &nbsp; Documento con Validez Oficial &nbsp;·&nbsp; ID: 11111111-2026 &nbsp; ✦
+      </span>
+    </div>
+
+  </div>
+</body>
+
+</html>
