@@ -92,20 +92,15 @@ export default function Dashboard({
 
   // Passing score: 16/20 = 80%
   const PASSING_SCORE = 16;
-  const MAX_SCORE = 20;
 
-  const totalCompleted = progress.filter((p) => p.completed).length;
-  const avgScore =
-    progress.filter((p) => p.quizScore !== undefined).length > 0
-      ? parseFloat((
-        progress
-          .filter((p) => p.quizScore !== undefined)
-          .reduce((sum, p) => sum + (p.quizScore || 0), 0) /
-        progress.filter((p) => p.quizScore !== undefined).length
-      ).toFixed(1))
-      : null;
+  const totalApproved = filteredTopics.filter(t => {
+    const p = progressMap[t.id];
+    return p?.quizScore !== undefined && p.quizScore >= PASSING_SCORE;
+  }).length;
 
-  const meetsScoreThreshold = avgScore !== null && avgScore >= PASSING_SCORE;
+  const approvedPct = filteredTopics.length > 0
+    ? Math.round((totalApproved / filteredTopics.length) * 100)
+    : 0;
 
   return (
     <div className="min-h-screen safe-area-top safe-area-bottom">
@@ -157,27 +152,33 @@ export default function Dashboard({
           </div>
           <div className="glass-card rounded-2xl p-4 text-center">
             <CheckCircle className="w-5 h-5 text-emerald-400 mx-auto mb-2" />
-            <p className="text-xl font-bold text-white">{totalCompleted}</p>
-            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight">Hechos</p>
+            <p className="text-xl font-bold text-white">{totalApproved}</p>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight">Aprobados</p>
           </div>
           <div className="glass-card rounded-2xl p-4 text-center">
-            <Award className={`w-5 h-5 mx-auto mb-2 ${meetsScoreThreshold ? 'text-emerald-400' : avgScore !== null ? 'text-amber-400' : 'text-amber-400'}`} />
-            <p className={`font-bold leading-none ${meetsScoreThreshold ? 'text-emerald-400' : 'text-white'}`}>
-              <span className="text-xl">{avgScore !== null ? avgScore : '—'}</span>
-              {avgScore !== null && <span className="text-xs text-slate-500 font-bold">/{MAX_SCORE}</span>}
+            <Award className={`w-5 h-5 mx-auto mb-2 ${approvedPct === 100 ? 'text-emerald-400' : approvedPct > 0 ? 'text-amber-400' : 'text-slate-500'}`} />
+            <p className={`text-xl font-bold leading-none ${approvedPct === 100 ? 'text-emerald-400' : approvedPct > 0 ? 'text-amber-400' : 'text-white'}`}>
+              {approvedPct}%
             </p>
-            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight mt-1">Calificación</p>
-            <p className="text-[9px] text-slate-500 font-bold tracking-widest mt-0.5">MÍN. {PASSING_SCORE}/20</p>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-tight mt-1">Aprobados</p>
+            <p className="text-[9px] text-slate-500 font-bold tracking-widest mt-0.5">{totalApproved}/{filteredTopics.length}</p>
           </div>
         </motion.div>
 
 
         {/* Section title */}
-        <div className="flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-blue-400" />
-          <h2 className="text-sm font-bold text-slate-300 uppercase tracking-widest">
-            Tus cursos programados
-          </h2>
+        <div>
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-blue-400" />
+            <h2 className="text-sm font-bold text-slate-300 uppercase tracking-widest">
+              Tus cursos programados
+            </h2>
+          </div>
+          {userSession && (
+            <p className="text-xs font-semibold text-slate-400 mt-1 ml-6">
+              {userSession.nombres} {userSession.apellidos}
+            </p>
+          )}
         </div>
 
         {/* Course list - Grid responsivo adaptado para Desktop ampliado */}

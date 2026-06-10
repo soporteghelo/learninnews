@@ -27,6 +27,8 @@ import type {
 
 // Regular imports for immediate load
 import LoginScreen from './components/LoginScreen';
+import ProfileForm from './components/ProfileForm';
+import type { ProfileFormData } from './components/ProfileForm';
 import Onboarding from './components/Onboarding';
 import Dashboard from './components/Dashboard';
 import CourseDetail from './components/CourseDetail';
@@ -77,6 +79,31 @@ function driveEmbedUrl(url: string, _type: 'video' | 'pdf'): string {
   }
   
   return '';
+}
+
+/** Elimina quizSavedProgress y otros campos pesados antes de guardar en Sheets */
+function slimProgress(prog: UserProgress[]): UserProgress[] {
+  return prog.map(({ topicId, completed, currentChunk, quizScore, lastAccessed }) => ({
+    topicId, completed, currentChunk, quizScore, lastAccessed,
+  }));
+}
+
+/** Clave localStorage de progreso persistente por DNI (sobrevive logout) */
+function dniProgressKey(dni: string): string {
+  return `learndrive_progress_dni_${dni}`;
+}
+
+/** Merge de dos arrays de progreso: por topicId gana el más reciente (lastAccessed) */
+function mergeProgress(a: UserProgress[], b: UserProgress[]): UserProgress[] {
+  const map = new Map<string, UserProgress>();
+  for (const p of a) map.set(p.topicId, p);
+  for (const p of b) {
+    const existing = map.get(p.topicId);
+    if (!existing || (p.lastAccessed ?? 0) > (existing.lastAccessed ?? 0)) {
+      map.set(p.topicId, p);
+    }
+  }
+  return Array.from(map.values());
 }
 
 /** Convierte audience de formato legacy (string) o nuevo (array) al array tipado */
@@ -164,6 +191,14 @@ export default function App() {
             localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(migrated));
           }
           setProgress(migrated);
+          // Backup al caché DNI-específico para que sobreviva al logout
+          try {
+            const sessionRaw = localStorage.getItem(getStorageKey(APP_CONFIG.storage.keys.session));
+            if (sessionRaw) {
+              const { dni } = JSON.parse(sessionRaw);
+              if (dni) localStorage.setItem(dniProgressKey(dni), JSON.stringify(slimProgress(migrated)));
+            }
+          } catch { /* ignore */ }
         } catch {
           localStorage.removeItem(getStorageKey(APP_CONFIG.storage.keys.progress));
         }
@@ -273,44 +308,68 @@ export default function App() {
           audience: restoredAudience,
           inicio: existingRecord.inicio || new Date().toISOString(),
           certificadoUrls: Object.keys(liveUrls).length > 0 ? liveUrls : undefined,
+          // Restore profile fields if already saved
+          empresa: existingRecord.empresa || undefined,
+          area: existingRecord.area || undefined,
+          cargo: existingRecord.cargo || undefined,
+          celular: existingRecord.celular || undefined,
+          correo: existingRecord.correo || undefined,
+          fechaIngreso: existingRecord.fechaIngreso || undefined,
+          fechaNacimiento: existingRecord.fechaNacimiento || undefined,
+          contacto1Numero: existingRecord.contacto1Numero || undefined,
+          contacto1Parentesco: existingRecord.contacto1Parentesco || undefined,
+          contacto2Numero: existingRecord.contacto2Numero || undefined,
+          contacto2Parentesco: existingRecord.contacto2Parentesco || undefined,
+          profileComplete: !!(existingRecord.area),
         };
         setUserSession(session);
         localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(session));
 
-        // Restore progress if exists — migrate legacy % scores (>20) to /20 scale
-        if (existingRecord.progressJson) {
-          try {
-            const raw: UserProgress[] = JSON.parse(existingRecord.progressJson);
-            const restoredProgress = raw.map(p => ({
-              ...p,
-              quizScore: p.quizScore !== undefined && p.quizScore > 20
-                ? parseFloat(((p.quizScore / 100) * 20).toFixed(1))
-                : p.quizScore,
-            }));
-            setProgress(restoredProgress);
-            localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(restoredProgress));
-          } catch { /* ignore parse errors */ }
-        }
+        // Restore progress: merge Sheets data with local DNI cache (handles stale CSV)
+        try {
+          const migrateScores = (arr: UserProgress[]) => arr.map(p => ({
+            ...p,
+            quizScore: p.quizScore !== undefined && p.quizScore > 20
+              ? parseFloat(((p.quizScore / 100) * 20).toFixed(1))
+              : p.quizScore,
+          }));
+          const sheetsProgress: UserProgress[] = existingRecord.progressJson
+            ? migrateScores(JSON.parse(existingRecord.progressJson))
+            : [];
+          const localRaw = localStorage.getItem(dniProgressKey(dni));
+          const localProgress: UserProgress[] = localRaw
+            ? migrateScores(JSON.parse(localRaw))
+            : [];
+          const merged = mergeProgress(sheetsProgress, localProgress);
+          if (merged.length > 0) {
+            setProgress(merged);
+            localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(merged));
+            localStorage.setItem(dniProgressKey(dni), JSON.stringify(merged));
+          }
+        } catch { /* ignore parse errors */ }
 
-        if (restoredAudience.length > 0) {
+        // If profile not yet filled, show ProfileForm first
+        if (!existingRecord.area) {
+          setView('profileForm');
+        } else if (restoredAudience.length > 0) {
           setAudience(restoredAudience);
           setView('dashboard');
         } else {
           setView('onboarding');
         }
       } else {
-        // New user — register immediately in Sheets
+        // New user — create session and show ProfileForm (registration happens after form)
         const session: UserSession = {
           dni,
           apellidos,
           nombres,
           audience: [],
           inicio: new Date().toISOString(),
+          profileComplete: false,
         };
         setUserSession(session);
         localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(session));
-        registerIngreso({ dni, apellidos, nombres, publico: '' }).catch(console.error);
-        setView('onboarding');
+        setView('profileForm');
       }
     } catch (err) {
       console.error('Login error:', err);
@@ -329,6 +388,29 @@ export default function App() {
     }
   };
 
+  const handleProfileComplete = (data: ProfileFormData) => {
+    if (!userSession) return;
+    const updatedSession: UserSession = {
+      ...userSession,
+      empresa: data.empresa,
+      area: data.area,
+      cargo: data.cargo,
+      fechaIngreso: data.fechaIngreso,
+      fechaNacimiento: data.fechaNacimiento,
+      correo: data.correo,
+      celular: data.celular,
+      contacto1Numero: data.contacto1Numero,
+      contacto1Parentesco: data.contacto1Parentesco,
+      contacto2Numero: data.contacto2Numero || undefined,
+      contacto2Parentesco: data.contacto2Parentesco || undefined,
+      profileComplete: true,
+    };
+    setUserSession(updatedSession);
+    localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(updatedSession));
+    // No registramos en Sheets todavía — se guarda cuando confirme su perfil de audiencia
+    setView('onboarding');
+  };
+
   const handleSelectAudience = async (types: AudienceType[]) => {
     setAudience(types);
     if (userSession) {
@@ -340,6 +422,17 @@ export default function App() {
         apellidos: userSession.apellidos,
         nombres: userSession.nombres,
         publico: types.join(', '),
+        empresa: userSession.empresa,
+        area: userSession.area,
+        cargo: userSession.cargo,
+        fechaIngreso: userSession.fechaIngreso,
+        fechaNacimiento: userSession.fechaNacimiento,
+        correo: userSession.correo,
+        celular: userSession.celular,
+        contacto1Numero: userSession.contacto1Numero,
+        contacto1Parentesco: userSession.contacto1Parentesco,
+        contacto2Numero: userSession.contacto2Numero,
+        contacto2Parentesco: userSession.contacto2Parentesco,
       }).catch(console.error);
     }
     setView('dashboard');
@@ -354,6 +447,10 @@ export default function App() {
 
   const handleLogout = () => {
     if (window.confirm('¿Estás seguro de que quieres cerrar sesión?')) {
+      // Guardar snapshot del progreso actual antes de borrar, para restaurar al re-login
+      if (userSession?.dni && progress.length > 0) {
+        localStorage.setItem(dniProgressKey(userSession.dni), JSON.stringify(slimProgress(progress)));
+      }
       setUserSession(null);
       setAudience(null);
       setProgress([]);
@@ -378,6 +475,7 @@ export default function App() {
         newProg.push({ topicId, completed: false, currentChunk: chunkIndex, lastAccessed: Date.now() });
       }
       localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(newProg));
+      if (userSession?.dni) localStorage.setItem(dniProgressKey(userSession.dni), JSON.stringify(newProg));
 
       // Sync progress snapshot to sheet periodically (every 3 chunks)
       if (userSession && chunkIndex % 3 === 0) {
@@ -389,7 +487,7 @@ export default function App() {
           avance: `${avancePct}%`,
           nota: '',
           modulosCompletados: completedCount,
-          progress: newProg,
+          progress: slimProgress(newProg),
         }).catch(console.error);
       }
 
@@ -407,10 +505,29 @@ export default function App() {
         newProg.push({ topicId, completed: true, currentChunk: 0, lastAccessed: Date.now() });
       }
       localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(newProg));
+      if (userSession?.dni) localStorage.setItem(dniProgressKey(userSession.dni), JSON.stringify(newProg));
+
+      // Sync completed status to Sheets so other devices see it
+      if (userSession) {
+        const completedCount = newProg.filter(p => p.completed).length;
+        const totalTopics = topics.filter(t => t.active !== false).length;
+        const avancePct = totalTopics > 0 ? Math.round((completedCount / totalTopics) * 100) : 0;
+        const quizScores = newProg.filter(p => p.quizScore !== undefined).map(p => p.quizScore!);
+        const avgNotaOutOf20 = quizScores.length > 0 ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : 0;
+        const avgNotaPct = Math.round((avgNotaOutOf20 / 20) * 100);
+        updateIngresoProgress({
+          dni: userSession.dni,
+          avance: `${avancePct}%`,
+          nota: `${avgNotaPct}%`,
+          modulosCompletados: completedCount,
+          progress: slimProgress(newProg),
+        }).catch(console.error);
+      }
+
       return newProg;
     });
     setView('courseDetail');
-  }, []);
+  }, [userSession, topics]);
 
   const handleQuizComplete = useCallback((topicId: string, score: number) => {
     setProgress(prev => {
@@ -422,6 +539,7 @@ export default function App() {
         newProg.push({ topicId, completed: false, quizScore: score, lastAccessed: Date.now() });
       }
       localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(newProg));
+      if (userSession?.dni) localStorage.setItem(dniProgressKey(userSession.dni), JSON.stringify(newProg));
 
       // Sync to INGRESOS sheet
       if (userSession) {
@@ -445,7 +563,7 @@ export default function App() {
           nota: `${avgNotaPct}%`,
           modulosCompletados: completedTopics,
           intentosQuiz: totalQuizAttempts,
-          progress: newProg,
+          progress: slimProgress(newProg),
         }).catch(console.error);
       }
 
@@ -512,8 +630,8 @@ export default function App() {
 
   return (
     <div className={`min-h-screen text-slate-200 selection:bg-blue-500/30 selection:text-blue-200 ${darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
-      {/* Top-right floating buttons — hidden in admin view (admin has its own header) */}
-      {view !== 'admin' && view !== 'learning' && (
+      {/* Top-right floating buttons — hidden in views that have their own header */}
+      {view !== 'admin' && view !== 'learning' && view !== 'quiz' && view !== 'certificateClaim' && (
         <div className="fixed top-4 right-4 z-[200] flex items-center gap-2">
           {userSession && (view === 'dashboard' || view === 'courseDetail') && (
             <button
@@ -559,6 +677,15 @@ export default function App() {
               onLogin={handleLogin} 
               isRegistering={isRegistering} 
               globalKnownUsers={globalKnownUsers} 
+            />
+          </motion.div>
+        )}
+
+        {view === 'profileForm' && userSession && (
+          <motion.div key="profileForm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <ProfileForm
+              userSession={userSession}
+              onComplete={handleProfileComplete}
             />
           </motion.div>
         )}
@@ -706,18 +833,43 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.4, ease: "easeInOut" }}
-              className="fixed inset-0 bg-black flex flex-col sm:items-center sm:justify-center sm:p-8"
+              className="fixed inset-0 bg-black flex flex-col"
               style={{ zIndex: 99999 }}
             >
-              {/* Video wrapper */}
-              <div className="flex-1 sm:flex-none w-full sm:max-w-5xl">
+              {/* Header buttons — always visible at top, full width */}
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="shrink-0 flex items-center justify-between gap-3 px-5 pt-6 pb-3 sm:px-10 sm:pt-7"
+              >
+                <button
+                  onClick={() => setMediaOverlay(null)}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/5 border border-white/10 text-white/70 text-xs font-bold hover:bg-white hover:text-slate-950 hover:scale-105 active:scale-95 transition-all group"
+                >
+                  <X className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
+                  SALIR
+                </button>
+                {driveViewUrl && (
+                  <a
+                    href={driveViewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-blue-600/20 border border-blue-500/40 text-blue-300 text-xs font-bold hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    ABRIR EN GOOGLE DRIVE
+                  </a>
+                )}
+              </motion.div>
+
+              {/* Media — fills all remaining height, never overflows */}
+              <div className="flex-1 min-h-0 px-0 pb-0 sm:px-10 sm:pb-8">
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.1, duration: 0.4 }}
-                  className={`relative h-full sm:h-auto w-full bg-slate-900 overflow-hidden sm:rounded-2xl sm:shadow-[0_0_80px_rgba(59,130,246,0.15)] sm:border sm:border-white/5 sm:ring-1 sm:ring-white/10 ${
-                    mediaOverlay.type === 'video' ? 'sm:aspect-video' : 'sm:aspect-[3/4]'
-                  }`}
+                  className="relative h-full w-full bg-slate-900 overflow-hidden sm:rounded-2xl sm:shadow-[0_0_80px_rgba(59,130,246,0.15)] sm:border sm:border-white/5 sm:ring-1 sm:ring-white/10"
                 >
                   {embedUrl ? (
                     <iframe
@@ -734,49 +886,8 @@ export default function App() {
                       <p className="text-slate-400 max-w-sm text-sm">El enlace no corresponde a un archivo de Google Drive válido.</p>
                     </div>
                   )}
-
-                  {/* Botón "Abrir en Drive" flotante — siempre visible */}
-                  {driveViewUrl && (
-                    <a
-                      href={driveViewUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="absolute top-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur border border-white/20 text-white text-[11px] font-bold hover:bg-blue-600 hover:border-blue-500 transition-all z-10"
-                      title="Abrir en Google Drive"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      Abrir en Drive
-                    </a>
-                  )}
                 </motion.div>
               </div>
-
-              {/* Footer buttons */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.5 }}
-                className="shrink-0 mt-4 sm:mt-8 flex items-center gap-3"
-              >
-                {driveViewUrl && (
-                  <a
-                    href={driveViewUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-blue-600/20 border border-blue-500/40 text-blue-300 text-xs font-bold hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    ABRIR EN GOOGLE DRIVE
-                  </a>
-                )}
-                <button
-                  onClick={() => setMediaOverlay(null)}
-                  className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-white/5 border border-white/10 text-white/50 text-xs font-bold hover:bg-white hover:text-slate-950 hover:scale-105 active:scale-95 transition-all group"
-                >
-                  <X className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
-                  SALIR
-                </button>
-              </motion.div>
             </motion.div>
           );
         })()}

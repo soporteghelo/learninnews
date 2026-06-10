@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import ReactMarkdown from 'react-markdown';
+import RichContent from './RichContent';
 import * as XLSX from 'xlsx';
 import {
   ChevronLeft, ChevronRight, Save, Trash2, Edit3,
@@ -96,7 +96,7 @@ export default function AdminPanel({
 
   // Markdown full-screen preview / editor
   const [previewChunkId, setPreviewChunkId] = useState<string | null>(null);
-  const [previewMode, setPreviewMode] = useState<'preview' | 'edit'>('preview');
+  const [previewMode, setPreviewMode] = useState<'preview' | 'edit' | 'blocks'>('preview');
   const [previewLocalContent, setPreviewLocalContent] = useState('');
   const [previewDirty, setPreviewDirty] = useState(false);
   const [previewSaving, setPreviewSaving] = useState(false);
@@ -110,7 +110,38 @@ export default function AdminPanel({
     setPreviewDirty(false);
   };
 
-  const switchPreviewMode = (newMode: 'preview' | 'edit') => {
+  // Split content into deletable blocks (by --- separator or blank lines before headings/HTML)
+  const splitIntoBlocks = (content: string): string[] => {
+    // Primary split: explicit --- separators
+    const bySeparator = content.split(/\n---+\n/);
+    if (bySeparator.length > 1) return bySeparator.map(b => b.trim()).filter(Boolean);
+    // Fallback: split before each top-level HTML block tag or Markdown heading
+    const lines = content.split('\n');
+    const blocks: string[] = [];
+    let current: string[] = [];
+    for (const line of lines) {
+      const isBlockStart = /^#{1,3}\s/.test(line) || /^<(details|div|section|table|h[1-6]|p)\b/i.test(line);
+      if (isBlockStart && current.join('').trim()) {
+        blocks.push(current.join('\n').trim());
+        current = [line];
+      } else {
+        current.push(line);
+      }
+    }
+    if (current.join('').trim()) blocks.push(current.join('\n').trim());
+    return blocks.filter(Boolean);
+  };
+
+  const deleteBlock = (blockIndex: number) => {
+    const blocks = splitIntoBlocks(previewLocalContent);
+    blocks.splice(blockIndex, 1);
+    const newContent = blocks.join('\n\n---\n\n');
+    setPreviewLocalContent(newContent);
+    setPreviewDirty(true);
+    if (previewChunkId) handleUpdateContent(previewChunkId, { contenido: newContent });
+  };
+
+  const switchPreviewMode = (newMode: 'preview' | 'edit' | 'blocks') => {
     if (previewMode === newMode) return;
     let pct = 0;
     if (previewMode === 'preview' && mdPreviewScrollRef.current) {
@@ -337,35 +368,132 @@ ${text}`;
         throw new Error('No se pudo extraer texto suficiente del PDF.');
       }
 
-      const promptTemplate = `Redacta el siguiente contenido con un estilo claro, fluido y agradable de leer, como si formara parte de un manual corporativo moderno. Evita un tono robótico o excesivamente técnico; el texto debe sentirse natural, profesional y fácil de comprender. Mantén toda la información original, sin omitir detalles. Mejora la redacción, la coherencia y la conexión entre ideas para lograr una lectura más armoniosa.
+      const promptTemplate = `Actúa como un editor experto en documentación corporativa, capacitación empresarial y diseño de contenido interactivo.
 
-Formato de salida (OBLIGATORIO) Devuelve TODO el contenido dentro de un bloque de código usando triple backticks (\`\`\`), para que el Markdown no se renderice y se puedan ver explícitamente los símbolos como #, ## y ###.
+Tu tarea es reescribir y estructurar el contenido que te proporcionaré para que sea más claro, profesional, atractivo y fácil de comprender, manteniendo absolutamente toda la información original, debe sonar amigable.
 
-NO renderices el Markdown. Debe verse como texto plano.
+OBJETIVO
 
-Estructura requerida
-Usa # para el título principal
-Usa ## para subtítulos
-Usa ### para subsecciones
-Desarrolla el contenido en párrafos claros
-Usa listas con - solo cuando aporten claridad
+- Mejorar la redacción, gramática, fluidez y coherencia.
+- Mantener intacto el significado del contenido.
+- No omitir información.
+- No agregar información que no exista en el texto original.
+- Organizar las ideas con una estructura visual moderna y fácil de leer.
+- Que suene amigable y fácil de digerir, sin perder profesionalismo.
 
-Formato de texto
-Usa negritas para conceptos clave
-Usa cursivas para énfasis
-Mantén buena jerarquía visual
-Evita bloques de texto largos
+PASO OBLIGATORIO ANTES DE GENERAR EL RESULTADO
 
-Tono y estilo
-Profesional pero cercano
-Explicativo y natural
-Adecuado para capacitación corporativa
+Antes de procesar el contenido, debes preguntarme exactamente:
 
-Restricciones
-No omitir información
-No agregar contenido nuevo
-No incluir explicaciones fuera del resultado
-No usar ningún formato fuera del bloque de código
+"¿Deseas recibir el resultado en Markdown interactivo o en HTML interactivo?"
+"Resumido o igual que el original?"
+
+No generes el contenido hasta que responda.
+
+OPCIÓN 1: MARKDOWN INTERACTIVO
+
+Si elijo Markdown:
+
+- Entrega TODO el contenido dentro de un único bloque de código usando triple backticks (\`\`\`).
+- El Markdown NO debe renderizarse.
+- Debe visualizarse como texto plano mostrando explícitamente símbolos como:
+  - #
+  - ##
+  - ###
+  - >
+  - -
+  - **
+
+La estructura debe incluir, cuando corresponda:
+
+# Título principal
+Descripcion breve del contenido y su propósito.
+
+## Subtítulos
+
+### Subsecciones
+
+- Listas con viñetas
+- Listas numeradas
+- Tablas en formato Markdown
+- Bloques de notas
+- Bloques de observaciones
+- Comentarios explicativos
+- Ejemplos
+- Advertencias
+- Recomendaciones
+- Resúmenes parciales
+- Elementos visuales en texto que mejoren la comprensión
+
+El contenido debe verse dinámico y organizado, evitando grandes bloques de texto.
+
+
+OPCIÓN 2: HTML INTERACTIVO
+
+Si elijo HTML:
+
+Genera un documento HTML completo e independiente.
+
+Debe incluir:
+
+- HTML5 válido
+- CSS integrado
+- Diseño moderno y profesional
+- Responsive para móviles y escritorio
+- Tipografía agradable
+- Tarjetas visuales
+- Secciones colapsables (acordeones)
+- Pestañas cuando sea útil
+- Tablas estilizadas
+- Cuadros informativos
+- Cuadros de advertencia
+- Cuadros de recomendaciones
+- Iconografía mediante emojis o caracteres Unicode
+- Colores corporativos elegantes
+- Sombras suaves y bordes modernos
+- Navegación visual clara
+- Comentarios explicativos dentro del código HTML
+- Elementos interactivos que no requieran librerías externas
+
+Si el contenido lo permite, también puedes incorporar:
+
+- Descripcion breve del contenido y su propósito.
+- Diagramas simples con HTML/CSS
+- Líneas de tiempo
+- Tarjetas de proceso
+- Flujos visuales
+- Indicadores de estado
+- Barras de progreso
+- Comparativas visuales
+
+ESTILO DE REDACCIÓN
+
+- Profesional y amigable.
+- Cercano y fácil de entender.
+- Natural y humano.
+- Explicativo sin ser excesivamente técnico.
+- Orientado al aprendizaje y la capacitación.
+
+FORMATO DEL TEXTO
+
+- Usar negritas para conceptos importantes.
+- Usar cursivas para enfatizar ideas relevantes.
+- Mantener una jerarquía visual clara.
+- Utilizar párrafos breves.
+- Favorecer la lectura rápida.
+- Mejorar las transiciones entre ideas.
+
+RESTRICCIONES
+
+- Usa transiciones y/o efectos de modo que quede el aprendizaje en el lector.
+- No omitir información.
+- No inventar información.
+- No agregar conclusiones no presentes en el texto original.
+- No explicar lo que hiciste.
+- No incluir texto fuera del formato solicitado.
+- Esperar siempre mi elección entre Markdown interactivo y HTML interactivo antes de generar el resultado.
+- No agregues un header principal al inicio, de frente al contenido.
+- Si el codigo html es muy extenso, damelo por partes, de modo que lo que al pegar la parte 1 de tu código, le hago un enter y pego la parte 3 y asi sucesivamente, hasta completar el html, y no se rompa el codigo.
 
 CONTENIDO:
 ${text}`;
@@ -1454,7 +1582,7 @@ ${text}`;
                                 </div>
                                 <div>
                                   <div className="flex items-center justify-between mb-2">
-                                    <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em]">Contenido (Markdown)</label>
+                                    <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em]">Contenido (Markdown / HTML)</label>
                                     <button
                                       type="button"
                                       onClick={() => openPreview(c.cod, c.contenido)}
@@ -1468,6 +1596,7 @@ ${text}`;
                                     onChange={e => handleUpdateContent(c.cod, { contenido: e.target.value })}
                                     className="w-full bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm text-[#191c1d] font-mono min-h-[260px] resize-y placeholder-[#737781] focus:border-[#1b4d89] focus:ring-2 focus:ring-[#1b4d89]/10 outline-none transition-all"
                                     rows={11}
+                                    placeholder="Escribe contenido en Markdown o HTML. Ambos se renderizan."
                                   />
                                 </div>
                                 <div className="flex gap-4">
@@ -1995,7 +2124,7 @@ ${text}`;
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
           onClick={activeTab === 'content' ? handleAddContentManual : activeTab === 'quiz' ? handleAddQuizManual : handleAddTopicManual}
-          className={`fixed bottom-24 sm:bottom-8 right-6 sm:right-8 w-16 h-16 rounded-full shadow-[0_8px_24px_rgba(0,27,60,0.2)] flex items-center justify-center transition-all z-50 hover:shadow-[0_12px_32px_rgba(0,27,60,0.3)] ${
+          className={`fixed bottom-24 right-6 w-16 h-16 rounded-full shadow-[0_8px_24px_rgba(0,27,60,0.2)] flex items-center justify-center transition-all z-50 hover:shadow-[0_12px_32px_rgba(0,27,60,0.3)] ${
             activeTab === 'topics' ? 'bg-gradient-to-r from-[#582a00] to-[#8c4a00]' :
             activeTab === 'content' ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89]' :
             'bg-gradient-to-r from-[#006d36] to-[#005227]'
@@ -2111,18 +2240,25 @@ ${text}`;
                   >
                     <Edit3 className="w-3 h-3" /> Editar
                   </button>
+                  <button
+                    onClick={() => switchPreviewMode('blocks')}
+                    className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all ${previewMode === 'blocks' ? 'bg-white shadow-sm text-red-600' : 'text-[#737781] hover:text-[#424750]'}`}
+                  >
+                    <Trash2 className="w-3 h-3" /> Bloques
+                  </button>
                 </div>
               </div>
 
-              {/* Content area */}
-              {previewMode === 'preview' ? (
+              {/* Content area — fixed height via absolute panels to prevent resize on tab switch */}
+              <div className="flex-1 relative overflow-hidden">
+                {/* Ver (preview) panel */}
                 <div
                   ref={mdPreviewScrollRef}
-                  className="flex-1 overflow-y-auto px-5 py-6 bg-white"
+                  className={`absolute inset-0 overflow-y-auto px-5 py-6 bg-white${previewMode === 'preview' ? '' : ' hidden'}`}
                 >
                   {previewLocalContent ? (
-                    <div className="markdown-content markdown-preview prose prose-sm max-w-none">
-                      <ReactMarkdown>{previewLocalContent}</ReactMarkdown>
+                    <div className="rich-content-light prose prose-sm max-w-none">
+                      <RichContent content={previewLocalContent} className="rich-content-light" />
                     </div>
                   ) : (
                     <div className="flex items-center justify-center h-40 text-[#737781] text-sm">
@@ -2130,22 +2266,58 @@ ${text}`;
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="flex-1 flex flex-col bg-white">
-                  <textarea
-                    ref={mdEditScrollRef}
-                    value={previewLocalContent}
-                    onChange={e => {
-                      setPreviewLocalContent(e.target.value);
-                      setPreviewDirty(true);
-                      handleUpdateContent(previewChunkId, { contenido: e.target.value });
-                    }}
-                    className="w-full flex-1 p-5 text-sm text-[#1e293b] font-mono resize-none focus:outline-none border-0 overflow-y-auto"
-                    placeholder="Escribe el contenido en Markdown..."
-                    autoFocus
-                  />
+
+                {/* Editar panel */}
+                <textarea
+                  ref={mdEditScrollRef}
+                  value={previewLocalContent}
+                  onChange={e => {
+                    setPreviewLocalContent(e.target.value);
+                    setPreviewDirty(true);
+                    handleUpdateContent(previewChunkId, { contenido: e.target.value });
+                  }}
+                  className={`absolute inset-0 p-5 text-sm text-[#1e293b] font-mono resize-none focus:outline-none border-0 overflow-y-auto${previewMode === 'edit' ? '' : ' hidden'}`}
+                  placeholder="Escribe el contenido en Markdown o HTML (ambos se renderizan). Ejemplo: ## Título o <img src='...' />"
+                />
+
+                {/* Bloques panel */}
+                <div className={`absolute inset-0 overflow-y-auto px-4 py-4 bg-[#fafafa]${previewMode === 'blocks' ? '' : ' hidden'}`}>
+                  {(() => {
+                    const blocks = splitIntoBlocks(previewLocalContent);
+                    if (blocks.length === 0) {
+                      return (
+                        <div className="flex items-center justify-center h-40 text-[#737781] text-sm text-center px-8">
+                          Sin bloques. Separa secciones con{' '}
+                          <code className="mx-1 px-1 bg-[#f0f1f2] rounded text-xs">---</code>
+                          {' '}o usa encabezados (##).
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="space-y-4">
+                        {blocks.map((block, i) => (
+                          <div key={i} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden shadow-sm">
+                            <div className="px-4 py-2 border-b border-[#f0f1f2] flex items-center justify-between bg-[#f8f9fa]">
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-[#737781]">Bloque {i + 1}</span>
+                              <button
+                                onClick={() => {
+                                  if (window.confirm(`¿Eliminar bloque ${i + 1}? Esta acción no se puede deshacer.`)) deleteBlock(i);
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-red-600 bg-red-50 rounded-lg hover:bg-red-100 active:scale-95 transition-all"
+                              >
+                                <Trash2 className="w-3 h-3" /> Eliminar
+                              </button>
+                            </div>
+                            <div className="px-4 py-3">
+                              <RichContent content={block} className="rich-content-light" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
-              )}
+              </div>
 
               {/* Footer save */}
               <div className="px-4 py-4 border-t border-[#e1e3e4] bg-white">
@@ -2173,7 +2345,7 @@ ${text}`;
         target="_blank"
         rel="noopener noreferrer"
         title="Abrir Google Sheets"
-        className="fixed bottom-6 right-4 z-[150] flex items-center justify-center w-12 h-12 rounded-2xl bg-[#1b4d89] text-white shadow-lg shadow-[#1b4d89]/40 hover:bg-[#163d70] hover:scale-110 active:scale-95 transition-all"
+        className="fixed bottom-6 right-6 z-[150] flex items-center justify-center w-12 h-12 rounded-full bg-[#1b4d89] text-white shadow-lg shadow-[#1b4d89]/40 hover:bg-[#163d70] hover:scale-110 active:scale-95 transition-all"
       >
         <FileSpreadsheet className="w-5 h-5" />
       </a>

@@ -626,6 +626,18 @@ export interface IngresoRecord {
   tiempoTotal: string;
   progressJson: string;
   certificadoUrl?: string;
+  // Extended profile fields
+  empresa?: string;
+  area?: string;
+  cargo?: string;
+  fechaIngreso?: string;
+  fechaNacimiento?: string;
+  correo?: string;
+  celular?: string;
+  contacto1Numero?: string;
+  contacto1Parentesco?: string;
+  contacto2Numero?: string;
+  contacto2Parentesco?: string;
 }
 
 export async function fetchCertificateLinkByDni(dni: string): Promise<Record<string, string>> {
@@ -672,9 +684,23 @@ export async function fetchIngresoByDni(dni: string): Promise<IngresoRecord | nu
       Papa.parse(csvText, {
         header: true,
         complete: (results) => {
-          const match = results.data.find((row: any) => String(row.DNI || row.Id || '').trim() === String(dni).trim());
-          if (!match) { resolve(null); return; }
-          const row = match as any;
+          // Collect ALL rows matching this DNI
+          const matches = (results.data as any[]).filter(
+            (r: any) => String(r.DNI || r.Id || '').trim() === String(dni).trim()
+          );
+          if (!matches.length) { resolve(null); return; }
+
+          // Pick the best row: prefer the one with ProgressJSON, then most recent UltimoAcceso
+          const best = matches.reduce((prev: any, curr: any) => {
+            const prevHasProgress = !!(prev.ProgressJSON || '').trim();
+            const currHasProgress = !!(curr.ProgressJSON || '').trim();
+            if (currHasProgress && !prevHasProgress) return curr;
+            if (prevHasProgress && !currHasProgress) return prev;
+            // Both have (or both lack) progress — prefer most recent UltimoAcceso
+            return (curr.UltimoAcceso || '') > (prev.UltimoAcceso || '') ? curr : prev;
+          });
+
+          const row = best;
           resolve({
             id: row.Id || '',
             apellidos: row.Apellidos || '',
@@ -691,6 +717,18 @@ export async function fetchIngresoByDni(dni: string): Promise<IngresoRecord | nu
             tiempoTotal: row.TiempoTotal || '',
             progressJson: row.ProgressJSON || '',
             certificadoUrl: row.CertificadoUrl || '',
+            // Extended profile fields
+            empresa: row.EMPRESA || '',
+            area: row.AREA || '',
+            cargo: row.CARGO || row.Cargo || '',
+            fechaIngreso: row.FECHA_INGRESO || '',
+            fechaNacimiento: row.FECHA_NACIMIENTO || '',
+            correo: row.CORREO || '',
+            celular: row.CELULAR || '',
+            contacto1Numero: row.NUMERO_CONTACTO_1 || '',
+            contacto1Parentesco: row.PARENTESCO_CONTACTO_1 || '',
+            contacto2Numero: row.NUMERO_CONTACTO_2 || '',
+            contacto2Parentesco: row.PARENTESCO_CONTACTO_2 || '',
           });
         },
         error: () => resolve(null),
@@ -715,6 +753,18 @@ export async function registerIngreso(data: {
   apellidos: string;
   nombres: string;
   publico: string;
+  // Extended profile fields
+  empresa?: string;
+  area?: string;
+  cargo?: string;
+  fechaIngreso?: string;
+  fechaNacimiento?: string;
+  correo?: string;
+  celular?: string;
+  contacto1Numero?: string;
+  contacto1Parentesco?: string;
+  contacto2Numero?: string;
+  contacto2Parentesco?: string;
 }): Promise<{ success: boolean; message: string }> {
   try {
     const result = await postToAppsScript({
@@ -734,6 +784,18 @@ export async function registerIngreso(data: {
         IntentosQuiz: '0',
         TiempoTotal: '0 min',
         ProgressJSON: '[]',
+        // Profile fields — only sent when provided so existing row values are preserved
+        ...(data.empresa !== undefined   && { EMPRESA: data.empresa }),
+        ...(data.area !== undefined      && { AREA: data.area }),
+        ...(data.cargo !== undefined     && { CARGO: data.cargo }),
+        ...(data.fechaIngreso !== undefined   && { FECHA_INGRESO: data.fechaIngreso }),
+        ...(data.fechaNacimiento !== undefined && { FECHA_NACIMIENTO: data.fechaNacimiento }),
+        ...(data.correo !== undefined    && { CORREO: data.correo }),
+        ...(data.celular !== undefined   && { CELULAR: data.celular }),
+        ...(data.contacto1Numero !== undefined     && { NUMERO_CONTACTO_1: data.contacto1Numero }),
+        ...(data.contacto1Parentesco !== undefined && { PARENTESCO_CONTACTO_1: data.contacto1Parentesco }),
+        ...(data.contacto2Numero !== undefined     && { NUMERO_CONTACTO_2: data.contacto2Numero }),
+        ...(data.contacto2Parentesco !== undefined && { PARENTESCO_CONTACTO_2: data.contacto2Parentesco }),
       },
     });
     return {

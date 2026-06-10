@@ -20,8 +20,20 @@ export interface UserSession {
   audience: AudienceType[];
   inicio: string; // ISO date
   certificadoUrls?: Record<string, string>; // topicId → Drive URL (one per approved course)
+  // Basic fields (also used in certificate)
   cargo?: string;
   celular?: string;
+  // Extended profile fields (collected in ProfileForm)
+  empresa?: string;
+  area?: string;
+  fechaIngreso?: string;        // DD/MM/YYYY
+  fechaNacimiento?: string;     // DD/MM/YYYY
+  correo?: string;
+  contacto1Numero?: string;
+  contacto1Parentesco?: string;
+  contacto2Numero?: string;
+  contacto2Parentesco?: string;
+  profileComplete?: boolean;    // true once ProfileForm was submitted
 }
 
 export interface LearnTopic {
@@ -121,6 +133,7 @@ export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz';
 
 export type AppView =
   | 'login'
+  | 'profileForm'
   | 'onboarding'
   | 'dashboard'
   | 'courseDetail'

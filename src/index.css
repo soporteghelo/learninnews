@@ -193,6 +193,99 @@ body {
 /* MARKDOWN CONTENT STYLES                      */
 /* ============================================ */
 
+.rich-content {
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: #cbd5e1;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Images without explicit size adapt to container */
+.rich-content img:not([width]):not([height]) {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+
+/* All images cap at 100% even if HTML sets a larger value */
+.rich-content img {
+  max-width: 100%;
+}
+
+/* Tables from HTML */
+.rich-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.9rem;
+}
+.rich-content th, .rich-content td {
+  border: 1px solid #334155;
+  padding: 6px 10px;
+  text-align: left;
+}
+.rich-content th {
+  background: #1e293b;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+/* Lists — restored after Tailwind preflight reset */
+.rich-content ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+.rich-content ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+.rich-content ul ul  { list-style-type: circle; margin-top: 0.25rem; }
+.rich-content ul ul ul { list-style-type: square; }
+.rich-content li {
+  margin-bottom: 0.3rem;
+  line-height: 1.7;
+}
+.rich-content li::marker { color: #3b82f6; font-weight: 700; }
+
+/* Headings */
+.rich-content h1 { font-size: 1.5rem; font-weight: 800; margin: 1.25rem 0 0.5rem; }
+.rich-content h2 { font-size: 1.2rem; font-weight: 700; margin: 1rem 0 0.4rem; }
+.rich-content h3 { font-size: 1rem;  font-weight: 600; margin: 0.8rem 0 0.3rem; }
+.rich-content p  { margin: 0.5rem 0; }
+.rich-content strong { font-weight: 700; }
+.rich-content em { font-style: italic; }
+.rich-content hr { border: none; border-top: 1px solid #334155; margin: 1rem 0; }
+.rich-content a  { color: #60a5fa; text-decoration: underline; }
+
+/* details/summary (collapsible HTML) */
+.rich-content details { border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; margin: 6px 0; }
+.rich-content summary { cursor: pointer; font-weight: 600; }
+
+/* Admin preview: light background */
+.rich-content-light {
+  color: #1e293b;
+}
+.rich-content-light th {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+.rich-content-light td {
+  border-color: #cbd5e1;
+}
+.rich-content-light li::marker { color: #1b4d89; }
+.rich-content-light h1,
+.rich-content-light h2,
+.rich-content-light h3 { color: #1e293b; }
+.rich-content-light a  { color: #1b4d89; }
+.rich-content-light hr { border-color: #cbd5e1; }
+.rich-content-light details { border-color: #cbd5e1; }
+.rich-content-light summary { color: #1e293b; }
+
 .markdown-content {
   font-size: 0.95rem;
   line-height: 1.8;

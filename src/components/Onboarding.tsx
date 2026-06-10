@@ -219,7 +219,7 @@ export default function Onboarding({ onSelectAudience }: OnboardingProps) {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="mt-6"
+              className="mt-6 pb-8"
             >
               <button
                 onClick={() => setShowConfirm(true)}

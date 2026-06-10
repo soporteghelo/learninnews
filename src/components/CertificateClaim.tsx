@@ -437,11 +437,26 @@ export default function CertificateClaim({
 
         <AnimatePresence mode="wait">
           {step === 'confirm' && (
-            <motion.div 
+            <motion.div
               key="confirm"
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
               className="glass-card rounded-3xl p-8 border-white/5"
             >
+              {/* Botones al inicio del card */}
+              <div className="flex gap-3 mb-6">
+                <button
+                  onClick={onBack}
+                  className="py-4 px-5 rounded-xl border-2 border-white/25 text-slate-400 font-black text-xs tracking-widest hover:text-white hover:border-white/50 active:scale-[0.98] transition-all"
+                >
+                  ← Volver
+                </button>
+                <button
+                  onClick={handleNext}
+                  className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black text-xs tracking-widest hover:bg-blue-500 active:scale-[0.98] transition-all flex items-center justify-center gap-2 border-2 border-white/25"
+                >
+                  CONFIRMAR Y CONTINUAR <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
               <div className="w-20 h-20 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-6 border border-blue-500/20 mx-auto">
                 <CheckCircle className="w-10 h-10 text-blue-400" />
               </div>
@@ -486,39 +501,41 @@ export default function CertificateClaim({
                   </div>
                 </div>
               </div>
-              <p className="text-slate-400 text-xs text-center leading-relaxed">
+              <p className="text-slate-400 text-xs text-center leading-relaxed mt-6">
                 Al continuar, certificas que tus datos son correctos para la emisión del documento oficial ante las autoridades correspondientes.
               </p>
-              <div className="flex gap-3 mt-8">
-                <button
-                  onClick={onBack}
-                  className="py-4 px-5 rounded-xl border border-white/10 text-slate-400 font-black text-xs tracking-widest hover:text-white hover:border-white/20 active:scale-[0.98] transition-all"
-                >
-                  ← Volver
-                </button>
-                <button
-                  onClick={handleNext}
-                  className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black text-xs tracking-widest hover:bg-blue-500 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                >
-                  CONFIRMAR Y CONTINUAR <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
             </motion.div>
           )}
 
           {step === 'signature' && (
-            <motion.div 
+            <motion.div
               key="signature"
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
               className="glass-card rounded-3xl p-6 border-white/5"
             >
+              {/* Botones al inicio */}
+              <div className="flex gap-3 mb-6">
+                <button
+                  onClick={clearSignature}
+                  className="flex-1 py-4 bg-slate-900 text-slate-400 rounded-xl font-black text-[10px] tracking-widest border-2 border-white/25 hover:text-white hover:border-white/50 transition-all"
+                >
+                  LIMPIAR
+                </button>
+                <button
+                  onClick={handleNext}
+                  className="flex-[2] py-4 bg-blue-600 text-white rounded-xl font-black text-[10px] tracking-widest hover:bg-blue-500 transition-all flex items-center justify-center gap-2 overflow-hidden border-2 border-white/25"
+                >
+                  {signatureData ? 'CONFIRMAR FIRMA' : 'DIBUJA TU FIRMA'} <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+
               <div className="flex items-center gap-3 mb-6">
                 <PenTool className="w-5 h-5 text-blue-400" />
                 <h3 className="text-lg font-bold text-white">Firma del Participante</h3>
               </div>
-              
+
               <div ref={sigContainerRef} className="bg-white rounded-2xl overflow-hidden mb-4 border-2 border-slate-800" style={{ height: '200px' }}>
-                <SignatureCanvas 
+                <SignatureCanvas
                   ref={sigCanvas}
                   penColor="#000"
                   canvasProps={{ style: { width: '100%', height: '100%', cursor: 'crosshair', display: 'block' } }}
@@ -527,31 +544,36 @@ export default function CertificateClaim({
                 />
               </div>
 
-              {error && <p className="text-red-400 text-[10px] font-bold mb-4 uppercase tracking-wider flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {error}</p>}
-
-              <div className="flex gap-3">
-                <button 
-                  onClick={clearSignature}
-                  className="flex-1 py-4 bg-slate-900 text-slate-400 rounded-xl font-black text-[10px] tracking-widest border border-white/5 hover:text-white transition-all"
-                >
-                  LIMPIAR
-                </button>
-                <button 
-                  onClick={handleNext}
-                  className="flex-[2] py-4 bg-blue-600 text-white rounded-xl font-black text-[10px] tracking-widest hover:bg-blue-500 transition-all flex items-center justify-center gap-2 overflow-hidden"
-                >
-                  {signatureData ? 'CONFIRMAR FIRMA' : 'DIBUJA TU FIRMA'} <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
+              {error && <p className="text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {error}</p>}
             </motion.div>
           )}
 
           {step === 'selfie' && (
-            <motion.div 
+            <motion.div
               key="selfie"
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
               className="glass-card rounded-3xl p-6 border-white/5"
             >
+              {/* Botones al inicio — solo cuando hay selfie capturada */}
+              {selfieData && (
+                <div className="flex gap-2 mb-5">
+                  <button
+                    onClick={() => { setSelfieData(null); setIsCameraReady(false); setCameraSessionKey((k) => k + 1); setFaceStatus('loading'); setStabilityProgress(0); setError(null); }}
+                    className="flex-1 py-3 bg-slate-800/90 text-white rounded-xl font-black text-[10px] tracking-widest border-2 border-white/25 flex items-center justify-center gap-1.5 hover:bg-slate-700/90 hover:border-white/50 transition-all"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> REPETIR
+                  </button>
+                  <button
+                    onClick={generateAndUpload}
+                    disabled={isUploading}
+                    className="flex-[2] py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] tracking-widest hover:bg-blue-500 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 border-2 border-white/25"
+                  >
+                    {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Award className="w-3.5 h-3.5" />}
+                    {isUploading ? 'PROCESANDO...' : 'GENERAR CERTIFICADO'}
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center gap-3 mb-4">
                 <Camera className="w-5 h-5 text-blue-400" />
                 <h3 className="text-lg font-bold text-white">Validación Biométrica</h3>
@@ -673,27 +695,9 @@ export default function CertificateClaim({
               ) : (
                 <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-500/50 bg-slate-900 mb-2">
                   <img src={selfieData} alt="Selfie" className="w-full object-cover" style={{ maxHeight: '55vh' }} />
-                  {/* Overlay: badge + action buttons always visible */}
-                  <div className="absolute bottom-0 left-0 right-0 px-3 pb-3 pt-8 bg-gradient-to-t from-black/90 via-black/60 to-transparent">
-                    <div className="text-center mb-2">
-                      <span className="bg-emerald-500 text-black text-[9px] font-black px-3 py-1 rounded-full tracking-widest uppercase">CAPTURA EXITOSA</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => { setSelfieData(null); setIsCameraReady(false); setCameraSessionKey((k) => k + 1); setFaceStatus('loading'); setStabilityProgress(0); setError(null); }}
-                        className="flex-1 py-3 bg-slate-800/90 text-white rounded-xl font-black text-[10px] tracking-widest border border-white/10 flex items-center justify-center gap-1.5 backdrop-blur-sm hover:bg-slate-700/90 transition-all"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" /> REPETIR
-                      </button>
-                      <button
-                        onClick={generateAndUpload}
-                        disabled={isUploading}
-                        className="flex-[2] py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] tracking-widest hover:bg-blue-500 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
-                      >
-                        {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Award className="w-3.5 h-3.5" />}
-                        {isUploading ? 'PROCESANDO...' : 'GENERAR CERTIFICADO'}
-                      </button>
-                    </div>
+                  {/* Solo el badge de confirmación */}
+                  <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-3 pt-6 bg-gradient-to-t from-black/70 to-transparent">
+                    <span className="bg-emerald-500 text-black text-[9px] font-black px-3 py-1 rounded-full tracking-widest uppercase">CAPTURA EXITOSA</span>
                   </div>
                 </div>
               )}

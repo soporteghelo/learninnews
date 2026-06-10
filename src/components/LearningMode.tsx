@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import ReactMarkdown from 'react-markdown';
+import RichContent from './RichContent';
 import {
   ChevronLeft, ChevronRight, CheckCircle2,
   Play, FileText, ChevronDown, BookOpen
@@ -318,7 +318,7 @@ export default function LearningMode({
                       </button>
 
                       <div className="markdown-content max-w-none">
-                        <ReactMarkdown>{currentChunk.contenido}</ReactMarkdown>
+                        <RichContent content={currentChunk.contenido} />
                       </div>
                     </motion.div>
                   )}
@@ -327,7 +327,7 @@ export default function LearningMode({
                 {/* Contenido sin video: siempre visible */}
                 {currentChunk.videos.length === 0 && (
                   <div className="markdown-content max-w-none">
-                    <ReactMarkdown>{currentChunk.contenido}</ReactMarkdown>
+                    <RichContent content={currentChunk.contenido} />
                   </div>
                 )}
               </motion.div>
