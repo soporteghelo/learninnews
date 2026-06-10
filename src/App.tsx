@@ -191,12 +191,24 @@ export default function App() {
             localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(migrated));
           }
           setProgress(migrated);
-          // Backup al caché DNI-específico para que sobreviva al logout
+          // Backup al caché DNI-específico y refrescar Sheets con slim format
           try {
             const sessionRaw = localStorage.getItem(getStorageKey(APP_CONFIG.storage.keys.session));
             if (sessionRaw) {
               const { dni } = JSON.parse(sessionRaw);
-              if (dni) localStorage.setItem(dniProgressKey(dni), JSON.stringify(slimProgress(migrated)));
+              if (dni) {
+                const slim = slimProgress(migrated);
+                localStorage.setItem(dniProgressKey(dni), JSON.stringify(slim));
+                // Re-escribir Sheets en background con formato limpio (fix para otros dispositivos)
+                if (slim.some(p => p.quizScore !== undefined)) {
+                  updateIngresoProgress({
+                    dni,
+                    avance: '',
+                    nota: '',
+                    progress: slim,
+                  }).catch(console.error);
+                }
+              }
             }
           } catch { /* ignore */ }
         } catch {
@@ -342,9 +354,19 @@ export default function App() {
             : [];
           const merged = mergeProgress(sheetsProgress, localProgress);
           if (merged.length > 0) {
+            const slim = slimProgress(merged);
             setProgress(merged);
             localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(merged));
-            localStorage.setItem(dniProgressKey(dni), JSON.stringify(merged));
+            localStorage.setItem(dniProgressKey(dni), JSON.stringify(slim));
+            // Re-escribir Sheets con formato limpio para que otros dispositivos lo lean bien
+            if (slim.some(p => p.quizScore !== undefined)) {
+              updateIngresoProgress({
+                dni,
+                avance: '',
+                nota: '',
+                progress: slim,
+              }).catch(console.error);
+            }
           }
         } catch { /* ignore parse errors */ }
 
