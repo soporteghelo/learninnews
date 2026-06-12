@@ -855,21 +855,45 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.4, ease: "easeInOut" }}
-              className="fixed inset-0 bg-black flex flex-col"
+              className="fixed inset-0 bg-black"
               style={{ zIndex: 99999 }}
             >
-              {/* Header buttons — always visible at top, full width */}
+              {/* iframe — siempre ocupa toda la pantalla (portrait y landscape) */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.1, duration: 0.4 }}
+                className="absolute inset-0"
+              >
+                {embedUrl ? (
+                  <iframe
+                    key={embedUrl}
+                    src={embedUrl}
+                    className="w-full h-full border-0"
+                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
+                    <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
+                    <h3 className="text-xl font-bold text-white mb-2">Enlace no válido</h3>
+                    <p className="text-slate-400 max-w-sm text-sm">El enlace no corresponde a un archivo de Google Drive válido.</p>
+                  </div>
+                )}
+              </motion.div>
+
+              {/* Botones flotantes — gradiente superior para visibilidad */}
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
-                className="shrink-0 flex items-center justify-between gap-3 px-5 pt-6 pb-3 sm:px-10 sm:pt-7"
+                className="absolute top-0 left-0 right-0 flex items-center justify-between gap-3 px-4 pt-5 pb-10 bg-gradient-to-b from-black/75 via-black/30 to-transparent pointer-events-none z-10"
               >
                 <button
                   onClick={() => setMediaOverlay(null)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/5 border border-white/10 text-white/70 text-xs font-bold hover:bg-white hover:text-slate-950 hover:scale-105 active:scale-95 transition-all group"
+                  className="pointer-events-auto flex items-center gap-2 px-4 py-2 rounded-full bg-black/40 border border-white/20 text-white text-xs font-bold backdrop-blur-sm hover:bg-white hover:text-slate-950 hover:scale-105 active:scale-95 transition-all group"
                 >
-                  <X className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
+                  <X className="w-3.5 h-3.5 group-hover:rotate-90 transition-transform duration-300" />
                   SALIR
                 </button>
                 {driveViewUrl && (
@@ -877,39 +901,13 @@ export default function App() {
                     href={driveViewUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-blue-600/20 border border-blue-500/40 text-blue-300 text-xs font-bold hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all"
+                    className="pointer-events-auto flex items-center gap-2 px-4 py-2 rounded-full bg-blue-600/30 border border-blue-400/40 text-blue-300 text-xs font-bold backdrop-blur-sm hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all"
                   >
-                    <ExternalLink className="w-4 h-4" />
+                    <ExternalLink className="w-3.5 h-3.5" />
                     ABRIR EN GOOGLE DRIVE
                   </a>
                 )}
               </motion.div>
-
-              {/* Media — fills all remaining height, never overflows */}
-              <div className="flex-1 min-h-0 px-0 pb-0 sm:px-10 sm:pb-8">
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.1, duration: 0.4 }}
-                  className="relative h-full w-full bg-slate-900 overflow-hidden sm:rounded-2xl sm:shadow-[0_0_80px_rgba(59,130,246,0.15)] sm:border sm:border-white/5 sm:ring-1 sm:ring-white/10"
-                >
-                  {embedUrl ? (
-                    <iframe
-                      key={embedUrl}
-                      src={embedUrl}
-                      className="absolute inset-0 w-full h-full border-0"
-                      allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-                      allowFullScreen
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
-                      <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
-                      <h3 className="text-xl font-bold text-white mb-2">Enlace no válido</h3>
-                      <p className="text-slate-400 max-w-sm text-sm">El enlace no corresponde a un archivo de Google Drive válido.</p>
-                    </div>
-                  )}
-                </motion.div>
-              </div>
             </motion.div>
           );
         })()}
