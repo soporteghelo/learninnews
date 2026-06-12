@@ -318,7 +318,7 @@ export default function LearningMode({
                       </button>
 
                       <div className="markdown-content max-w-none">
-                        <RichContent content={currentChunk.contenido} />
+                        <RichContent content={currentChunk.contenido} onLinkClick={onOpenMedia} />
                       </div>
                     </motion.div>
                   )}
@@ -327,7 +327,7 @@ export default function LearningMode({
                 {/* Contenido sin video: siempre visible */}
                 {currentChunk.videos.length === 0 && (
                   <div className="markdown-content max-w-none">
-                    <RichContent content={currentChunk.contenido} />
+                    <RichContent content={currentChunk.contenido} onLinkClick={onOpenMedia} />
                   </div>
                 )}
               </motion.div>
