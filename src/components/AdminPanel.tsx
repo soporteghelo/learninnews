@@ -8,7 +8,7 @@ import {
   CheckCircle2, Loader2, Lock, Eye, EyeOff, RefreshCw,
   Wifi, WifiOff, ChevronDown, ChevronUp,
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
-  Wand2, Filter, FileSpreadsheet, LogOut
+  Wand2, Filter, FileSpreadsheet, LogOut, Printer
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG } from '../config/app.config';
 import {
@@ -163,6 +163,57 @@ export default function AdminPanel({
         el.scrollTop = pct * (el.scrollHeight - el.clientHeight);
       }
     }));
+  };
+
+  const handlePrintPdf = (chunk: { tema: string; contexto: string; contenido: string }) => {
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <title>${chunk.tema}</title>
+  <style>
+    @page { margin: 20mm 18mm; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12pt; color: #111; line-height: 1.6; }
+    header { border-bottom: 2px solid #1b4d89; padding-bottom: 8px; margin-bottom: 20px; }
+    header .ctx { font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #737781; }
+    header h1 { font-size: 18pt; font-weight: 800; color: #1b4d89; margin: 4px 0 0; }
+    h1,h2,h3,h4 { color: #1b4d89; margin-top: 1.2em; }
+    h2 { font-size: 13pt; border-bottom: 1px solid #e1e3e4; padding-bottom: 4px; }
+    h3 { font-size: 11pt; }
+    p { margin: 0.6em 0; }
+    ul, ol { padding-left: 1.4em; margin: 0.6em 0; }
+    li { margin-bottom: 3px; }
+    table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 10pt; }
+    th { background: #1b4d89; color: #fff; padding: 6px 10px; text-align: left; }
+    td { border: 1px solid #ccc; padding: 5px 10px; }
+    tr:nth-child(even) td { background: #f5f7fa; }
+    code { background: #f0f2f4; padding: 1px 5px; border-radius: 3px; font-size: 10pt; font-family: monospace; }
+    pre { background: #f0f2f4; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 9.5pt; }
+    blockquote { border-left: 4px solid #1b4d89; margin: 1em 0; padding: 6px 14px; background: #f5f7fa; color: #424750; }
+    img { max-width: 100%; }
+    footer { margin-top: 30px; border-top: 1px solid #e1e3e4; padding-top: 8px; font-size: 8pt; color: #737781; text-align: right; }
+    @media print { a { color: inherit; text-decoration: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="ctx">${chunk.contexto}</div>
+    <h1>${chunk.tema}</h1>
+  </header>
+  <div id="content"></div>
+  <footer>LearnDrive — ${new Date().toLocaleDateString('es-PE', { day:'2-digit', month:'long', year:'numeric' })}</footer>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    const raw = ${JSON.stringify(chunk.contenido)};
+    document.getElementById('content').innerHTML = marked.parse(raw);
+    window.onload = () => { window.print(); window.onafterprint = () => window.close(); };
+  </script>
+</body>
+</html>`);
+    win.document.close();
   };
 
   const handlePreviewSave = async () => {
@@ -2226,6 +2277,14 @@ ${text}`;
                   <p className="text-[9px] font-bold uppercase tracking-widest text-[#737781]">{chunk.contexto}</p>
                   <p className="font-bold text-[#00366b] text-sm truncate">{chunk.tema}</p>
                 </div>
+                {/* Imprimir PDF */}
+                <button
+                  onClick={() => handlePrintPdf(chunk)}
+                  title="Imprimir / Guardar como PDF"
+                  className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold rounded-lg bg-[#f3f4f5] hover:bg-[#e7e8e9] text-[#1b4d89] transition-all active:scale-95 flex-shrink-0"
+                >
+                  <Printer className="w-3 h-3" /> PDF
+                </button>
                 {/* Mode toggle */}
                 <div className="flex bg-[#f3f4f5] rounded-xl p-1 gap-0.5 flex-shrink-0">
                   <button
