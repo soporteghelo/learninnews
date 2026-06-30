@@ -2412,7 +2412,6 @@ ${text}`;
                               return sum + (tp?.quizScore ?? 0);
                             }, 0) / userTopics.length
                           : null;
-                        const startedTopics = userProgress.filter(p => p.currentChunk > 0 || p.completed);
 
                         return (
                           <div key={record.dni} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
