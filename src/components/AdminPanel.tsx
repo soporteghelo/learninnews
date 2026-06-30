@@ -2353,19 +2353,52 @@ ${text}`;
                       {ingresoRecords.length === 0 ? 'Haz clic en "Actualizar" para cargar los datos' : 'Prueba cambiando los filtros'}
                     </p>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {filteredIngresos
-                      .slice()
-                      .sort((a, b) => {
-                        // Parse "DD/MM/YYYY - (HH:MM:SS)" → timestamp
-                        const parse = (s: string) => {
-                          const m = s?.match(/(\d{2})\/(\d{2})\/(\d{4})\s*-\s*\((\d{2}):(\d{2}):(\d{2})\)/);
-                          return m ? new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}`).getTime() : 0;
-                        };
-                        return parse(b.inicio) - parse(a.inicio);
-                      })
-                      .map(record => {
+                ) : (() => {
+                  const parseInicio = (s: string): Date | null => {
+                    const m = s?.match(/(\d{2})\/(\d{2})\/(\d{4})\s*-\s*\((\d{2}):(\d{2}):(\d{2})\)/);
+                    return m ? new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}`) : null;
+                  };
+                  const getISOWeek = (d: Date): number => {
+                    const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+                    tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
+                    const y = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+                    return Math.ceil((((tmp.getTime() - y.getTime()) / 86400000) + 1) / 7);
+                  };
+                  const sorted = filteredIngresos.slice().sort((a, b) => {
+                    const da = parseInicio(a.inicio)?.getTime() ?? 0;
+                    const db = parseInicio(b.inicio)?.getTime() ?? 0;
+                    return db - da;
+                  });
+                  const groupMap = new Map<string, { label: string; records: typeof sorted }>();
+                  for (const record of sorted) {
+                    const date = parseInicio(record.inicio);
+                    let key = '0000-W00';
+                    let label = 'Sin fecha';
+                    if (date) {
+                      const week = getISOWeek(date);
+                      const year = date.getFullYear();
+                      key = `${year}-W${String(week).padStart(2, '0')}`;
+                      const dow = date.getDay() || 7;
+                      const mon = new Date(date); mon.setDate(date.getDate() - dow + 1);
+                      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+                      const fmt = (d: Date) => d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' });
+                      label = `Semana ${week}  ·  ${fmt(mon)} – ${fmt(sun)}, ${year}`;
+                    }
+                    if (!groupMap.has(key)) groupMap.set(key, { label, records: [] });
+                    groupMap.get(key)!.records.push(record);
+                  }
+                  const groups = Array.from(groupMap.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+                  return (
+                    <div className="space-y-6">
+                      {groups.map(([key, group]) => (
+                        <div key={key}>
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="h-px flex-1 bg-[#e1e3e4]" />
+                            <span className="text-[10px] font-bold text-[#737781] uppercase tracking-wider whitespace-nowrap px-2">{group.label}</span>
+                            <div className="h-px flex-1 bg-[#e1e3e4]" />
+                          </div>
+                          <div className="space-y-2">
+                            {group.records.map(record => {
                         const userProgress = parseUserProgress(record.progressJson);
                         const isExpanded = progressExpandedDni === record.dni;
                         const avanceNum = parseFloat(record.avance?.replace('%', '') || '0') || 0;
@@ -2497,9 +2530,13 @@ ${text}`;
                             )}
                           </div>
                         );
-                      })}
-                  </div>
-                )}
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>
