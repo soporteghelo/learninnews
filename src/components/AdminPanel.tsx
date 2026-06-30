@@ -2350,7 +2350,15 @@ ${text}`;
                 ) : (
                   <div className="space-y-2">
                     {filteredIngresos
-                      .sort((a, b) => (b.ultimoAcceso || '').localeCompare(a.ultimoAcceso || ''))
+                      .slice()
+                      .sort((a, b) => {
+                        // Parse "DD/MM/YYYY - (HH:MM:SS)" → timestamp
+                        const parse = (s: string) => {
+                          const m = s?.match(/(\d{2})\/(\d{2})\/(\d{4})\s*-\s*\((\d{2}):(\d{2}):(\d{2})\)/);
+                          return m ? new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}`).getTime() : 0;
+                        };
+                        return parse(b.inicio) - parse(a.inicio);
+                      })
                       .map(record => {
                         const userProgress = parseUserProgress(record.progressJson);
                         const isExpanded = progressExpandedDni === record.dni;
