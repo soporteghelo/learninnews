@@ -2407,12 +2407,14 @@ ${text}`;
                             {isExpanded && (
                               <div className="border-t border-[#f3f4f5] px-4 py-4 bg-[#f8f9fa] space-y-4">
                                 {/* Profile info */}
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                   {[
                                     { label: 'Área', value: record.area || '—' },
                                     { label: 'Cargo', value: record.cargo || '—' },
                                     { label: 'Correo', value: record.correo || '—' },
-                                    { label: 'Último acceso', value: record.ultimoAcceso ? new Date(record.ultimoAcceso).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
+                                    { label: 'Inicio', value: record.inicio || '—' },
+                                    { label: 'Último acceso', value: record.ultimoAcceso || '—' },
+                                    { label: 'Dispositivo', value: record.dispositivo || '—' },
                                   ].map(({ label, value }) => (
                                     <div key={label}>
                                       <p className="text-[9px] text-[#737781] uppercase font-bold tracking-wide">{label}</p>
