@@ -739,6 +739,65 @@ export async function fetchIngresoByDni(dni: string): Promise<IngresoRecord | nu
   }
 }
 
+/** Fetch ALL rows from INGRESOS sheet, one best record per DNI */
+export async function fetchAllIngresos(): Promise<IngresoRecord[]> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.ingresos);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const byDni = new Map<string, any>();
+          for (const row of results.data as any[]) {
+            const dni = String(row.DNI || row.Id || '').trim();
+            if (!dni) continue;
+            const existing = byDni.get(dni);
+            if (!existing) { byDni.set(dni, row); continue; }
+            const prevHas = !!(existing.ProgressJSON || '').trim();
+            const currHas = !!(row.ProgressJSON || '').trim();
+            if (currHas && !prevHas) byDni.set(dni, row);
+            else if (prevHas === currHas && (row.UltimoAcceso || '') > (existing.UltimoAcceso || '')) byDni.set(dni, row);
+          }
+          resolve(Array.from(byDni.values()).map((row: any): IngresoRecord => ({
+            id: row.Id || '',
+            apellidos: row.Apellidos || '',
+            nombres: row.Nombres || '',
+            dni: row.DNI || row.Id || '',
+            inicio: row.Inicio || '',
+            avance: row.Avance || '',
+            publico: row.Publico || '',
+            nota: row.Nota || '',
+            ultimoAcceso: row.UltimoAcceso || '',
+            dispositivo: row.Dispositivo || '',
+            modulosCompletados: row.ModulosCompletados || '',
+            intentosQuiz: row.IntentosQuiz || '',
+            tiempoTotal: row.TiempoTotal || '',
+            progressJson: row.ProgressJSON || '',
+            certificadoUrl: row.CertificadoUrl || '',
+            empresa: row.EMPRESA || '',
+            area: row.AREA || '',
+            cargo: row.CARGO || row.Cargo || '',
+            fechaIngreso: row.FECHA_INGRESO || '',
+            fechaNacimiento: row.FECHA_NACIMIENTO || '',
+            correo: row.CORREO || '',
+            celular: row.CELULAR || '',
+            contacto1Numero: row.NUMERO_CONTACTO_1 || '',
+            contacto1Parentesco: row.PARENTESCO_CONTACTO_1 || '',
+            contacto2Numero: row.NUMERO_CONTACTO_2 || '',
+            contacto2Parentesco: row.PARENTESCO_CONTACTO_2 || '',
+          })));
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch {
+    return [];
+  }
+}
+
 function getDeviceInfo(): string {
   const ua = navigator.userAgent;
   if (/Android/i.test(ua)) return 'Android';

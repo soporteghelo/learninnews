@@ -129,7 +129,7 @@ export interface ConnectionTestResult {
   geminiApi: { ok: boolean; error?: string };
 }
 
-export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz';
+export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress';
 
 export type AppView =
   | 'login'

@@ -8,7 +8,7 @@ import {
   CheckCircle2, Loader2, Lock, Eye, EyeOff, RefreshCw,
   Wifi, WifiOff, ChevronDown, ChevronUp,
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
-  Wand2, Filter, FileSpreadsheet, LogOut, Printer
+  Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG } from '../config/app.config';
 import {
@@ -16,11 +16,12 @@ import {
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  clearSheetCache,
+  clearSheetCache, fetchAllIngresos,
 } from '../services/sheetsService';
+import type { IngresoRecord } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
-  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult
+  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress
 } from '../types';
 
 const ADMIN_AUTH_KEY = 'learndrive_admin_auth';
@@ -238,11 +239,39 @@ export default function AdminPanel({
     }
   };
 
+  // Progress tracking tab
+  const [ingresoRecords, setIngresoRecords] = useState<IngresoRecord[]>([]);
+  const [progressLoading, setProgressLoading] = useState(false);
+  const [progressSearch, setProgressSearch] = useState('');
+  const [progressEmpresaFilter, setProgressEmpresaFilter] = useState('');
+  const [progressPublicoFilter, setProgressPublicoFilter] = useState('');
+  const [progressExpandedDni, setProgressExpandedDni] = useState<string | null>(null);
+
   // Toast notification
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToast({ text, type });
     setTimeout(() => setToast(null), 3500);
+  };
+
+  // Load ingreso records when progress tab opens
+  useEffect(() => {
+    if (activeTab !== 'progress') return;
+    if (ingresoRecords.length > 0) return;
+    setProgressLoading(true);
+    fetchAllIngresos().then(records => {
+      setIngresoRecords(records);
+      setProgressLoading(false);
+    }).catch(() => setProgressLoading(false));
+  }, [activeTab]);
+
+  const handleRefreshProgress = () => {
+    setProgressLoading(true);
+    setIngresoRecords([]);
+    fetchAllIngresos().then(records => {
+      setIngresoRecords(records);
+      setProgressLoading(false);
+    }).catch(() => setProgressLoading(false));
   };
 
   // Auth
@@ -1066,6 +1095,61 @@ ${text}`;
     return true;
   });
 
+  // ========== PROGRESS TAB COMPUTED VALUES ==========
+  const parseUserProgress = (json: string): UserProgress[] => {
+    try { return JSON.parse(json) || []; } catch { return []; }
+  };
+
+  const filteredIngresos = ingresoRecords.filter(r => {
+    const search = progressSearch.toLowerCase();
+    if (search && !`${r.nombres} ${r.apellidos} ${r.dni}`.toLowerCase().includes(search)) return false;
+    if (progressEmpresaFilter && r.empresa !== progressEmpresaFilter) return false;
+    if (progressPublicoFilter && r.publico !== progressPublicoFilter) return false;
+    return true;
+  });
+
+  const empresasOptions = [...new Set(ingresoRecords.map(r => r.empresa).filter(Boolean))].sort() as string[];
+  const publicoOptions = [...new Set(ingresoRecords.map(r => r.publico).filter(Boolean))].sort() as string[];
+
+  const avgAvance = ingresoRecords.length === 0 ? 0 : Math.round(
+    ingresoRecords.reduce((sum, r) => sum + (parseFloat(r.avance?.replace('%', '') || '0') || 0), 0) / ingresoRecords.length
+  );
+  const validNotas = ingresoRecords.map(r => parseFloat(r.nota || '0')).filter(n => n > 0);
+  const avgNota = validNotas.length === 0 ? '—' : (validNotas.reduce((a, b) => a + b, 0) / validNotas.length).toFixed(1);
+
+  const handleExportProgressExcel = () => {
+    const rows = filteredIngresos.map(r => {
+      const prog = parseUserProgress(r.progressJson);
+      const row: Record<string, any> = {
+        'Apellidos': r.apellidos,
+        'Nombres': r.nombres,
+        'DNI': r.dni,
+        'Empresa': r.empresa,
+        'Área': r.area,
+        'Cargo': r.cargo,
+        'Público': r.publico,
+        'Avance General': r.avance,
+        'Nota General': r.nota,
+        'Último Acceso': r.ultimoAcceso,
+        'Correo': r.correo,
+        'Celular': r.celular,
+      };
+      topics.forEach(topic => {
+        const tp = prog.find(p => p.topicId === topic.id);
+        const totalChunks = allChunks.filter(c => c.idMain === topic.id).length;
+        const pct = tp ? (tp.completed ? 100 : Math.min(100, Math.round(((tp.currentChunk || 0) / Math.max(totalChunks, 1)) * 100))) : 0;
+        row[`${topic.title} - Avance`] = `${pct}%`;
+        row[`${topic.title} - Nota`] = tp?.quizScore !== undefined ? tp.quizScore : '';
+      });
+      return row;
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Progreso');
+    XLSX.writeFile(wb, `seguimiento_${new Date().toISOString().split('T')[0]}.xlsx`);
+    showToast('✓ Exportado a Excel');
+  };
+
   // ========== MAIN PANEL ==========
   return (
     <div className="min-h-screen bg-[#f8f9fa] safe-area-top safe-area-bottom pb-24">
@@ -1278,21 +1362,22 @@ ${text}`;
         </AnimatePresence>
 
         {/* Tab bar */}
-        <div className="mb-6 grid grid-cols-4 gap-1">
+        <div className="mb-6 grid grid-cols-5 gap-1">
           {([
             { key: 'topics', label: 'Detalles', badge: null },
             { key: 'overview', label: 'Resumen', badge: null },
-            { key: 'content', label: 'Contenidos', badge: selectedTopicId ? activeContentCount : null },
+            { key: 'content', label: 'Contenido', badge: selectedTopicId ? activeContentCount : null },
             { key: 'quiz', label: 'Quizzes', badge: selectedTopicId ? activeQuizCount : null },
+            { key: 'progress', label: 'Usuarios', badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
           ] as { key: AdminTab; label: string; badge: number | null }[]).map(tab => (
             <button
               key={tab.key}
-              disabled={tab.key !== 'topics' && !selectedTopicId}
+              disabled={tab.key !== 'topics' && tab.key !== 'progress' && !selectedTopicId}
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center justify-center gap-1 px-1 py-1.5 text-[10px] xs:text-[11px] font-bold rounded-xl transition-all border ${
                 activeTab === tab.key
                   ? 'bg-[#1b4d89] text-white border-[#1b4d89] shadow-sm'
-                  : tab.key !== 'topics' && !selectedTopicId
+                  : (tab.key !== 'topics' && tab.key !== 'progress' && !selectedTopicId)
                   ? 'bg-[#f8f9fa]/50 text-[#c3c6d1] border-[#e1e3e4]/60 cursor-not-allowed opacity-60'
                   : 'bg-white text-[#737781] border-[#e1e3e4] hover:bg-[#f3f4f5] hover:border-[#1b4d89]/30 hover:text-[#00366b]'
               }`}
@@ -1516,7 +1601,7 @@ ${text}`;
           </div>
         )}
 
-        {selectedTopicId && activeTab !== 'topics' && (
+        {selectedTopicId && activeTab !== 'topics' && activeTab !== 'progress' && (
           <>
 
 
@@ -2155,13 +2240,228 @@ ${text}`;
           </>
         )}
 
-        {!selectedTopicId && (
+        {!selectedTopicId && activeTab !== 'progress' && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-20 h-20 rounded-full bg-[#e1e3e4] flex items-center justify-center mb-4">
               <Search className="w-10 h-10 text-[#737781]" />
             </div>
             <p className="text-sm font-semibold text-[#424750]">Selecciona un módulo para comenzar</p>
             <p className="text-sm text-[#737781] mt-2">Usa el selector superior para gestionar contenidos del sistema</p>
+          </div>
+        )}
+
+        {/* ====== TAB: USUARIOS / SEGUIMIENTO ====== */}
+        {activeTab === 'progress' && (
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-[#00366b] flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-[#1b4d89]" />
+                  Seguimiento de Usuarios
+                </h2>
+                <p className="text-xs text-[#737781] mt-0.5">Avance y notas por usuario en todos los módulos</p>
+              </div>
+              <button
+                onClick={handleRefreshProgress}
+                disabled={progressLoading}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-[#e1e3e4] text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] transition-all disabled:opacity-50"
+              >
+                {progressLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                Actualizar
+              </button>
+            </div>
+
+            {progressLoading ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-[#1b4d89]" />
+                <p className="text-sm text-[#737781]">Cargando datos de usuarios…</p>
+              </div>
+            ) : (
+              <>
+                {/* Stats cards */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] text-center">
+                    <p className="text-2xl font-bold text-[#1b4d89]">{ingresoRecords.length}</p>
+                    <p className="text-[10px] text-[#737781] uppercase font-bold tracking-wider mt-1">Usuarios</p>
+                  </div>
+                  <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] text-center">
+                    <p className="text-2xl font-bold text-emerald-600">{avgAvance}%</p>
+                    <p className="text-[10px] text-[#737781] uppercase font-bold tracking-wider mt-1">Avance prom.</p>
+                  </div>
+                  <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] text-center">
+                    <p className="text-2xl font-bold text-amber-600">{avgNota}</p>
+                    <p className="text-[10px] text-[#737781] uppercase font-bold tracking-wider mt-1">Nota prom.</p>
+                  </div>
+                </div>
+
+                {/* Filters */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#737781]" />
+                    <input
+                      value={progressSearch}
+                      onChange={e => setProgressSearch(e.target.value)}
+                      placeholder="Buscar nombre o DNI…"
+                      className="w-full pl-9 pr-4 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none"
+                    />
+                  </div>
+                  {empresasOptions.length > 0 && (
+                    <select
+                      value={progressEmpresaFilter}
+                      onChange={e => setProgressEmpresaFilter(e.target.value)}
+                      className="px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                    >
+                      <option value="">Todas las empresas</option>
+                      {empresasOptions.map(e => <option key={e} value={e}>{e}</option>)}
+                    </select>
+                  )}
+                  {publicoOptions.length > 0 && (
+                    <select
+                      value={progressPublicoFilter}
+                      onChange={e => setProgressPublicoFilter(e.target.value)}
+                      className="px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                    >
+                      <option value="">Todos los públicos</option>
+                      {publicoOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  )}
+                  <button
+                    onClick={handleExportProgressExcel}
+                    disabled={filteredIngresos.length === 0}
+                    className="flex items-center gap-2 px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#006d36] hover:bg-emerald-50 transition-all disabled:opacity-40"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    Excel
+                  </button>
+                </div>
+
+                {/* Users list */}
+                {filteredIngresos.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-14 text-center">
+                    <Users className="w-10 h-10 text-[#c3c6d1] mb-3" />
+                    <p className="text-sm font-semibold text-[#424750]">
+                      {ingresoRecords.length === 0 ? 'No hay datos de usuarios' : 'Sin resultados para el filtro aplicado'}
+                    </p>
+                    <p className="text-xs text-[#737781] mt-1">
+                      {ingresoRecords.length === 0 ? 'Haz clic en "Actualizar" para cargar los datos' : 'Prueba cambiando los filtros'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredIngresos
+                      .sort((a, b) => (b.ultimoAcceso || '').localeCompare(a.ultimoAcceso || ''))
+                      .map(record => {
+                        const userProgress = parseUserProgress(record.progressJson);
+                        const isExpanded = progressExpandedDni === record.dni;
+                        const avanceNum = parseFloat(record.avance?.replace('%', '') || '0') || 0;
+                        const notaNum = parseFloat(record.nota || '0') || 0;
+                        const startedTopics = userProgress.filter(p => p.currentChunk > 0 || p.completed);
+
+                        return (
+                          <div key={record.dni} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
+                            <button
+                              onClick={() => setProgressExpandedDni(isExpanded ? null : record.dni)}
+                              className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-[#f8f9fa] transition-all"
+                            >
+                              {/* Avatar */}
+                              <div className="w-9 h-9 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm">
+                                {(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}
+                              </div>
+                              {/* Info */}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-[#00366b] text-sm truncate">{record.nombres} {record.apellidos}</p>
+                                <p className="text-[10px] text-[#737781] truncate">{record.dni} · {record.empresa || '—'} · {record.publico || '—'}</p>
+                              </div>
+                              {/* Stats */}
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <div className="text-center hidden sm:block">
+                                  <div className="text-xs font-bold text-[#1b4d89]">{avanceNum > 0 ? `${avanceNum}%` : '—'}</div>
+                                  <div className="text-[9px] text-[#737781] uppercase">avance</div>
+                                </div>
+                                <div className="text-center hidden sm:block">
+                                  <div className="text-xs font-bold text-amber-600">{notaNum > 0 ? notaNum.toFixed(1) : '—'}</div>
+                                  <div className="text-[9px] text-[#737781] uppercase">nota</div>
+                                </div>
+                                <div className="text-center">
+                                  <div className="text-xs font-bold text-slate-500">{startedTopics.length}</div>
+                                  <div className="text-[9px] text-[#737781] uppercase">módulos</div>
+                                </div>
+                                {isExpanded ? <ChevronUp className="w-4 h-4 text-[#737781]" /> : <ChevronDown className="w-4 h-4 text-[#737781]" />}
+                              </div>
+                            </button>
+
+                            {/* Expanded detail */}
+                            {isExpanded && (
+                              <div className="border-t border-[#f3f4f5] px-4 py-4 bg-[#f8f9fa] space-y-4">
+                                {/* Profile info */}
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                  {[
+                                    { label: 'Área', value: record.area || '—' },
+                                    { label: 'Cargo', value: record.cargo || '—' },
+                                    { label: 'Correo', value: record.correo || '—' },
+                                    { label: 'Último acceso', value: record.ultimoAcceso ? new Date(record.ultimoAcceso).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
+                                  ].map(({ label, value }) => (
+                                    <div key={label}>
+                                      <p className="text-[9px] text-[#737781] uppercase font-bold tracking-wide">{label}</p>
+                                      <p className="text-xs text-[#424750] font-semibold truncate">{value}</p>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* Per-topic progress */}
+                                <div>
+                                  <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">Avance por módulo</p>
+                                  {topics.length === 0 ? (
+                                    <p className="text-xs text-[#737781]">—</p>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {topics.map(topic => {
+                                        const tp = userProgress.find(p => p.topicId === topic.id);
+                                        if (!tp) return null;
+                                        const totalChunks = allChunks.filter(c => c.idMain === topic.id).length;
+                                        const pct = tp.completed ? 100 : Math.min(100, Math.round(((tp.currentChunk || 0) / Math.max(totalChunks, 1)) * 100));
+                                        const score = tp.quizScore;
+                                        return (
+                                          <div key={topic.id} className="flex items-center gap-3">
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center justify-between gap-2 mb-1">
+                                                <p className="text-xs font-semibold text-[#191c1d] truncate">{topic.title}</p>
+                                                <span className="text-[10px] font-bold text-[#424750] flex-shrink-0">{pct}%</span>
+                                              </div>
+                                              <div className="h-1.5 bg-[#e1e3e4] rounded-full overflow-hidden">
+                                                <div
+                                                  className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'bg-[#1b4d89]'}`}
+                                                  style={{ width: `${pct}%` }}
+                                                />
+                                              </div>
+                                            </div>
+                                            {score !== undefined && (
+                                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 ${score >= 14 ? 'bg-emerald-100 text-emerald-700' : score >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
+                                                {score.toFixed(1)}/20
+                                              </span>
+                                            )}
+                                            {tp.completed && score === undefined && (
+                                              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                      {userProgress.every(p => !topics.find(t => t.id === p.topicId)) && (
+                                        <p className="text-xs text-[#737781] italic">Sin avance registrado en módulos activos</p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>
