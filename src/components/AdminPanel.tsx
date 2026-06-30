@@ -1114,8 +1114,11 @@ ${text}`;
   const avgAvance = ingresoRecords.length === 0 ? 0 : Math.round(
     ingresoRecords.reduce((sum, r) => sum + (parseFloat(r.avance?.replace('%', '') || '0') || 0), 0) / ingresoRecords.length
   );
-  const validNotas = ingresoRecords.map(r => parseFloat(r.nota || '0')).filter(n => n > 0);
-  const avgNota = validNotas.length === 0 ? '—' : (validNotas.reduce((a, b) => a + b, 0) / validNotas.length).toFixed(1);
+  const allQuizScores = ingresoRecords.flatMap(r => {
+    try { return (JSON.parse(r.progressJson) as UserProgress[]).filter(p => p.quizScore !== undefined).map(p => p.quizScore!); }
+    catch { return [] as number[]; }
+  });
+  const avgNota = allQuizScores.length === 0 ? '—' : `${Math.round(allQuizScores.reduce((a, b) => a + b, 0) / allQuizScores.length / 20 * 100)}%`;
 
   const handleExportProgressExcel = () => {
     const rows = filteredIngresos.map(r => {
@@ -2363,7 +2366,8 @@ ${text}`;
                         const userProgress = parseUserProgress(record.progressJson);
                         const isExpanded = progressExpandedDni === record.dni;
                         const avanceNum = parseFloat(record.avance?.replace('%', '') || '0') || 0;
-                        const notaNum = parseFloat(record.nota || '0') || 0;
+                        const userScores = userProgress.filter(p => p.quizScore !== undefined).map(p => p.quizScore!);
+                        const avgUserNotaPct = userScores.length > 0 ? Math.round(userScores.reduce((a, b) => a + b, 0) / userScores.length / 20 * 100) : null;
                         const startedTopics = userProgress.filter(p => p.currentChunk > 0 || p.completed);
 
                         return (
@@ -2388,7 +2392,7 @@ ${text}`;
                                   <div className="text-[9px] text-[#737781] uppercase">avance</div>
                                 </div>
                                 <div className="text-center hidden sm:block">
-                                  <div className="text-xs font-bold text-amber-600">{notaNum > 0 ? notaNum.toFixed(1) : '—'}</div>
+                                  <div className="text-xs font-bold text-amber-600">{avgUserNotaPct !== null ? `${avgUserNotaPct}%` : '—'}</div>
                                   <div className="text-[9px] text-[#737781] uppercase">nota</div>
                                 </div>
                                 <div className="text-center">
@@ -2446,7 +2450,7 @@ ${text}`;
                                             </div>
                                             {score !== undefined && (
                                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 ${score >= 14 ? 'bg-emerald-100 text-emerald-700' : score >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
-                                                {score.toFixed(1)}/20
+                                                {Math.round((score / 20) * 100)}%
                                               </span>
                                             )}
                                             {tp.completed && score === undefined && (
