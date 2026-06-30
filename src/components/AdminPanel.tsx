@@ -2366,11 +2366,15 @@ ${text}`;
                         const userProgress = parseUserProgress(record.progressJson);
                         const isExpanded = progressExpandedDni === record.dni;
                         const avanceNum = parseFloat(record.avance?.replace('%', '') || '0') || 0;
-                        const avgUserNota = topics.length > 0
-                          ? topics.reduce((sum, t) => {
+                        const userAudiences = (record.publico || '').split(',').map((a: string) => a.trim()).filter(Boolean);
+                        const userTopics = topics.filter(t =>
+                          userAudiences.length === 0 || userAudiences.some((aud: string) => t.audience?.includes(aud))
+                        );
+                        const avgUserNota = userTopics.length > 0
+                          ? userTopics.reduce((sum, t) => {
                               const tp = userProgress.find(p => p.topicId === t.id);
                               return sum + (tp?.quizScore ?? 0);
-                            }, 0) / topics.length
+                            }, 0) / userTopics.length
                           : null;
                         const startedTopics = userProgress.filter(p => p.currentChunk > 0 || p.completed);
 
@@ -2400,7 +2404,7 @@ ${text}`;
                                   <div className="text-[9px] text-[#737781] uppercase">nota</div>
                                 </div>
                                 <div className="text-center">
-                                  <div className="text-xs font-bold text-slate-500">{topics.length}</div>
+                                  <div className="text-xs font-bold text-slate-500">{userTopics.length}</div>
                                   <div className="text-[9px] text-[#737781] uppercase">módulos</div>
                                 </div>
                                 {isExpanded ? <ChevronUp className="w-4 h-4 text-[#737781]" /> : <ChevronDown className="w-4 h-4 text-[#737781]" />}
@@ -2430,11 +2434,11 @@ ${text}`;
                                 {/* Per-topic progress */}
                                 <div>
                                   <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">Avance por módulo</p>
-                                  {topics.length === 0 ? (
+                                  {userTopics.length === 0 ? (
                                     <p className="text-xs text-[#737781]">—</p>
                                   ) : (
                                     <div className="space-y-2">
-                                      {topics.map(topic => {
+                                      {userTopics.map(topic => {
                                         const tp = userProgress.find(p => p.topicId === topic.id);
                                         const totalChunks = allChunks.filter(c => c.idMain === topic.id).length;
                                         const pct = tp
