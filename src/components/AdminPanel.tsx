@@ -2366,8 +2366,12 @@ ${text}`;
                         const userProgress = parseUserProgress(record.progressJson);
                         const isExpanded = progressExpandedDni === record.dni;
                         const avanceNum = parseFloat(record.avance?.replace('%', '') || '0') || 0;
-                        const userScores = userProgress.filter(p => p.quizScore !== undefined).map(p => p.quizScore!);
-                        const avgUserNota = userScores.length > 0 ? userScores.reduce((a, b) => a + b, 0) / userScores.length : null;
+                        const avgUserNota = topics.length > 0
+                          ? topics.reduce((sum, t) => {
+                              const tp = userProgress.find(p => p.topicId === t.id);
+                              return sum + (tp?.quizScore ?? 0);
+                            }, 0) / topics.length
+                          : null;
                         const startedTopics = userProgress.filter(p => p.currentChunk > 0 || p.completed);
 
                         return (
@@ -2396,7 +2400,7 @@ ${text}`;
                                   <div className="text-[9px] text-[#737781] uppercase">nota</div>
                                 </div>
                                 <div className="text-center">
-                                  <div className="text-xs font-bold text-slate-500">{startedTopics.length}</div>
+                                  <div className="text-xs font-bold text-slate-500">{topics.length}</div>
                                   <div className="text-[9px] text-[#737781] uppercase">módulos</div>
                                 </div>
                                 {isExpanded ? <ChevronUp className="w-4 h-4 text-[#737781]" /> : <ChevronDown className="w-4 h-4 text-[#737781]" />}
@@ -2432,15 +2436,17 @@ ${text}`;
                                     <div className="space-y-2">
                                       {topics.map(topic => {
                                         const tp = userProgress.find(p => p.topicId === topic.id);
-                                        if (!tp) return null;
                                         const totalChunks = allChunks.filter(c => c.idMain === topic.id).length;
-                                        const pct = tp.completed ? 100 : Math.min(100, Math.round(((tp.currentChunk || 0) / Math.max(totalChunks, 1)) * 100));
-                                        const score = tp.quizScore;
+                                        const pct = tp
+                                          ? (tp.completed ? 100 : Math.min(100, Math.round(((tp.currentChunk || 0) / Math.max(totalChunks, 1)) * 100)))
+                                          : 0;
+                                        const score = tp?.quizScore;
+                                        const notStarted = !tp;
                                         return (
                                           <div key={topic.id} className="flex items-center gap-3">
                                             <div className="flex-1 min-w-0">
                                               <div className="flex items-center justify-between gap-2 mb-1">
-                                                <p className="text-xs font-semibold text-[#191c1d] truncate">{topic.title}</p>
+                                                <p className={`text-xs font-semibold truncate ${notStarted ? 'text-[#737781]' : 'text-[#191c1d]'}`}>{topic.title}</p>
                                                 <span className="text-[10px] font-bold text-[#424750] flex-shrink-0">{pct}%</span>
                                               </div>
                                               <div className="h-1.5 bg-[#e1e3e4] rounded-full overflow-hidden">
@@ -2450,20 +2456,20 @@ ${text}`;
                                                 />
                                               </div>
                                             </div>
-                                            {score !== undefined && (
+                                            {score !== undefined ? (
                                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 ${score >= 14 ? 'bg-emerald-100 text-emerald-700' : score >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
                                                 {score.toFixed(1)}/20
                                               </span>
-                                            )}
-                                            {tp.completed && score === undefined && (
+                                            ) : notStarted ? (
+                                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 bg-slate-100 text-slate-400">
+                                                0.0/20
+                                              </span>
+                                            ) : tp?.completed ? (
                                               <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                                            )}
+                                            ) : null}
                                           </div>
                                         );
                                       })}
-                                      {userProgress.every(p => !topics.find(t => t.id === p.topicId)) && (
-                                        <p className="text-xs text-[#737781] italic">Sin avance registrado en módulos activos</p>
-                                      )}
                                     </div>
                                   )}
                                 </div>
