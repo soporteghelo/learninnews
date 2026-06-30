@@ -23,7 +23,7 @@ export default function QuizMode({
   onComplete,
   userDni,
 }: QuizModeProps) {
-  const storageKey = `ldc_quiz_progress_${topic.id}`;
+  const storageKey = `ldc_quiz_progress_${topic.id}_${userDni || 'anon'}`;
 
   // Initialize state from localStorage (resume) or fresh shuffle
   const [initState] = useState<{
@@ -150,7 +150,18 @@ export default function QuizMode({
 
   const handleNext = () => {
     if (currentIdx < totalQuestions - 1) {
-      setCurrentIdx(currentIdx + 1);
+      const nextIdx = currentIdx + 1;
+      try {
+        const data: QuizSavedProgress = {
+          shuffledIds: activeQuestions.map(q => q.idQuiz),
+          answeredMap,
+          currentIdx: nextIdx,
+          score,
+        };
+        localStorage.setItem(storageKey, JSON.stringify(data));
+        if (userDni) saveQuizProgressToSheets(userDni, topic.id, data);
+      } catch { /* ignore quota errors */ }
+      setCurrentIdx(nextIdx);
       setSelectedOption(null);
       setShowFeedback(false);
     } else {

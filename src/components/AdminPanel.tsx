@@ -8,7 +8,7 @@ import {
   CheckCircle2, Loader2, Lock, Eye, EyeOff, RefreshCw,
   Wifi, WifiOff, ChevronDown, ChevronUp,
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
-  Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp
+  Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG } from '../config/app.config';
 import {
@@ -16,7 +16,7 @@ import {
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  clearSheetCache, fetchAllIngresos,
+  clearSheetCache, fetchAllIngresos, fetchAllCertificates,
 } from '../services/sheetsService';
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
@@ -241,6 +241,7 @@ export default function AdminPanel({
 
   // Progress tracking tab
   const [ingresoRecords, setIngresoRecords] = useState<IngresoRecord[]>([]);
+  const [allCertificates, setAllCertificates] = useState<Record<string, Record<string, string>>>({});
   const [progressLoading, setProgressLoading] = useState(false);
   const [progressSearch, setProgressSearch] = useState('');
   const [progressEmpresaFilter, setProgressEmpresaFilter] = useState('');
@@ -254,13 +255,14 @@ export default function AdminPanel({
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Load ingreso records when progress tab opens
+  // Load ingreso records + certificates when progress tab opens
   useEffect(() => {
     if (activeTab !== 'progress') return;
     if (ingresoRecords.length > 0) return;
     setProgressLoading(true);
-    fetchAllIngresos().then(records => {
+    Promise.all([fetchAllIngresos(), fetchAllCertificates()]).then(([records, certs]) => {
       setIngresoRecords(records);
+      setAllCertificates(certs);
       setProgressLoading(false);
     }).catch(() => setProgressLoading(false));
   }, [activeTab]);
@@ -268,8 +270,9 @@ export default function AdminPanel({
   const handleRefreshProgress = () => {
     setProgressLoading(true);
     setIngresoRecords([]);
-    fetchAllIngresos().then(records => {
+    Promise.all([fetchAllIngresos(), fetchAllCertificates()]).then(([records, certs]) => {
       setIngresoRecords(records);
+      setAllCertificates(certs);
       setProgressLoading(false);
     }).catch(() => setProgressLoading(false));
   };
@@ -2446,8 +2449,9 @@ ${text}`;
                                           : 0;
                                         const score = tp?.quizScore;
                                         const notStarted = !tp;
+                                        const certUrl = allCertificates[record.dni]?.[topic.id];
                                         return (
-                                          <div key={topic.id} className="flex items-center gap-3">
+                                          <div key={topic.id} className="flex items-center gap-2">
                                             <div className="flex-1 min-w-0">
                                               <div className="flex items-center justify-between gap-2 mb-1">
                                                 <p className={`text-xs font-semibold truncate ${notStarted ? 'text-[#737781]' : 'text-[#191c1d]'}`}>{topic.title}</p>
@@ -2471,6 +2475,18 @@ ${text}`;
                                             ) : tp?.completed ? (
                                               <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
                                             ) : null}
+                                            {certUrl && (
+                                              <a
+                                                href={certUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                title="Ver certificado"
+                                                className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#1b4d89]/10 text-[#1b4d89] hover:bg-[#1b4d89]/20 transition-colors"
+                                              >
+                                                <Award className="w-3 h-3" />
+                                                <span className="text-[9px] font-bold">Cert.</span>
+                                              </a>
+                                            )}
                                           </div>
                                         );
                                       })}

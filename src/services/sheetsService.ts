@@ -672,6 +672,36 @@ export async function fetchCertificateLinkByDni(dni: string): Promise<Record<str
   }
 }
 
+/** Fetch ALL certificates from CERTIFICADOS sheet, grouped by DNI → { topicId: url } */
+export async function fetchAllCertificates(): Promise<Record<string, Record<string, string>>> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.certificates);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return {};
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const map: Record<string, Record<string, string>> = {};
+          for (const row of results.data as any[]) {
+            const dni = String(row.DNI || '').trim();
+            const topicId = String(row.TopicId || row.topicId || row.TOPICID || '').trim();
+            const link = String(row.LinkCertificado || row.PDF_URL || '').trim();
+            if (!dni || !topicId || !link) continue;
+            if (!map[dni]) map[dni] = {};
+            map[dni][topicId] = link;
+          }
+          resolve(map);
+        },
+        error: () => resolve({}),
+      });
+    });
+  } catch {
+    return {};
+  }
+}
+
 /** Fetch user record from INGRESOS sheet by DNI (read-only via CSV) */
 export async function fetchIngresoByDni(dni: string): Promise<IngresoRecord | null> {
   const url = getSheetUrl(SHEETS_CONFIG.sheets.ingresos);
