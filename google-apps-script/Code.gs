@@ -15,6 +15,8 @@ const QUIZ_SHEET_NAME = 'QUIZ';
 const DATA_SHEET_NAME = 'DATA';
 const INGRESOS_SHEET_NAME = 'INGRESOS';
 const LEARN_SHEET_NAME = 'LEARN';
+const SHORT_EVALS_SHEET_NAME = 'SHORT_EVALUACIONES';
+const SHORT_RESULTS_SHEET_NAME = 'SHORT_RESULTADOS';
 
 function doPost(e) {
   try {
@@ -67,6 +69,14 @@ function doPost(e) {
       const sheet = ss.getSheetByName(LEARN_SHEET_NAME);
       if (!sheet) return createResponse({ status: 'error', message: 'Hoja LEARN no encontrada' });
       return deleteTopic(sheet, data.topicIds);
+    } else if (data.action === 'createShortEval') {
+      return createShortEval(ss, data);
+    } else if (data.action === 'updateShortEval') {
+      return updateShortEval(ss, data);
+    } else if (data.action === 'deleteShortEval') {
+      return deleteShortEval(ss, data);
+    } else if (data.action === 'saveShortEvalResult') {
+      return saveShortEvalResult(ss, data);
     }
 
     return createResponse({ status: 'error', message: 'Acción no reconocida' });
@@ -533,6 +543,134 @@ function getOrCreateColumn(sheet, columnName) {
   return nextCol - 1;
 }
 
+
+// =============================================
+// SHORT EVALUACIONES
+// =============================================
+
+var SHORT_EVALS_HEADERS = ['Id', 'Nombre', 'Descripcion', 'TopicId', 'TopicTitle', 'ChunkIds', 'Activo', 'FechaCreacion'];
+var SHORT_RESULTS_HEADERS = ['EvaluacionId', 'EvaluacionNombre', 'Tema', 'DNI', 'Apellidos', 'Nombres', 'Nota', 'Porcentaje', 'FechaHora', 'TotalPreguntas', 'Correctas', 'PreguntasErroneas'];
+
+function getOrCreateSheetWithHeaders(ss, name, headers) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    return sheet;
+  }
+  var firstRow = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+  if (!firstRow[0] || String(firstRow[0]).trim() === '') {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  return sheet;
+}
+
+function buildRowFromObject(headers, valueMap) {
+  return headers.map(function(h) {
+    return valueMap[h] !== undefined && valueMap[h] !== null ? valueMap[h] : '';
+  });
+}
+
+function nowPeruString() {
+  // dd/MM/yyyy - (HH:mm:ss) en zona horaria de Lima
+  var tz = 'America/Lima';
+  return Utilities.formatDate(new Date(), tz, "dd/MM/yyyy") + ' - (' +
+         Utilities.formatDate(new Date(), tz, "HH:mm:ss") + ')';
+}
+
+function createShortEval(ss, data) {
+  var sheet = getOrCreateSheetWithHeaders(ss, SHORT_EVALS_SHEET_NAME, SHORT_EVALS_HEADERS);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var chunkIds = Array.isArray(data.chunkIds) ? data.chunkIds.join('|') : String(data.chunkIds || '');
+  var rowData = buildRowFromObject(headers, {
+    Id: String(data.id || '').trim(),
+    Nombre: String(data.nombre || '').trim(),
+    Descripcion: String(data.descripcion || '').trim(),
+    TopicId: String(data.topicId || '').trim(),
+    TopicTitle: String(data.topicTitle || '').trim(),
+    ChunkIds: chunkIds,
+    Activo: data.activo === true || String(data.activo) === 'true' ? 'true' : 'false',
+    FechaCreacion: data.fechaCreacion ? String(data.fechaCreacion) : nowPeruString()
+  });
+  sheet.appendRow(rowData);
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Evaluación creada' });
+}
+
+function updateShortEval(ss, data) {
+  var sheet = ss.getSheetByName(SHORT_EVALS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja SHORT_EVALUACIONES no encontrada' });
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var idIdx = headers.indexOf('Id');
+  var activoIdx = headers.indexOf('Activo');
+  if (idIdx === -1) return createResponse({ status: 'error', message: 'Columna Id no encontrada' });
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][idIdx]).trim() === String(data.id).trim()) {
+      if (activoIdx !== -1 && data.activo !== undefined) {
+        sheet.getRange(i + 1, activoIdx + 1).setValue(data.activo === true || String(data.activo) === 'true' ? 'true' : 'false');
+      }
+      SpreadsheetApp.flush();
+      return createResponse({ status: 'ok', message: 'Evaluación actualizada' });
+    }
+  }
+  return createResponse({ status: 'error', message: 'Evaluación no encontrada' });
+}
+
+function deleteShortEval(ss, data) {
+  var sheet = ss.getSheetByName(SHORT_EVALS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja SHORT_EVALUACIONES no encontrada' });
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var idIdx = headers.indexOf('Id');
+  if (idIdx === -1) return createResponse({ status: 'error', message: 'Columna Id no encontrada' });
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (String(values[i][idIdx]).trim() === String(data.id).trim()) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Evaluación eliminada' });
+}
+
+function saveShortEvalResult(ss, data) {
+  var sheet = getOrCreateSheetWithHeaders(ss, SHORT_RESULTS_SHEET_NAME, SHORT_RESULTS_HEADERS);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  // Blindaje anti-duplicado: si ya existe (EvaluacionId + DNI), no volver a insertar
+  var values = sheet.getDataRange().getValues();
+  var evalIdx = headers.indexOf('EvaluacionId');
+  var dniIdx = headers.indexOf('DNI');
+  if (evalIdx !== -1 && dniIdx !== -1) {
+    for (var i = 1; i < values.length; i++) {
+      if (String(values[i][evalIdx]).trim() === String(data.evaluacionId).trim() &&
+          String(values[i][dniIdx]).trim() === String(data.dni).trim()) {
+        return createResponse({ status: 'ok', message: 'Ya registrado', duplicate: true });
+      }
+    }
+  }
+
+  var wrongJson = '';
+  try { wrongJson = JSON.stringify(data.preguntasErroneas || []); } catch (e) { wrongJson = '[]'; }
+
+  var rowData = buildRowFromObject(headers, {
+    EvaluacionId: String(data.evaluacionId || '').trim(),
+    EvaluacionNombre: String(data.evaluacionNombre || '').trim(),
+    Tema: String(data.tema || '').trim(),
+    DNI: String(data.dni || '').trim(),
+    Apellidos: String(data.apellidos || '').trim(),
+    Nombres: String(data.nombres || '').trim(),
+    Nota: data.nota !== undefined ? data.nota : '',
+    Porcentaje: data.porcentaje !== undefined ? data.porcentaje : '',
+    FechaHora: nowPeruString(),
+    TotalPreguntas: data.totalPreguntas !== undefined ? data.totalPreguntas : '',
+    Correctas: data.correctas !== undefined ? data.correctas : '',
+    PreguntasErroneas: wrongJson
+  });
+  sheet.appendRow(rowData);
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Resultado guardado' });
+}
 
 function createResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
