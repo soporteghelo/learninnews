@@ -43,6 +43,10 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
   const [prevNota, setPrevNota] = useState<number | null>(null);
   const [prevFecha, setPrevFecha] = useState('');
 
+  // Resultados previos de esta evaluación (para auto-reconocer DNI y bloquear repetición)
+  type PrevResult = { dni: string; apellidos: string; nombres: string; nota: number; fechaHora: string };
+  const [evalResults, setEvalResults] = useState<PrevResult[]>([]);
+
   // Quiz
   const [activeQuestions, setActiveQuestions] = useState<QuizQuestion[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -62,18 +66,30 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
   );
 
   useEffect(() => {
-    Promise.all([fetchShortEvals(), fetchQuizQuestions(), fetchDataChunks()])
-      .then(([evals, questions, chunks]) => {
+    Promise.all([fetchShortEvals(), fetchQuizQuestions(), fetchDataChunks(), fetchShortResultsDni(evalId)])
+      .then(([evals, questions, chunks, prevResults]) => {
         const ev = evals.find(e => e.id === evalId);
         if (!ev) { setPageState('notFound'); return; }
         if (!ev.activo) { setEvalData(ev); setPageState('inactive'); return; }
         setEvalData(ev);
         setAllQuestions(questions);
         setAllChunks(chunks);
+        setEvalResults(prevResults);
         setPageState('entry');
       })
       .catch(() => setPageState('error'));
   }, [evalId]);
+
+  // Auto-reconocer apellidos/nombres cuando el DNI coincide con un resultado previo
+  useEffect(() => {
+    const d = dni.trim();
+    if (!d) return;
+    const match = evalResults.find(r => r.dni === d);
+    if (match) {
+      if (match.apellidos) setApellidos(match.apellidos);
+      if (match.nombres) setNombres(match.nombres);
+    }
+  }, [dni, evalResults]);
 
   const handleEntry = async () => {
     setEntryError('');
@@ -87,8 +103,13 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
     }
     setPageState('checking');
     try {
+      // Revisar primero lo registrado localmente (evita el retraso de caché del CSV
+      // cuando alguien acaba de rendir y vuelve a ingresar con el mismo DNI), luego el sheet.
+      const localTaken = evalResults.find(r => r.dni === dni.trim());
       const results = await fetchShortResultsDni(evalId);
-      const taken = results.find(r => r.dni === dni.trim());
+      const remoteTaken = results.find(r => r.dni === dni.trim());
+      const taken = localTaken || remoteTaken;
+      if (results.length > 0) setEvalResults(results);
       if (taken) {
         setPrevNota(taken.nota);
         setPrevFecha(taken.fechaHora);
@@ -114,7 +135,10 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
         setPageState('entry');
         return;
       }
-      const shuffled = shuffleArray(pool);
+      // Máximo 15 preguntas, elegidas al azar. La nota (0–20) se recalcula sobre
+      // la cantidad realmente mostrada (ver handleNext), así que menos de 15 también
+      // reparte correctamente el puntaje hasta 20.
+      const shuffled = shuffleArray(pool).slice(0, 15);
       setActiveQuestions(shuffled);
       setCurrentIdx(0);
       setAnsweredMap({});
@@ -180,8 +204,33 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
         });
       } catch { /* result shown even if save fails */ }
 
+      // Registrar localmente para reconocer/bloquear si vuelve a ingresar con el mismo DNI
+      setEvalResults(prev => ([
+        ...prev,
+        { dni: dni.trim(), apellidos: apellidos.trim(), nombres: nombres.trim(), nota: finalScoreVal, fechaHora: '' },
+      ]));
+
       setPageState('done');
     }
+  };
+
+  // Volver al inicio del login de la evaluación (limpia el formulario)
+  const resetToEntry = () => {
+    setDni('');
+    setApellidos('');
+    setNombres('');
+    setActiveQuestions([]);
+    setCurrentIdx(0);
+    setAnsweredMap({});
+    setScore(0);
+    setSelectedOption(null);
+    setShowFeedback(false);
+    setFinalScore(0);
+    setWrongAnswers([]);
+    setPrevNota(null);
+    setPrevFecha('');
+    setEntryError('');
+    setPageState('entry');
   };
 
   const q = activeQuestions[currentIdx];
@@ -255,7 +304,13 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
             <p className="text-2xl font-bold text-emerald-600 mt-1">{pct}%</p>
             <p className="text-xs text-[#737781] mt-2">{prevFecha}</p>
           </div>
-          <p className="text-xs text-[#737781]">Solo se permite un intento por evaluación.</p>
+          <p className="text-xs text-[#737781] mb-4">Solo se permite un intento por evaluación.</p>
+          <button
+            onClick={resetToEntry}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-[#1b4d89] text-white rounded-xl font-bold text-sm"
+          >
+            <ArrowRight className="w-4 h-4" /> Volver al inicio
+          </button>
         </motion.div>
       </div>
     );
@@ -297,7 +352,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
           </div>
 
           {wrongAnswers.length > 0 && (
-            <div className="border-t border-[#f3f4f5] px-6 pb-6">
+            <div className="border-t border-[#f3f4f5] px-6">
               <p className="text-[10px] font-bold text-[#737781] uppercase tracking-wider my-3">Respuestas incorrectas</p>
               <div className="space-y-3">
                 {wrongAnswers.map((w, i) => (
@@ -311,6 +366,15 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
               </div>
             </div>
           )}
+
+          <div className="px-6 pb-6 pt-4">
+            <button
+              onClick={resetToEntry}
+              className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#1b4d89] text-white rounded-xl font-bold text-sm"
+            >
+              <ArrowRight className="w-4 h-4" /> Volver al inicio
+            </button>
+          </div>
         </motion.div>
       </div>
     );

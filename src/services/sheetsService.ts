@@ -1068,7 +1068,7 @@ export async function fetchShortEvals(): Promise<ShortEval[]> {
   } catch { return []; }
 }
 
-export async function fetchShortResultsDni(evalId: string): Promise<{ dni: string; nota: number; fechaHora: string }[]> {
+export async function fetchShortResultsDni(evalId: string): Promise<{ dni: string; apellidos: string; nombres: string; nota: number; fechaHora: string }[]> {
   const url = getSheetUrl(SHEETS_CONFIG.sheets.shortResults);
   try {
     const response = await fetch(url, { cache: 'no-store' });
@@ -1082,6 +1082,8 @@ export async function fetchShortResultsDni(evalId: string): Promise<{ dni: strin
             .filter((r: any) => String(r.EvaluacionId || '').trim() === evalId && r.DNI)
             .map((r: any) => ({
               dni: String(r.DNI || '').trim(),
+              apellidos: String(r.Apellidos || '').trim(),
+              nombres: String(r.Nombres || '').trim(),
               nota: parseFloat(r.Nota || '0') || 0,
               fechaHora: String(r.FechaHora || '').trim(),
             })));
