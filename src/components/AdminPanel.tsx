@@ -8,7 +8,8 @@ import {
   CheckCircle2, Loader2, Lock, Eye, EyeOff, RefreshCw,
   Wifi, WifiOff, ChevronDown, ChevronUp,
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
-  Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award
+  Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
+  ClipboardCheck, ExternalLink, ToggleLeft, ToggleRight, Globe
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG } from '../config/app.config';
 import {
@@ -17,11 +18,12 @@ import {
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
   clearSheetCache, fetchAllIngresos, fetchAllCertificates,
+  fetchShortEvals, createShortEval, updateShortEvalStatus, deleteShortEval, fetchAllShortResults,
 } from '../services/sheetsService';
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
-  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress
+  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEval
 } from '../types';
 
 const ADMIN_AUTH_KEY = 'learndrive_admin_auth';
@@ -248,6 +250,19 @@ export default function AdminPanel({
   const [progressPublicoFilter, setProgressPublicoFilter] = useState('');
   const [progressExpandedDni, setProgressExpandedDni] = useState<string | null>(null);
 
+  // Short Evaluaciones state
+  const [shortEvals, setShortEvals] = useState<ShortEval[]>([]);
+  const [shortEvalsLoading, setShortEvalsLoading] = useState(false);
+  const [shortResults, setShortResults] = useState<Array<{ evaluacionId: string; dni: string; nombres: string; apellidos: string; nota: number; porcentaje: number; fechaHora: string; tema: string }>>([]);
+  // New eval form
+  const [newEvalNombre, setNewEvalNombre] = useState('');
+  const [newEvalDesc, setNewEvalDesc] = useState('');
+  const [newEvalTopicId, setNewEvalTopicId] = useState('');
+  const [newEvalChunkIds, setNewEvalChunkIds] = useState<string[]>([]);
+  const [newEvalSaving, setNewEvalSaving] = useState(false);
+  const [showNewEvalForm, setShowNewEvalForm] = useState(false);
+  const [showResultsFor, setShowResultsFor] = useState<string | null>(null);
+
   // Toast notification
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
@@ -266,6 +281,74 @@ export default function AdminPanel({
       setProgressLoading(false);
     }).catch(() => setProgressLoading(false));
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'shortEvals') return;
+    if (shortEvals.length > 0) return;
+    setShortEvalsLoading(true);
+    Promise.all([fetchShortEvals(), fetchAllShortResults()]).then(([evs, results]) => {
+      setShortEvals(evs);
+      setShortResults(results);
+      setShortEvalsLoading(false);
+    }).catch(() => setShortEvalsLoading(false));
+  }, [activeTab]);
+
+  const handleRefreshShortEvals = () => {
+    setShortEvalsLoading(true);
+    setShortEvals([]);
+    Promise.all([fetchShortEvals(), fetchAllShortResults()]).then(([evs, results]) => {
+      setShortEvals(evs);
+      setShortResults(results);
+      setShortEvalsLoading(false);
+    }).catch(() => setShortEvalsLoading(false));
+  };
+
+  const handleCreateShortEval = async () => {
+    if (!newEvalNombre.trim() || !newEvalTopicId) return;
+    const topic = topics.find(t => t.id === newEvalTopicId);
+    if (!topic) return;
+    const id = `eval_${Date.now()}`;
+    const newEval: ShortEval = {
+      id,
+      nombre: newEvalNombre.trim(),
+      descripcion: newEvalDesc.trim(),
+      topicId: newEvalTopicId,
+      topicTitle: topic.title,
+      chunkIds: newEvalChunkIds,
+      activo: true,
+      fechaCreacion: new Date().toLocaleString('es-PE'),
+    };
+    setNewEvalSaving(true);
+    try {
+      await createShortEval(newEval);
+      setShortEvals(prev => [newEval, ...prev]);
+      setNewEvalNombre(''); setNewEvalDesc(''); setNewEvalTopicId(''); setNewEvalChunkIds([]);
+      setShowNewEvalForm(false);
+      showToast('Evaluación creada exitosamente');
+    } catch {
+      showToast('Error al crear la evaluación. Verifica el Apps Script.', 'error');
+    }
+    setNewEvalSaving(false);
+  };
+
+  const handleToggleEvalActive = async (ev: ShortEval) => {
+    try {
+      await updateShortEvalStatus(ev.id, !ev.activo);
+      setShortEvals(prev => prev.map(e => e.id === ev.id ? { ...e, activo: !e.activo } : e));
+    } catch { showToast('Error al actualizar estado', 'error'); }
+  };
+
+  const handleDeleteShortEval = async (id: string) => {
+    if (!confirm('¿Eliminar esta evaluación?')) return;
+    try {
+      await deleteShortEval(id);
+      setShortEvals(prev => prev.filter(e => e.id !== id));
+      showToast('Evaluación eliminada');
+    } catch { showToast('Error al eliminar', 'error'); }
+  };
+
+  const getEvalLink = (id: string) =>
+    `${window.location.origin}${window.location.pathname}#/eval/${id}`;
 
   const handleRefreshProgress = () => {
     setProgressLoading(true);
@@ -1368,25 +1451,26 @@ ${text}`;
         </AnimatePresence>
 
         {/* Tab bar */}
-        <div className="mb-6 grid grid-cols-5 gap-1">
+        <div className="mb-6 grid grid-cols-6 gap-1">
           {([
             { key: 'topics', label: 'Detalles', badge: null },
             { key: 'overview', label: 'Resumen', badge: null },
             { key: 'content', label: 'Contenido', badge: selectedTopicId ? activeContentCount : null },
             { key: 'quiz', label: 'Quizzes', badge: selectedTopicId ? activeQuizCount : null },
             { key: 'progress', label: 'Usuarios', badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
+            { key: 'shortEvals', label: 'Evals', badge: shortEvals.length > 0 ? shortEvals.length : null },
           ] as { key: AdminTab; label: string; badge: number | null }[]).map(tab => (
             <button
               key={tab.key}
-              disabled={tab.key !== 'topics' && tab.key !== 'progress' && !selectedTopicId}
+              disabled={tab.key !== 'topics' && tab.key !== 'progress' && tab.key !== 'shortEvals' && !selectedTopicId}
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center justify-center gap-1 px-1 py-1.5 text-[10px] xs:text-[11px] font-bold rounded-xl transition-all border ${
                 activeTab === tab.key
                   ? 'bg-[#1b4d89] text-white border-[#1b4d89] shadow-sm'
-                  : (tab.key !== 'topics' && tab.key !== 'progress' && !selectedTopicId)
+                  : (tab.key !== 'topics' && tab.key !== 'progress' && tab.key !== 'shortEvals' && !selectedTopicId)
                   ? 'bg-[#f8f9fa]/50 text-[#c3c6d1] border-[#e1e3e4]/60 cursor-not-allowed opacity-60'
                   : 'bg-white text-[#737781] border-[#e1e3e4] hover:bg-[#f3f4f5] hover:border-[#1b4d89]/30 hover:text-[#00366b]'
-              }`}
+              }`
             >
               <span className="truncate">{tab.label}</span>
               {tab.badge !== null && (
@@ -1607,7 +1691,7 @@ ${text}`;
           </div>
         )}
 
-        {selectedTopicId && activeTab !== 'topics' && activeTab !== 'progress' && (
+        {selectedTopicId && activeTab !== 'topics' && activeTab !== 'progress' && activeTab !== 'shortEvals' && (
           <>
 
 
@@ -2246,7 +2330,7 @@ ${text}`;
           </>
         )}
 
-        {!selectedTopicId && activeTab !== 'progress' && (
+        {!selectedTopicId && activeTab !== 'progress' && activeTab !== 'shortEvals' && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-20 h-20 rounded-full bg-[#e1e3e4] flex items-center justify-center mb-4">
               <Search className="w-10 h-10 text-[#737781]" />
@@ -2537,6 +2621,214 @@ ${text}`;
                   );
                 })()}
               </>
+            )}
+          </div>
+        )}
+
+        {/* ====== TAB: SHORT EVALUACIONES ====== */}
+        {activeTab === 'shortEvals' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-black text-[#00366b] flex items-center gap-2">
+                  <ClipboardCheck className="w-5 h-5 text-[#1b4d89]" />
+                  Evaluaciones Cortas
+                </h2>
+                <p className="text-xs text-[#737781] mt-0.5">Crea evaluaciones con enlace directo — un intento por usuario</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleRefreshShortEvals} disabled={shortEvalsLoading}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#e1e3e4] text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] transition-all disabled:opacity-50">
+                  {shortEvalsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  Actualizar
+                </button>
+                <button onClick={() => setShowNewEvalForm(v => !v)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1b4d89] text-white text-xs font-bold hover:bg-[#00366b] transition-all">
+                  <Plus className="w-3.5 h-3.5" />
+                  Nueva
+                </button>
+              </div>
+            </div>
+
+            {/* Create form */}
+            <AnimatePresence>
+              {showNewEvalForm && (
+                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                  className="bg-white rounded-2xl border border-[#1b4d89]/30 p-5 space-y-3">
+                  <p className="text-xs font-bold text-[#1b4d89] uppercase tracking-wider">Nueva evaluación corta</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Nombre *</label>
+                      <input value={newEvalNombre} onChange={e => setNewEvalNombre(e.target.value)}
+                        placeholder="Ej: Evaluación SSMA - Semana 26"
+                        className="w-full px-3 py-2.5 text-sm border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Descripción</label>
+                      <input value={newEvalDesc} onChange={e => setNewEvalDesc(e.target.value)}
+                        placeholder="Descripción opcional"
+                        className="w-full px-3 py-2.5 text-sm border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Módulo *</label>
+                    <select value={newEvalTopicId} onChange={e => { setNewEvalTopicId(e.target.value); setNewEvalChunkIds([]); }}
+                      className="w-full px-3 py-2.5 text-sm border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]">
+                      <option value="">— Seleccionar módulo —</option>
+                      {topics.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+                    </select>
+                  </div>
+                  {newEvalTopicId && (() => {
+                    const chunks = allChunks.filter(c => c.idMain === newEvalTopicId);
+                    if (chunks.length === 0) return null;
+                    return (
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">
+                          Secciones (dejar vacío = todas las preguntas del módulo)
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto">
+                          {chunks.map(c => (
+                            <label key={c.cod} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e1e3e4] cursor-pointer hover:bg-[#f8f9fa] text-xs">
+                              <input type="checkbox" checked={newEvalChunkIds.includes(c.cod)}
+                                onChange={e => setNewEvalChunkIds(prev => e.target.checked ? [...prev, c.cod] : prev.filter(id => id !== c.cod))}
+                                className="accent-[#1b4d89]" />
+                              <span className="font-medium text-[#424750] truncate">{c.tema}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={() => setShowNewEvalForm(false)}
+                      className="flex-1 py-2.5 rounded-xl border border-[#e1e3e4] text-xs font-bold text-[#737781] hover:bg-[#f3f4f5]">
+                      Cancelar
+                    </button>
+                    <button onClick={handleCreateShortEval} disabled={!newEvalNombre.trim() || !newEvalTopicId || newEvalSaving}
+                      className="flex-1 py-2.5 rounded-xl bg-[#1b4d89] text-white text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5">
+                      {newEvalSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      Crear evaluación
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* List */}
+            {shortEvalsLoading ? (
+              <div className="flex flex-col items-center py-12 gap-2">
+                <Loader2 className="w-8 h-8 text-[#1b4d89] animate-spin" />
+                <p className="text-xs text-[#737781]">Cargando evaluaciones...</p>
+              </div>
+            ) : shortEvals.length === 0 ? (
+              <div className="flex flex-col items-center py-12 text-center">
+                <ClipboardCheck className="w-12 h-12 text-[#e1e3e4] mb-3" />
+                <p className="text-sm font-bold text-[#737781]">Sin evaluaciones</p>
+                <p className="text-xs text-[#737781] mt-1">Haz clic en "Nueva" para crear la primera evaluación corta</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {shortEvals.map(ev => {
+                  const evalResults = shortResults.filter(r => r.evaluacionId === ev.id);
+                  const link = getEvalLink(ev.id);
+                  const showResults = showResultsFor === ev.id;
+                  const avgNota = evalResults.length > 0
+                    ? (evalResults.reduce((s, r) => s + r.nota, 0) / evalResults.length).toFixed(1)
+                    : null;
+                  return (
+                    <div key={ev.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
+                      <div className="px-4 py-3.5 flex items-start gap-3">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${ev.activo ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                          <ClipboardCheck className={`w-5 h-5 ${ev.activo ? 'text-emerald-600' : 'text-slate-400'}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-[#00366b] text-sm truncate">{ev.nombre}</p>
+                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${ev.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                              {ev.activo ? 'ACTIVO' : 'INACTIVO'}
+                            </span>
+                          </div>
+                          {ev.descripcion && <p className="text-xs text-[#737781] mt-0.5">{ev.descripcion}</p>}
+                          <p className="text-[10px] text-[#737781] mt-1">
+                            Módulo: <span className="font-semibold">{ev.topicTitle}</span>
+                            {ev.chunkIds.length > 0 && ` · ${ev.chunkIds.length} sección(es)`}
+                            <span className="mx-1">·</span>
+                            <span className="font-semibold">{evalResults.length}</span> respuestas
+                            {avgNota && <span> · Nota prom: <span className="font-semibold text-amber-600">{avgNota}/20</span></span>}
+                          </p>
+                          {/* Link box */}
+                          <div className="mt-2 flex items-center gap-2 bg-[#f8f9fa] rounded-lg px-3 py-2 border border-[#e1e3e4]">
+                            <Globe className="w-3.5 h-3.5 text-[#737781] flex-shrink-0" />
+                            <span className="text-[10px] text-[#737781] truncate flex-1 font-mono">{link}</span>
+                            <button
+                              onClick={() => { navigator.clipboard.writeText(link); showToast('Enlace copiado'); }}
+                              className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-[#1b4d89]/10 text-[#1b4d89] hover:bg-[#1b4d89]/20 transition-colors text-[10px] font-bold">
+                              <Copy className="w-3 h-3" />Copiar
+                            </button>
+                            <a href={link} target="_blank" rel="noopener noreferrer"
+                              className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors text-[10px] font-bold">
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1.5 flex-shrink-0">
+                          <button onClick={() => handleToggleEvalActive(ev)} title={ev.activo ? 'Desactivar' : 'Activar'}
+                            className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
+                            {ev.activo
+                              ? <ToggleRight className="w-5 h-5 text-emerald-500" />
+                              : <ToggleLeft className="w-5 h-5 text-slate-400" />}
+                          </button>
+                          <button onClick={() => setShowResultsFor(showResults ? null : ev.id)} title="Ver resultados"
+                            className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
+                            <TrendingUp className="w-4 h-4 text-[#1b4d89]" />
+                          </button>
+                          <button onClick={() => handleDeleteShortEval(ev.id)} title="Eliminar"
+                            className="p-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Results table */}
+                      {showResults && (
+                        <div className="border-t border-[#f3f4f5] px-4 py-3 bg-[#f8f9fa]">
+                          <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">Resultados ({evalResults.length})</p>
+                          {evalResults.length === 0 ? (
+                            <p className="text-xs text-[#737781] italic">Sin respuestas aún</p>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-[9px] text-[#737781] uppercase">
+                                    <th className="text-left pb-1.5 pr-3">DNI</th>
+                                    <th className="text-left pb-1.5 pr-3">Apellidos y Nombres</th>
+                                    <th className="text-center pb-1.5 pr-3">Nota</th>
+                                    <th className="text-center pb-1.5">%</th>
+                                    <th className="text-left pb-1.5 pl-3">Fecha</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#f3f4f5]">
+                                  {evalResults.map((r, i) => (
+                                    <tr key={i}>
+                                      <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
+                                      <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.apellidos} {r.nombres}</td>
+                                      <td className={`py-1.5 pr-3 text-center font-bold ${r.nota >= 16 ? 'text-emerald-600' : r.nota >= 12 ? 'text-amber-600' : 'text-red-500'}`}>
+                                        {r.nota.toFixed(1)}/20
+                                      </td>
+                                      <td className="py-1.5 text-center font-bold text-[#424750]">{r.porcentaje}%</td>
+                                      <td className="py-1.5 pl-3 text-[#737781]">{r.fechaHora}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}

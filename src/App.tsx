@@ -38,6 +38,7 @@ const LearningMode = lazy(() => import('./components/LearningMode'));
 const QuizMode = lazy(() => import('./components/QuizMode'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const CertificateClaim = lazy(() => import('./components/CertificateClaim'));
+const ShortEvalPage = lazy(() => import('./components/ShortEvalPage'));
 
 // Loading Fallback Component
 const ViewLoader = () => (
@@ -121,8 +122,14 @@ function migrateAudience(raw: unknown): AudienceType[] {
 }
 
 export default function App() {
+  // --- Detect short eval URL (#/eval/ID) before any other init ---
+  const [shortEvalId] = useState<string | null>(() => {
+    const m = window.location.hash.match(/^#\/eval\/([^/?&]+)/);
+    return m ? m[1] : null;
+  });
+
   // --- Global State ---
-  const [view, setView] = useState<AppView>('login');
+  const [view, setView] = useState<AppView>(() => shortEvalId ? 'shortEval' : 'login');
   const [userSession, setUserSession] = useState<UserSession | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
   const [audience, setAudience] = useState<AudienceType[] | null>(null);
@@ -609,6 +616,14 @@ export default function App() {
   };
 
   // --- Rendering ---
+  if (view === 'shortEval' && shortEvalId) {
+    return (
+      <Suspense fallback={<ViewLoader />}>
+        <ShortEvalPage evalId={shortEvalId} />
+      </Suspense>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6">

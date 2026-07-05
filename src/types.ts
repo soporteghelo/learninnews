@@ -129,7 +129,7 @@ export interface ConnectionTestResult {
   geminiApi: { ok: boolean; error?: string };
 }
 
-export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress';
+export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'shortEvals';
 
 export type AppView =
   | 'login'
@@ -140,4 +140,24 @@ export type AppView =
   | 'learning'
   | 'quiz'
   | 'admin'
-  | 'certificateClaim';
+  | 'certificateClaim'
+  | 'shortEval';
+
+export interface ShortEval {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  topicId: string;
+  topicTitle: string;
+  chunkIds: string[];   // empty = todas las preguntas del topicId
+  activo: boolean;
+  fechaCreacion: string;
+}
+
+export interface ShortEvalWrongAnswer {
+  idQuiz: string;
+  question: string;
+  selected: string;
+  correct: string;
+  explanation: string;
+}

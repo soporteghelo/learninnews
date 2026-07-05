@@ -1035,3 +1035,121 @@ export async function saveQuizProgressToSheets(
     await postToAppsScript({ action: 'updateQuizProgress', dni, topicId, progress });
   } catch { /* non-critical — localStorage remains as fallback */ }
 }
+
+// =============================================
+// SHORT EVALUACIONES
+// =============================================
+import type { ShortEval, ShortEvalWrongAnswer } from '../types';
+
+export async function fetchShortEvals(): Promise<ShortEval[]> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.shortEvals);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          resolve((results.data as any[]).filter(r => r.Id).map((r: any): ShortEval => ({
+            id: String(r.Id || '').trim(),
+            nombre: String(r.Nombre || '').trim(),
+            descripcion: String(r.Descripcion || '').trim(),
+            topicId: String(r.TopicId || '').trim(),
+            topicTitle: String(r.TopicTitle || '').trim(),
+            chunkIds: r.ChunkIds ? String(r.ChunkIds).split('|').map((s: string) => s.trim()).filter(Boolean) : [],
+            activo: String(r.Activo || '').toLowerCase() === 'true' || String(r.Activo || '') === '1',
+            fechaCreacion: String(r.FechaCreacion || '').trim(),
+          })));
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch { return []; }
+}
+
+export async function fetchShortResultsDni(evalId: string): Promise<{ dni: string; nota: number; fechaHora: string }[]> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.shortResults);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          resolve((results.data as any[])
+            .filter((r: any) => String(r.EvaluacionId || '').trim() === evalId && r.DNI)
+            .map((r: any) => ({
+              dni: String(r.DNI || '').trim(),
+              nota: parseFloat(r.Nota || '0') || 0,
+              fechaHora: String(r.FechaHora || '').trim(),
+            })));
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch { return []; }
+}
+
+export async function fetchAllShortResults(): Promise<Array<{
+  evaluacionId: string; evaluacionNombre: string; tema: string;
+  dni: string; apellidos: string; nombres: string;
+  nota: number; porcentaje: number; fechaHora: string; totalPreguntas: number; correctas: number;
+}>> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.shortResults);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          resolve((results.data as any[]).filter((r: any) => r.EvaluacionId && r.DNI).map((r: any) => ({
+            evaluacionId: String(r.EvaluacionId || '').trim(),
+            evaluacionNombre: String(r.EvaluacionNombre || '').trim(),
+            tema: String(r.Tema || '').trim(),
+            dni: String(r.DNI || '').trim(),
+            apellidos: String(r.Apellidos || '').trim(),
+            nombres: String(r.Nombres || '').trim(),
+            nota: parseFloat(r.Nota || '0') || 0,
+            porcentaje: parseFloat(r.Porcentaje || '0') || 0,
+            fechaHora: String(r.FechaHora || '').trim(),
+            totalPreguntas: parseInt(r.TotalPreguntas || '0') || 0,
+            correctas: parseInt(r.Correctas || '0') || 0,
+          })));
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch { return []; }
+}
+
+export async function createShortEval(data: Omit<ShortEval, 'fechaCreacion'>): Promise<void> {
+  await postToAppsScript({ action: 'createShortEval', ...data });
+}
+
+export async function updateShortEvalStatus(id: string, activo: boolean): Promise<void> {
+  await postToAppsScript({ action: 'updateShortEval', id, activo });
+}
+
+export async function deleteShortEval(id: string): Promise<void> {
+  await postToAppsScript({ action: 'deleteShortEval', id });
+}
+
+export async function saveShortEvalResult(data: {
+  evaluacionId: string;
+  evaluacionNombre: string;
+  tema: string;
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  nota: number;
+  porcentaje: number;
+  totalPreguntas: number;
+  correctas: number;
+  preguntasErroneas: ShortEvalWrongAnswer[];
+}): Promise<void> {
+  await postToAppsScript({ action: 'saveShortEvalResult', ...data });
+}

@@ -20,6 +20,8 @@ export const SHEETS_CONFIG = {
     ingresos: 'INGRESOS',
     config: 'CONFIG',
     certificates: 'CERTIFICADOS',
+    shortEvals: 'SHORT_EVALUACIONES',
+    shortResults: 'SHORT_RESULTADOS',
   },
   useMockDataOnError: true,
 } as const;
