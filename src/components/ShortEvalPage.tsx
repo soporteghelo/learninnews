@@ -461,9 +461,9 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
   const progressPct = Math.round((answered / total) * 100);
 
   return (
-    <div className="min-h-screen bg-[#f8f9fa] flex flex-col">
+    <div className="h-[100dvh] bg-[#f8f9fa] flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="bg-white border-b border-[#e1e3e4] px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+      <div className="bg-white border-b border-[#e1e3e4] px-4 py-3 flex items-center justify-between flex-shrink-0 z-10">
         <div className="min-w-0">
           <p className="text-[10px] font-bold text-[#737781] uppercase tracking-wider truncate">{evalData?.nombre}</p>
           <p className="text-xs font-semibold text-[#191c1d] truncate">{nombres} {apellidos}</p>
@@ -475,12 +475,12 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
       </div>
 
       {/* Progress bar */}
-      <div className="h-1.5 bg-[#e1e3e4]">
+      <div className="h-1.5 bg-[#e1e3e4] flex-shrink-0">
         <div className="h-full bg-[#1b4d89] transition-all duration-300" style={{ width: `${progressPct}%` }} />
       </div>
 
-      {/* Question */}
-      <div className="flex-1 flex flex-col items-center justify-start p-4 pt-6">
+      {/* Question (área con scroll propio) */}
+      <div className="flex-1 overflow-y-auto flex flex-col items-center justify-start p-4 pt-6">
         <AnimatePresence mode="wait">
           <motion.div
             key={currentIdx}
@@ -523,28 +523,34 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
               })}
             </div>
 
-            {showFeedback && (
+            {showFeedback && q?.explanation && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-                {q?.explanation && (
-                  <div className="mt-3 px-4 py-3 bg-blue-50 rounded-xl border border-blue-200">
-                    <p className="text-xs text-blue-700 leading-relaxed">{q.explanation}</p>
-                  </div>
-                )}
-                <button
-                  onClick={handleNext}
-                  className="w-full mt-3 flex items-center justify-center gap-2 py-3.5 bg-[#1b4d89] text-white rounded-xl font-bold text-sm"
-                >
-                  {currentIdx < total - 1 ? (
-                    <><ArrowRight className="w-4 h-4" /> Siguiente pregunta</>
-                  ) : (
-                    <><ChevronRight className="w-4 h-4" /> Finalizar evaluación</>
-                  )}
-                </button>
+                <div className="mt-3 px-4 py-3 bg-blue-50 rounded-xl border border-blue-200">
+                  <p className="text-xs text-blue-700 leading-relaxed">{q.explanation}</p>
+                </div>
               </motion.div>
             )}
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Footer fijo con el botón — siempre visible tras responder (sin scroll) */}
+      {showFeedback && (
+        <div className="flex-shrink-0 bg-white/95 backdrop-blur border-t border-[#e1e3e4] p-4">
+          <div className="max-w-lg mx-auto">
+            <button
+              onClick={handleNext}
+              className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#1b4d89] text-white rounded-xl font-bold text-sm"
+            >
+              {currentIdx < total - 1 ? (
+                <><ArrowRight className="w-4 h-4" /> Siguiente pregunta</>
+              ) : (
+                <><ChevronRight className="w-4 h-4" /> Finalizar evaluación</>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
