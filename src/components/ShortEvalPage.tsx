@@ -135,8 +135,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
     } else {
       // Finished — compute results
       const total = activeQuestions.length;
-      const correct = score + (showFeedback && selectedOption === activeQuestions[currentIdx].correctAnswer ? 0 : 0);
-      // score is already updated by handleSelect
+      // score ya fue actualizado por handleSelect
       const finalScoreVal = parseFloat(((score / total) * 20).toFixed(1));
       const pct = Math.round((score / total) * 100);
 
