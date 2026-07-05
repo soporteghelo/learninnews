@@ -7,9 +7,9 @@ import {
 import { shuffleArray } from '../lib/utils';
 import {
   fetchShortEvals, fetchShortResultsDni, saveShortEvalResult,
-  fetchQuizQuestions,
+  fetchQuizQuestions, fetchDataChunks,
 } from '../services/sheetsService';
-import type { ShortEval, QuizQuestion, ShortEvalWrongAnswer } from '../types';
+import type { ShortEval, QuizQuestion, DataChunk, ShortEvalWrongAnswer } from '../types';
 
 type PageState =
   | 'loading'
@@ -31,6 +31,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
   const [pageState, setPageState] = useState<PageState>('loading');
   const [evalData, setEvalData] = useState<ShortEval | null>(null);
   const [allQuestions, setAllQuestions] = useState<QuizQuestion[]>([]);
+  const [allChunks, setAllChunks] = useState<DataChunk[]>([]);
 
   // Entry form
   const [dni, setDni] = useState('');
@@ -61,13 +62,14 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
   );
 
   useEffect(() => {
-    Promise.all([fetchShortEvals(), fetchQuizQuestions()])
-      .then(([evals, questions]) => {
+    Promise.all([fetchShortEvals(), fetchQuizQuestions(), fetchDataChunks()])
+      .then(([evals, questions, chunks]) => {
         const ev = evals.find(e => e.id === evalId);
         if (!ev) { setPageState('notFound'); return; }
         if (!ev.activo) { setEvalData(ev); setPageState('inactive'); return; }
         setEvalData(ev);
         setAllQuestions(questions);
+        setAllChunks(chunks);
         setPageState('entry');
       })
       .catch(() => setPageState('error'));
@@ -93,10 +95,19 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
         setPageState('alreadyTaken');
         return;
       }
-      // Filter questions by eval config
-      const pool = evalData!.chunkIds.length > 0
-        ? allQuestions.filter(q => q.idMain === evalData!.topicId && evalData!.chunkIds.includes(q.idMain))
-        : allQuestions.filter(q => q.idMain === evalData!.topicId);
+      // Filtrar preguntas del tema. Si hay secciones seleccionadas (chunkIds = cod
+      // de secciones), mapear esos cod a su 'tema' y filtrar por categoriaContenido,
+      // que es como la app vincula preguntas ↔ secciones (q.categoriaContenido === chunk.tema).
+      const topicQuestions = allQuestions.filter(q => q.idMain === evalData!.topicId);
+      let pool = topicQuestions;
+      if (evalData!.chunkIds.length > 0) {
+        const selectedTemas = allChunks
+          .filter(c => evalData!.chunkIds.includes(c.cod))
+          .map(c => (c.tema || '').trim());
+        const filtered = topicQuestions.filter(q => selectedTemas.includes((q.categoriaContenido || '').trim()));
+        // Si el match por sección no arroja preguntas, caer a todas las del tema
+        pool = filtered.length > 0 ? filtered : topicQuestions;
+      }
 
       if (pool.length === 0) {
         setEntryError('Esta evaluación no tiene preguntas configuradas. Contacta al administrador.');
