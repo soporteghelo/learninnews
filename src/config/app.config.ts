@@ -254,6 +254,21 @@ export function getStorageKey(key: string): string {
   return `${APP_CONFIG.storage.prefix}${key}`;
 }
 
+// URL pública de producción (Vercel) — usada para generar enlaces compartibles
+// de evaluaciones cortas, de modo que funcionen aunque el admin esté en local.
+export const PUBLIC_APP_URL = 'https://learninnews.vercel.app';
+
+export function getPublicBaseUrl(): string {
+  // En local/preview usamos la URL de producción para que el enlace sea público.
+  // En producción usamos el origen actual (soporta dominios propios).
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+    if (!isLocal) return `${window.location.origin}${window.location.pathname}`;
+  }
+  return `${PUBLIC_APP_URL}/`;
+}
+
 
 export function getSheetUrl(sheetName: string): string {
   const cacheBust = `&_t=${Date.now()}`;

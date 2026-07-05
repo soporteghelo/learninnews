@@ -155,6 +155,13 @@ export default function App() {
 
   // --- Initialization ---
   useEffect(() => {
+    // Modo evaluación corta: página pública autónoma, no inicializar el app principal
+    // (evita que una sesión guardada redirija a dashboard/perfil sobre la vista 'shortEval').
+    if (shortEvalId) {
+      setIsLoading(false);
+      return;
+    }
+
     const restoreLocalData = () => {
       const storedSession = localStorage.getItem(getStorageKey(APP_CONFIG.storage.keys.session));
       if (storedSession) {

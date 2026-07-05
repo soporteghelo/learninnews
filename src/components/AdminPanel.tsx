@@ -11,7 +11,7 @@ import {
   Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
   ClipboardCheck, ExternalLink, ToggleLeft, ToggleRight, Globe
 } from 'lucide-react';
-import { ADMIN_CONFIG, AUDIENCE_CONFIG } from '../config/app.config';
+import { ADMIN_CONFIG, AUDIENCE_CONFIG, getPublicBaseUrl } from '../config/app.config';
 import {
   saveQuizToSheets, deleteQuizFromSheets,
   saveContentToSheets, deleteContentFromSheets,
@@ -348,7 +348,7 @@ export default function AdminPanel({
   };
 
   const getEvalLink = (id: string) =>
-    `${window.location.origin}${window.location.pathname}#/eval/${id}`;
+    `${getPublicBaseUrl()}#/eval/${id}`;
 
   const handleRefreshProgress = () => {
     setProgressLoading(true);
@@ -1470,7 +1470,7 @@ ${text}`;
                   : (tab.key !== 'topics' && tab.key !== 'progress' && tab.key !== 'shortEvals' && !selectedTopicId)
                   ? 'bg-[#f8f9fa]/50 text-[#c3c6d1] border-[#e1e3e4]/60 cursor-not-allowed opacity-60'
                   : 'bg-white text-[#737781] border-[#e1e3e4] hover:bg-[#f3f4f5] hover:border-[#1b4d89]/30 hover:text-[#00366b]'
-              }`
+              }`}
             >
               <span className="truncate">{tab.label}</span>
               {tab.badge !== null && (
@@ -2661,19 +2661,19 @@ ${text}`;
                       <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Nombre *</label>
                       <input value={newEvalNombre} onChange={e => setNewEvalNombre(e.target.value)}
                         placeholder="Ej: Evaluación SSMA - Semana 26"
-                        className="w-full px-3 py-2.5 text-sm border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                        className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium placeholder:text-[#9ca3af] border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Descripción</label>
                       <input value={newEvalDesc} onChange={e => setNewEvalDesc(e.target.value)}
                         placeholder="Descripción opcional"
-                        className="w-full px-3 py-2.5 text-sm border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                        className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium placeholder:text-[#9ca3af] border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Módulo *</label>
                     <select value={newEvalTopicId} onChange={e => { setNewEvalTopicId(e.target.value); setNewEvalChunkIds([]); }}
-                      className="w-full px-3 py-2.5 text-sm border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]">
+                      className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]">
                       <option value="">— Seleccionar módulo —</option>
                       {topics.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
                     </select>
