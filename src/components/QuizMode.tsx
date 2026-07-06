@@ -2,11 +2,14 @@ import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, Award, CheckCircle2, XCircle,
-  ArrowRight, RefreshCw, BarChart3, HelpCircle, BookmarkCheck, Loader2
+  ArrowRight, RefreshCw, BarChart3, HelpCircle, BookmarkCheck, Loader2, Timer
 } from 'lucide-react';
 import { shuffleArray } from '../lib/utils';
 import { fetchQuizProgressFromSheets, saveQuizProgressToSheets } from '../services/sheetsService';
 import type { QuizQuestion, LearnTopic, QuizSavedProgress } from '../types';
+
+// Tiempo límite (segundos) por pregunta. Al agotarse, se avanza automáticamente.
+const QUESTION_TIME = 30;
 
 interface QuizModeProps {
   topic: LearnTopic;
@@ -70,6 +73,7 @@ export default function QuizMode({
   const [showFeedback, setShowFeedback] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
   const [isLoadingSheets, setIsLoadingSheets] = useState(!!userDni && !initState.isResumed);
+  const [timeLeft, setTimeLeft] = useState(QUESTION_TIME);
 
   const totalQuestions = activeQuestions.length;
   const currentQuestion = activeQuestions[currentIdx];
@@ -171,6 +175,32 @@ export default function QuizMode({
     }
   };
 
+  // Se agotó el tiempo: la pregunta cuenta como no respondida (incorrecta) y avanza.
+  const handleTimeout = () => {
+    if (showFeedback) return;
+    setAnsweredMap(prev => ({ ...prev, [currentIdx]: { selected: '', correct: false } }));
+    handleNext();
+  };
+
+  // Cuenta regresiva por pregunta. Se reinicia al cambiar de pregunta y se detiene al responder.
+  useEffect(() => {
+    if (showFeedback || isFinished || isLoadingSheets || totalQuestions === 0) return;
+    setTimeLeft(QUESTION_TIME);
+    const intervalId = setInterval(() => {
+      setTimeLeft(prev => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(intervalId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIdx, showFeedback, isFinished, isLoadingSheets, totalQuestions]);
+
+  // Al llegar a 0 sin respuesta, avanzar automáticamente.
+  useEffect(() => {
+    if (timeLeft === 0 && !showFeedback && !isFinished && !isLoadingSheets && totalQuestions > 0) {
+      handleTimeout();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
+
   // ── LOADING SHEETS STATE ──
   if (isLoadingSheets) {
     return (
@@ -265,6 +295,16 @@ export default function QuizMode({
             </div>
             {/* Running score + answered count */}
             <div className="flex items-center gap-2">
+              {!showFeedback && (
+                <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider tabular-nums border ${
+                  timeLeft <= 10
+                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse'
+                    : 'bg-blue-500/10 text-blue-300 border-blue-500/20'
+                }`}>
+                  <Timer className="w-3 h-3" />
+                  {timeLeft}s
+                </span>
+              )}
               {answeredCount > 0 && (
                 <span className="text-[10px] font-black text-amber-400 uppercase tracking-wider">
                   NOTA {runningScore}/20

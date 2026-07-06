@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2, XCircle, ArrowRight, Award, Loader2,
-  AlertCircle, ClipboardCheck, User, ChevronRight,
+  AlertCircle, ClipboardCheck, User, ChevronRight, Timer,
 } from 'lucide-react';
 import { shuffleArray } from '../lib/utils';
 import {
@@ -22,6 +22,9 @@ type PageState =
   | 'saving'
   | 'done'
   | 'error';
+
+// Tiempo límite (segundos) por pregunta. Al agotarse, se avanza automáticamente.
+const QUESTION_TIME = 30;
 
 interface ShortEvalPageProps {
   evalId: string;
@@ -54,6 +57,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
   const [score, setScore] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(QUESTION_TIME);
 
   // Results
   const [finalScore, setFinalScore] = useState(0);
@@ -162,7 +166,17 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
     setShowFeedback(true);
   };
 
-  const handleNext = async () => {
+  // Se agotó el tiempo: la pregunta cuenta como no respondida (incorrecta) y avanza.
+  const handleTimeout = () => {
+    if (showFeedback) return;
+    const cur = activeQuestions[currentIdx];
+    const newMap = { ...answeredMap, [currentIdx]: { selected: '', correct: false, question: cur } };
+    setAnsweredMap(newMap);
+    handleNext(newMap);
+  };
+
+  const handleNext = async (mapOverride?: typeof answeredMap) => {
+    const map = mapOverride ?? answeredMap;
     if (currentIdx < activeQuestions.length - 1) {
       setCurrentIdx(i => i + 1);
       setSelectedOption(null);
@@ -174,7 +188,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
       const finalScoreVal = parseFloat(((score / total) * 20).toFixed(1));
       const pct = Math.round((score / total) * 100);
 
-      const wrong: ShortEvalWrongAnswer[] = Object.values(answeredMap)
+      const wrong: ShortEvalWrongAnswer[] = Object.values(map)
         .filter(a => !a.correct)
         .map(a => ({
           idQuiz: a.question.idQuiz,
@@ -232,6 +246,25 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
     setEntryError('');
     setPageState('entry');
   };
+
+  // Cuenta regresiva por pregunta. Se reinicia al cambiar de pregunta y se detiene al responder.
+  useEffect(() => {
+    if (pageState !== 'quiz' || showFeedback) return;
+    setTimeLeft(QUESTION_TIME);
+    const intervalId = setInterval(() => {
+      setTimeLeft(prev => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(intervalId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIdx, showFeedback, pageState]);
+
+  // Al llegar a 0 sin respuesta, avanzar automáticamente.
+  useEffect(() => {
+    if (timeLeft === 0 && pageState === 'quiz' && !showFeedback) {
+      handleTimeout();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
 
   const q = activeQuestions[currentIdx];
   const optOrder = optionOrders[currentIdx] ?? ['A', 'B', 'C', 'D'];
@@ -468,9 +501,21 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
           <p className="text-[10px] font-bold text-[#737781] uppercase tracking-wider truncate">{evalData?.nombre}</p>
           <p className="text-xs font-semibold text-[#191c1d] truncate">{nombres} {apellidos}</p>
         </div>
-        <div className="flex-shrink-0 text-right">
-          <p className="text-xs font-bold text-[#1b4d89]">{currentIdx + 1} / {total}</p>
-          <p className="text-[10px] text-[#737781]">preguntas</p>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {!showFeedback && (
+            <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black tabular-nums border ${
+              timeLeft <= 10
+                ? 'bg-red-50 text-red-600 border-red-200 animate-pulse'
+                : 'bg-[#1b4d89]/10 text-[#1b4d89] border-[#1b4d89]/20'
+            }`}>
+              <Timer className="w-3.5 h-3.5" />
+              {timeLeft}s
+            </span>
+          )}
+          <div className="text-right">
+            <p className="text-xs font-bold text-[#1b4d89]">{currentIdx + 1} / {total}</p>
+            <p className="text-[10px] text-[#737781]">preguntas</p>
+          </div>
         </div>
       </div>
 
@@ -539,7 +584,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
         <div className="flex-shrink-0 bg-white/95 backdrop-blur border-t border-[#e1e3e4] p-4">
           <div className="max-w-lg mx-auto">
             <button
-              onClick={handleNext}
+              onClick={() => handleNext()}
               className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#1b4d89] text-white rounded-xl font-bold text-sm"
             >
               {currentIdx < total - 1 ? (
