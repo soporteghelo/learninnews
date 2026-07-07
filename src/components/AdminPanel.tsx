@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import RichContent from './RichContent';
 import * as XLSX from 'xlsx';
@@ -19,11 +19,12 @@ import {
   testSheetsConnection, testAppsScriptConnection,
   clearSheetCache, fetchAllIngresos, fetchAllCertificates,
   fetchShortEvals, createShortEval, updateShortEvalStatus, deleteShortEval, fetchAllShortResults,
+  deleteShortEvalResult,
 } from '../services/sheetsService';
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
-  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEval
+  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEval, ShortEvalWrongAnswer
 } from '../types';
 
 const ADMIN_AUTH_KEY = 'learndrive_admin_auth';
@@ -253,7 +254,7 @@ export default function AdminPanel({
   // Short Evaluaciones state
   const [shortEvals, setShortEvals] = useState<ShortEval[]>([]);
   const [shortEvalsLoading, setShortEvalsLoading] = useState(false);
-  const [shortResults, setShortResults] = useState<Array<{ evaluacionId: string; dni: string; nombres: string; apellidos: string; nota: number; porcentaje: number; fechaHora: string; tema: string }>>([]);
+  const [shortResults, setShortResults] = useState<Array<{ evaluacionId: string; dni: string; nombres: string; apellidos: string; nota: number; porcentaje: number; fechaHora: string; tema: string; preguntasErroneas: ShortEvalWrongAnswer[] }>>([]);
   // New eval form
   const [newEvalNombre, setNewEvalNombre] = useState('');
   const [newEvalDesc, setNewEvalDesc] = useState('');
@@ -262,6 +263,8 @@ export default function AdminPanel({
   const [newEvalSaving, setNewEvalSaving] = useState(false);
   const [showNewEvalForm, setShowNewEvalForm] = useState(false);
   const [showResultsFor, setShowResultsFor] = useState<string | null>(null);
+  const [expandedResult, setExpandedResult] = useState<string | null>(null);
+  const [deletingResult, setDeletingResult] = useState<string | null>(null);
 
   // Toast notification
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -345,6 +348,19 @@ export default function AdminPanel({
       setShortEvals(prev => prev.filter(e => e.id !== id));
       showToast('Evaluación eliminada');
     } catch { showToast('Error al eliminar', 'error'); }
+  };
+
+  const handleDeleteShortResult = async (evaluacionId: string, dni: string) => {
+    if (!confirm('¿Eliminar este registro de resultado? Podrá volver a rendir la evaluación.')) return;
+    const key = `${evaluacionId}__${dni}`;
+    setDeletingResult(key);
+    try {
+      await deleteShortEvalResult(evaluacionId, dni);
+      setShortResults(prev => prev.filter(r => !(r.evaluacionId === evaluacionId && r.dni === dni)));
+      if (expandedResult === key) setExpandedResult(null);
+      showToast('Registro eliminado');
+    } catch { showToast('Error al eliminar registro', 'error'); }
+    finally { setDeletingResult(null); }
   };
 
   const getEvalLink = (id: string) =>
@@ -2805,20 +2821,77 @@ ${text}`;
                                     <th className="text-center pb-1.5 pr-3">Nota</th>
                                     <th className="text-center pb-1.5">%</th>
                                     <th className="text-left pb-1.5 pl-3">Fecha</th>
+                                    <th className="text-center pb-1.5 pl-3">Falló</th>
+                                    <th className="pb-1.5"></th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#f3f4f5]">
-                                  {evalResults.map((r, i) => (
-                                    <tr key={i}>
-                                      <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
-                                      <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.apellidos} {r.nombres}</td>
-                                      <td className={`py-1.5 pr-3 text-center font-bold ${r.nota >= 16 ? 'text-emerald-600' : r.nota >= 12 ? 'text-amber-600' : 'text-red-500'}`}>
-                                        {r.nota.toFixed(1)}/20
-                                      </td>
-                                      <td className="py-1.5 text-center font-bold text-[#424750]">{r.porcentaje}%</td>
-                                      <td className="py-1.5 pl-3 text-[#737781]">{r.fechaHora}</td>
-                                    </tr>
-                                  ))}
+                                  {evalResults.map((r) => {
+                                    const rowKey = `${r.evaluacionId}__${r.dni}`;
+                                    const wrong = r.preguntasErroneas || [];
+                                    const isExpanded = expandedResult === rowKey;
+                                    const isDeleting = deletingResult === rowKey;
+                                    return (
+                                      <Fragment key={rowKey}>
+                                        <tr>
+                                          <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
+                                          <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.apellidos} {r.nombres}</td>
+                                          <td className={`py-1.5 pr-3 text-center font-bold ${r.nota >= 16 ? 'text-emerald-600' : r.nota >= 12 ? 'text-amber-600' : 'text-red-500'}`}>
+                                            {r.nota.toFixed(1)}/20
+                                          </td>
+                                          <td className="py-1.5 text-center font-bold text-[#424750]">{r.porcentaje}%</td>
+                                          <td className="py-1.5 pl-3 text-[#737781] whitespace-nowrap">{r.fechaHora}</td>
+                                          <td className="py-1.5 pl-3 text-center">
+                                            {wrong.length > 0 ? (
+                                              <button
+                                                onClick={() => setExpandedResult(isExpanded ? null : rowKey)}
+                                                title="Ver preguntas falladas"
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 text-red-600 hover:bg-red-100 transition-colors font-bold text-[10px]"
+                                              >
+                                                {wrong.length}
+                                                <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                              </button>
+                                            ) : (
+                                              <span className="text-emerald-500 font-bold text-[10px]">0</span>
+                                            )}
+                                          </td>
+                                          <td className="py-1.5 pl-2 text-center">
+                                            <button
+                                              onClick={() => handleDeleteShortResult(r.evaluacionId, r.dni)}
+                                              disabled={isDeleting}
+                                              title="Eliminar registro"
+                                              className="p-1 rounded-md hover:bg-red-50 transition-colors disabled:opacity-40"
+                                            >
+                                              {isDeleting
+                                                ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" />
+                                                : <Trash2 className="w-3.5 h-3.5 text-red-400" />}
+                                            </button>
+                                          </td>
+                                        </tr>
+                                        {isExpanded && wrong.length > 0 && (
+                                          <tr>
+                                            <td colSpan={7} className="py-2 px-2 bg-white">
+                                              <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">
+                                                Preguntas falladas ({wrong.length})
+                                              </p>
+                                              <div className="space-y-2">
+                                                {wrong.map((w, wi) => (
+                                                  <div key={wi} className="rounded-lg border border-red-100 bg-red-50/60 p-2.5">
+                                                    <p className="text-[11px] font-semibold text-[#191c1d] mb-1">{wi + 1}. {w.question}</p>
+                                                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px]">
+                                                      <span className="text-red-600">Respondió: <strong>{w.selected || '—'}</strong></span>
+                                                      <span className="text-emerald-600">Correcta: <strong>{w.correct}</strong></span>
+                                                    </div>
+                                                    {w.explanation && <p className="text-[10px] text-[#737781] italic mt-1">{w.explanation}</p>}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </Fragment>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>

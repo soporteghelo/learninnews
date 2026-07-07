@@ -1,15 +1,19 @@
 import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ChevronLeft, Award, CheckCircle2, XCircle,
+  ChevronLeft, Award,
   ArrowRight, RefreshCw, BarChart3, HelpCircle, BookmarkCheck, Loader2, Timer
 } from 'lucide-react';
 import { shuffleArray } from '../lib/utils';
 import { fetchQuizProgressFromSheets, saveQuizProgressToSheets } from '../services/sheetsService';
-import type { QuizQuestion, LearnTopic, QuizSavedProgress } from '../types';
+import QuizOptions from './QuizOptions';
+import ConfidencePrompt from './ConfidencePrompt';
+import type { QuizQuestion, LearnTopic, QuizSavedProgress, Confidence } from '../types';
 
 // Tiempo límite (segundos) por pregunta. Al agotarse, se avanza automáticamente.
 const QUESTION_TIME = 30;
+// Pedir autoevaluación de confianza antes de revelar el feedback (metacognición).
+const ASK_CONFIDENCE = true;
 
 interface QuizModeProps {
   topic: LearnTopic;
@@ -32,7 +36,7 @@ export default function QuizMode({
   const [initState] = useState<{
     activeQuestions: QuizQuestion[];
     currentIdx: number;
-    answeredMap: Record<number, { selected: string; correct: boolean }>;
+    answeredMap: Record<number, { selected: string; correct: boolean; confidence?: Confidence }>;
     score: number;
     isResumed: boolean;
   }>(() => {
@@ -143,13 +147,23 @@ export default function QuizMode({
     onBack(answeredCount > 0 ? runningScore : undefined);
   };
 
-  const handleSelect = (option: 'A' | 'B' | 'C' | 'D') => {
-    if (showFeedback) return;
-    setSelectedOption(option);
-    setShowFeedback(true);
+  const revealAnswer = (option: 'A' | 'B' | 'C' | 'D', confidence?: Confidence) => {
     const correct = option === currentQuestion.correctAnswer;
     if (correct) setScore(prev => prev + 1);
-    setAnsweredMap(prev => ({ ...prev, [currentIdx]: { selected: option, correct } }));
+    setAnsweredMap(prev => ({ ...prev, [currentIdx]: { selected: option, correct, confidence } }));
+    setShowFeedback(true);
+  };
+
+  const handleSelect = (option: 'A' | 'B' | 'C' | 'D') => {
+    if (showFeedback || selectedOption) return;
+    setSelectedOption(option);
+    // Con confianza activada, esperamos su autoevaluación antes de revelar.
+    if (!ASK_CONFIDENCE) revealAnswer(option);
+  };
+
+  const handleConfidence = (level: Confidence) => {
+    if (!selectedOption || showFeedback) return;
+    revealAnswer(selectedOption, level);
   };
 
   const handleNext = () => {
@@ -177,25 +191,25 @@ export default function QuizMode({
 
   // Se agotó el tiempo: la pregunta cuenta como no respondida (incorrecta) y avanza.
   const handleTimeout = () => {
-    if (showFeedback) return;
+    if (showFeedback || selectedOption) return;
     setAnsweredMap(prev => ({ ...prev, [currentIdx]: { selected: '', correct: false } }));
     handleNext();
   };
 
-  // Cuenta regresiva por pregunta. Se reinicia al cambiar de pregunta y se detiene al responder.
+  // Cuenta regresiva por pregunta. Se reinicia al cambiar de pregunta y se detiene
+  // al elegir una opción (para no presionar durante la autoevaluación de confianza).
   useEffect(() => {
-    if (showFeedback || isFinished || isLoadingSheets || totalQuestions === 0) return;
+    if (showFeedback || selectedOption || isFinished || isLoadingSheets || totalQuestions === 0) return;
     setTimeLeft(QUESTION_TIME);
     const intervalId = setInterval(() => {
       setTimeLeft(prev => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
     return () => clearInterval(intervalId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIdx, showFeedback, isFinished, isLoadingSheets, totalQuestions]);
+  }, [currentIdx, showFeedback, selectedOption, isFinished, isLoadingSheets, totalQuestions]);
 
   // Al llegar a 0 sin respuesta, avanzar automáticamente.
   useEffect(() => {
-    if (timeLeft === 0 && !showFeedback && !isFinished && !isLoadingSheets && totalQuestions > 0) {
+    if (timeLeft === 0 && !showFeedback && !selectedOption && !isFinished && !isLoadingSheets && totalQuestions > 0) {
       handleTimeout();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -295,7 +309,7 @@ export default function QuizMode({
             </div>
             {/* Running score + answered count */}
             <div className="flex items-center gap-2">
-              {!showFeedback && (
+              {!showFeedback && !selectedOption && (
                 <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider tabular-nums border ${
                   timeLeft <= 10
                     ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse'
@@ -355,73 +369,20 @@ export default function QuizMode({
                 </h2>
               </div>
 
-              {/* Options */}
-              <div className="grid grid-cols-1 gap-2">
-                {optionOrders[currentIdx].map((letter) => {
-                  const optKey = `option${letter}` as keyof QuizQuestion;
-                  const optText = currentQuestion[optKey] as string;
-                  if (!optText) return null;
+              {/* Options + feedback + explanation (componente reutilizable) */}
+              <QuizOptions
+                question={currentQuestion}
+                optionOrder={optionOrders[currentIdx]}
+                selectedOption={selectedOption}
+                showFeedback={showFeedback}
+                locked={!!selectedOption && !showFeedback}
+                onSelect={handleSelect}
+              />
 
-                  const isSelected = selectedOption === letter;
-                  const isCorrect = letter === currentQuestion.correctAnswer;
-
-                  let cardClass = 'glass hover:bg-white/5 border-white/10';
-                  let icon = null;
-
-                  if (showFeedback) {
-                    if (isCorrect) {
-                      cardClass = 'bg-emerald-500/20 border-emerald-500 text-emerald-400 ring-1 ring-emerald-500/30 shadow-lg shadow-emerald-500/10';
-                      icon = <CheckCircle2 className="w-6 h-6" />;
-                    } else if (isSelected) {
-                      cardClass = 'bg-rose-500/20 border-rose-500 text-rose-400 ring-1 ring-rose-500/30 shadow-lg shadow-rose-500/10';
-                      icon = <XCircle className="w-6 h-6" />;
-                    } else {
-                      cardClass = 'opacity-40 border-white/5';
-                    }
-                  } else if (isSelected) {
-                    cardClass = 'bg-blue-600/30 border-blue-400 text-blue-200 ring-1 ring-blue-500/30';
-                  }
-
-                  return (
-                    <motion.button
-                      disabled={showFeedback}
-                      whileTap={{ scale: showFeedback ? 1 : 0.98 }}
-                      key={letter}
-                      onClick={() => handleSelect(letter as 'A' | 'B' | 'C' | 'D')}
-                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border-2 transition-all text-left ${cardClass}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`
-                          w-7 h-7 rounded-md flex items-center justify-center font-black text-xs flex-shrink-0
-                          ${isSelected ? 'bg-blue-500 text-white' : 'bg-white/5 text-slate-500'}
-                          ${showFeedback && isCorrect ? 'bg-emerald-500 text-white' : ''}
-                          ${showFeedback && isSelected && !isCorrect ? 'bg-rose-500 text-white' : ''}
-                        `}>
-                          {letter}
-                        </div>
-                        <span className="font-semibold text-sm">{optText}</span>
-                      </div>
-                      {icon}
-                    </motion.button>
-                  );
-                })}
-              </div>
-
-              {/* Explanation */}
-              <AnimatePresence>
-                {showFeedback && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`p-5 rounded-2xl glass-strong border-l-4 ${selectedOption === currentQuestion.correctAnswer ? 'border-emerald-500' : 'border-rose-500'}`}
-                  >
-                    <p className="text-xs font-black uppercase text-slate-500 tracking-widest mb-2">Explicación</p>
-                    <p className="text-sm text-slate-200 leading-relaxed italic">
-                      "{currentQuestion.explanation}"
-                    </p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              {/* Autoevaluación de confianza (antes de revelar el feedback) */}
+              {ASK_CONFIDENCE && selectedOption && !showFeedback && (
+                <ConfidencePrompt onSelect={handleConfidence} />
+              )}
 
               {/* Next button */}
               {showFeedback && (

@@ -77,6 +77,8 @@ function doPost(e) {
       return deleteShortEval(ss, data);
     } else if (data.action === 'saveShortEvalResult') {
       return saveShortEvalResult(ss, data);
+    } else if (data.action === 'deleteShortEvalResult') {
+      return deleteShortEvalResult(ss, data);
     }
 
     return createResponse({ status: 'error', message: 'Acción no reconocida' });
@@ -670,6 +672,27 @@ function saveShortEvalResult(ss, data) {
   sheet.appendRow(rowData);
   SpreadsheetApp.flush();
   return createResponse({ status: 'ok', message: 'Resultado guardado' });
+}
+
+function deleteShortEvalResult(ss, data) {
+  var sheet = ss.getSheetByName(SHORT_RESULTS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja SHORT_RESULTADOS no encontrada' });
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return createResponse({ status: 'ok', message: 'Sin registros', deleted: 0 });
+  var headers = values[0];
+  var evalIdx = headers.indexOf('EvaluacionId');
+  var dniIdx = headers.indexOf('DNI');
+  if (evalIdx === -1 || dniIdx === -1) return createResponse({ status: 'error', message: 'Columnas EvaluacionId/DNI no encontradas' });
+  var deleted = 0;
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (String(values[i][evalIdx]).trim() === String(data.evaluacionId).trim() &&
+        String(values[i][dniIdx]).trim() === String(data.dni).trim()) {
+      sheet.deleteRow(i + 1);
+      deleted++;
+    }
+  }
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Resultado eliminado', deleted: deleted });
 }
 
 function createResponse(obj) {

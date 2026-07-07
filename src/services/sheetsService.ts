@@ -1098,6 +1098,7 @@ export async function fetchAllShortResults(): Promise<Array<{
   evaluacionId: string; evaluacionNombre: string; tema: string;
   dni: string; apellidos: string; nombres: string;
   nota: number; porcentaje: number; fechaHora: string; totalPreguntas: number; correctas: number;
+  preguntasErroneas: ShortEvalWrongAnswer[];
 }>> {
   const url = getSheetUrl(SHEETS_CONFIG.sheets.shortResults);
   try {
@@ -1120,6 +1121,10 @@ export async function fetchAllShortResults(): Promise<Array<{
             fechaHora: String(r.FechaHora || '').trim(),
             totalPreguntas: parseInt(r.TotalPreguntas || '0') || 0,
             correctas: parseInt(r.Correctas || '0') || 0,
+            preguntasErroneas: (() => {
+              try { return r.PreguntasErroneas ? JSON.parse(r.PreguntasErroneas) : []; }
+              catch { return []; }
+            })(),
           })));
         },
         error: () => resolve([]),
@@ -1138,6 +1143,10 @@ export async function updateShortEvalStatus(id: string, activo: boolean): Promis
 
 export async function deleteShortEval(id: string): Promise<void> {
   await postToAppsScript({ action: 'deleteShortEval', id });
+}
+
+export async function deleteShortEvalResult(evaluacionId: string, dni: string): Promise<void> {
+  await postToAppsScript({ action: 'deleteShortEvalResult', evaluacionId, dni });
 }
 
 export async function saveShortEvalResult(data: {

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import RichContent from './RichContent';
 import {
   ChevronLeft, ChevronRight, CheckCircle2,
-  Play, FileText, ChevronDown, BookOpen
+  Play, FileText, ChevronDown, BookOpen, ListChecks, Award
 } from 'lucide-react';
 import type { LearnTopic, DataChunk } from '../types';
 
@@ -41,6 +41,7 @@ export default function LearningMode({
 }: LearningModeProps) {
   const [currentIndex, setCurrentIndex] = useState(initialChunkIndex);
   const [viewMode, setViewMode] = useState<'video' | 'read'>('video');
+  const [showRecap, setShowRecap] = useState(false);
   const currentChunk = chunks[currentIndex];
   const progressPercent = chunks.length > 0
     ? Math.round(((currentIndex + 1) / chunks.length) * 100)
@@ -60,8 +61,8 @@ export default function LearningMode({
 
   const nextSlide = useCallback(() => {
     if (currentIndex < chunks.length - 1) setCurrentIndex(i => i + 1);
-    else onFinish();
-  }, [currentIndex, chunks.length, onFinish]);
+    else setShowRecap(true);
+  }, [currentIndex, chunks.length]);
 
   const prevSlide = useCallback(() => {
     if (currentIndex > 0) setCurrentIndex(i => i - 1);
@@ -85,6 +86,65 @@ export default function LearningMode({
   }
 
   if (!currentChunk) return null;
+
+  // ── RECAPITULACIÓN AL FINALIZAR EL MÓDULO (antes de la evaluación) ──
+  if (showRecap) {
+    return (
+      <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-6 overflow-y-auto safe-area-top safe-area-bottom">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-lg glass-card rounded-3xl p-8 my-auto"
+        >
+          <div className="w-16 h-16 rounded-full mx-auto mb-4 bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <Award className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-black text-white text-center mb-1">¡Módulo completado!</h1>
+          <p className="text-slate-400 text-sm text-center mb-6">
+            Antes de la evaluación, repasa lo esencial de <span className="text-white font-semibold">{topic.title}</span>.
+          </p>
+
+          {topic.keyPoints && topic.keyPoints.length > 0 && (
+            <section className="mb-6">
+              <div className="flex items-center gap-2 mb-3 text-amber-400">
+                <ListChecks className="w-4 h-4" />
+                <h2 className="text-xs font-black uppercase tracking-widest">Puntos clave</h2>
+              </div>
+              <div className="space-y-2">
+                {topic.keyPoints.map((p, i) => (
+                  <div key={i} className="flex items-start gap-3 glass px-3 py-2.5 rounded-xl border-l-4 border-amber-500/50">
+                    <div className="w-2 h-2 mt-1.5 shrink-0 rounded-full bg-amber-500" />
+                    <span className="text-slate-200 text-xs font-semibold leading-snug">{p}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="mb-7">
+            <div className="flex items-center gap-2 mb-3 text-blue-400">
+              <BookOpen className="w-4 h-4" />
+              <h2 className="text-xs font-black uppercase tracking-widest">Temas cubiertos</h2>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {chunks.map((c, i) => (
+                <span key={c.cod} className="text-[11px] px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300">
+                  {i + 1}. {c.tema}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          <button
+            onClick={onFinish}
+            className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center justify-center gap-2 transition-colors"
+          >
+            <CheckCircle2 className="w-5 h-5" /> Ir a la evaluación
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-slate-950 flex flex-col lg:flex-row safe-area-top safe-area-bottom overflow-hidden">

@@ -798,7 +798,7 @@ export default function App() {
         {view === 'learning' && selectedTopic && (
           <motion.div key="learning" className="fixed inset-0 z-50">
             <Suspense fallback={<ViewLoader />}>
-              <LearningMode 
+              <LearningMode
                 topic={selectedTopic}
                 chunks={chunks.filter(c => c.idMain === selectedTopic.id)}
                 initialChunkIndex={progress.find(p => p.topicId === selectedTopic.id)?.currentChunk || 0}

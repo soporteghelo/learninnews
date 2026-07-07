@@ -86,9 +86,12 @@ export interface UserProgress {
   lastAccessed: number;
 }
 
+/** Nivel de confianza autoreportado antes de revelar el feedback (metacognición) */
+export type Confidence = 'alta' | 'media' | 'baja';
+
 export interface QuizSavedProgress {
   shuffledIds: string[];
-  answeredMap: Record<string, { selected: string; correct: boolean }>;
+  answeredMap: Record<string, { selected: string; correct: boolean; confidence?: Confidence }>;
   currentIdx: number;
   score: number;
 }
