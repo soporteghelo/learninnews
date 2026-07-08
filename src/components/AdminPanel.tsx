@@ -9,7 +9,7 @@ import {
   Wifi, WifiOff, ChevronDown, ChevronUp,
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
   Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
-  ClipboardCheck, ExternalLink, ToggleLeft, ToggleRight, Globe
+  ClipboardCheck, ExternalLink, ToggleLeft, ToggleRight, Globe, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG, getPublicBaseUrl } from '../config/app.config';
 import {
@@ -265,6 +265,15 @@ export default function AdminPanel({
   const [showResultsFor, setShowResultsFor] = useState<string | null>(null);
   const [expandedResult, setExpandedResult] = useState<string | null>(null);
   const [deletingResult, setDeletingResult] = useState<string | null>(null);
+  // Sort & filter for the short-eval results table (only one table is visible at a time)
+  type ResultsSortKey = 'dni' | 'nombre' | 'nota' | 'porcentaje' | 'fecha' | 'fallo';
+  const [resultsSort, setResultsSort] = useState<{ key: ResultsSortKey; dir: 'asc' | 'desc' }>({ key: 'fecha', dir: 'asc' });
+  const [resultsFilters, setResultsFilters] = useState<{ dni: string; nombre: string; nota: string; porcentaje: string; fecha: string; fallo: string }>(
+    { dni: '', nombre: '', nota: '', porcentaje: '', fecha: '', fallo: '' }
+  );
+  const toggleResultsSort = (key: ResultsSortKey) => {
+    setResultsSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  };
 
   // Toast notification
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -2794,7 +2803,11 @@ ${text}`;
                               ? <ToggleRight className="w-5 h-5 text-emerald-500" />
                               : <ToggleLeft className="w-5 h-5 text-slate-400" />}
                           </button>
-                          <button onClick={() => setShowResultsFor(showResults ? null : ev.id)} title="Ver resultados"
+                          <button onClick={() => {
+                              setShowResultsFor(showResults ? null : ev.id);
+                              setResultsSort({ key: 'fecha', dir: 'asc' });
+                              setResultsFilters({ dni: '', nombre: '', nota: '', porcentaje: '', fecha: '', fallo: '' });
+                            }} title="Ver resultados"
                             className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
                             <TrendingUp className="w-4 h-4 text-[#1b4d89]" />
                           </button>
@@ -2806,9 +2819,40 @@ ${text}`;
                       </div>
 
                       {/* Results table */}
-                      {showResults && (
+                      {showResults && (() => {
+                        const activeFilters = resultsFilters;
+                        const displayResults = evalResults
+                          .filter(r => {
+                            if (activeFilters.dni && !r.dni.toLowerCase().includes(activeFilters.dni.toLowerCase())) return false;
+                            if (activeFilters.nombre && !`${r.apellidos} ${r.nombres}`.toLowerCase().includes(activeFilters.nombre.toLowerCase())) return false;
+                            if (activeFilters.nota && !r.nota.toFixed(1).includes(activeFilters.nota.trim())) return false;
+                            if (activeFilters.porcentaje && !String(r.porcentaje).includes(activeFilters.porcentaje.trim())) return false;
+                            if (activeFilters.fecha && !r.fechaHora.toLowerCase().includes(activeFilters.fecha.toLowerCase())) return false;
+                            if (activeFilters.fallo && !String((r.preguntasErroneas || []).length).includes(activeFilters.fallo.trim())) return false;
+                            return true;
+                          })
+                          .sort((a, b) => {
+                            const dir = resultsSort.dir === 'asc' ? 1 : -1;
+                            switch (resultsSort.key) {
+                              case 'dni': return a.dni.localeCompare(b.dni, 'es', { numeric: true }) * dir;
+                              case 'nombre': return `${a.apellidos} ${a.nombres}`.localeCompare(`${b.apellidos} ${b.nombres}`, 'es', { sensitivity: 'base' }) * dir;
+                              case 'nota': return (a.nota - b.nota) * dir;
+                              case 'porcentaje': return (a.porcentaje - b.porcentaje) * dir;
+                              case 'fecha': return a.fechaHora.localeCompare(b.fechaHora, 'es') * dir;
+                              case 'fallo': return ((a.preguntasErroneas || []).length - (b.preguntasErroneas || []).length) * dir;
+                              default: return 0;
+                            }
+                          });
+                        const SortIcon = ({ col }: { col: ResultsSortKey }) => (
+                          resultsSort.key === col
+                            ? (resultsSort.dir === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />)
+                            : <ArrowUpDown className="w-2.5 h-2.5 opacity-30" />
+                        );
+                        return (
                         <div className="border-t border-[#f3f4f5] px-4 py-3 bg-[#f8f9fa]">
-                          <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">Resultados ({evalResults.length})</p>
+                          <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">
+                            Resultados ({displayResults.length}{displayResults.length !== evalResults.length ? ` / ${evalResults.length}` : ''})
+                          </p>
                           {evalResults.length === 0 ? (
                             <p className="text-xs text-[#737781] italic">Sin respuestas aún</p>
                           ) : (
@@ -2816,17 +2860,40 @@ ${text}`;
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="text-[9px] text-[#737781] uppercase">
-                                    <th className="text-left pb-1.5 pr-3">DNI</th>
-                                    <th className="text-left pb-1.5 pr-3">Apellidos y Nombres</th>
-                                    <th className="text-center pb-1.5 pr-3">Nota</th>
-                                    <th className="text-center pb-1.5">%</th>
-                                    <th className="text-left pb-1.5 pl-3">Fecha</th>
-                                    <th className="text-center pb-1.5 pl-3">Falló</th>
-                                    <th className="pb-1.5"></th>
+                                    <th className="text-left pb-1 pr-3">
+                                      <button onClick={() => toggleResultsSort('dni')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">DNI <SortIcon col="dni" /></button>
+                                    </th>
+                                    <th className="text-left pb-1 pr-3">
+                                      <button onClick={() => toggleResultsSort('nombre')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Apellidos y Nombres <SortIcon col="nombre" /></button>
+                                    </th>
+                                    <th className="text-center pb-1 pr-3">
+                                      <button onClick={() => toggleResultsSort('nota')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Nota <SortIcon col="nota" /></button>
+                                    </th>
+                                    <th className="text-center pb-1">
+                                      <button onClick={() => toggleResultsSort('porcentaje')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">% <SortIcon col="porcentaje" /></button>
+                                    </th>
+                                    <th className="text-left pb-1 pl-3">
+                                      <button onClick={() => toggleResultsSort('fecha')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Fecha <SortIcon col="fecha" /></button>
+                                    </th>
+                                    <th className="text-center pb-1 pl-3">
+                                      <button onClick={() => toggleResultsSort('fallo')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Falló <SortIcon col="fallo" /></button>
+                                    </th>
+                                    <th className="pb-1"></th>
+                                  </tr>
+                                  <tr className="align-top">
+                                    <th className="pb-2 pr-3"><input value={resultsFilters.dni} onChange={e => setResultsFilters(f => ({ ...f, dni: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2 pr-3"><input value={resultsFilters.nombre} onChange={e => setResultsFilters(f => ({ ...f, nombre: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2 pr-3"><input value={resultsFilters.nota} onChange={e => setResultsFilters(f => ({ ...f, nota: e.target.value }))} placeholder="…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2"><input value={resultsFilters.porcentaje} onChange={e => setResultsFilters(f => ({ ...f, porcentaje: e.target.value }))} placeholder="…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2 pl-3"><input value={resultsFilters.fecha} onChange={e => setResultsFilters(f => ({ ...f, fecha: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2 pl-3"><input value={resultsFilters.fallo} onChange={e => setResultsFilters(f => ({ ...f, fallo: e.target.value }))} placeholder="…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2"></th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#f3f4f5]">
-                                  {evalResults.map((r) => {
+                                  {displayResults.length === 0 ? (
+                                    <tr><td colSpan={7} className="py-3 text-center text-[#737781] italic text-[11px]">Sin resultados para los filtros aplicados</td></tr>
+                                  ) : displayResults.map((r) => {
                                     const rowKey = `${r.evaluacionId}__${r.dni}`;
                                     const wrong = r.preguntasErroneas || [];
                                     const isExpanded = expandedResult === rowKey;
@@ -2897,7 +2964,8 @@ ${text}`;
                             </div>
                           )}
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   );
                 })}
