@@ -274,6 +274,23 @@ export default function AdminPanel({
   const toggleResultsSort = (key: ResultsSortKey) => {
     setResultsSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
   };
+  // Numeric column filter: supports comparators (>, <, >=, <=, =) and plain-text/substring match
+  const matchNumericFilter = (value: number, raw: string, displayStr: string): boolean => {
+    const q = raw.trim().replace(',', '.');
+    const m = q.match(/^(>=|<=|>|<|=)\s*(-?\d+(?:\.\d+)?)$/);
+    if (m) {
+      const n = parseFloat(m[2]);
+      if (Number.isNaN(n)) return true;
+      switch (m[1]) {
+        case '>': return value > n;
+        case '<': return value < n;
+        case '>=': return value >= n;
+        case '<=': return value <= n;
+        case '=': return value === n;
+      }
+    }
+    return displayStr.includes(q);
+  };
 
   // Toast notification
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -2825,8 +2842,8 @@ ${text}`;
                           .filter(r => {
                             if (activeFilters.dni && !r.dni.toLowerCase().includes(activeFilters.dni.toLowerCase())) return false;
                             if (activeFilters.nombre && !`${r.apellidos} ${r.nombres}`.toLowerCase().includes(activeFilters.nombre.toLowerCase())) return false;
-                            if (activeFilters.nota && !r.nota.toFixed(1).includes(activeFilters.nota.trim())) return false;
-                            if (activeFilters.porcentaje && !String(r.porcentaje).includes(activeFilters.porcentaje.trim())) return false;
+                            if (activeFilters.nota && !matchNumericFilter(r.nota, activeFilters.nota, r.nota.toFixed(1))) return false;
+                            if (activeFilters.porcentaje && !matchNumericFilter(r.porcentaje, activeFilters.porcentaje, String(r.porcentaje))) return false;
                             if (activeFilters.fecha && !r.fechaHora.toLowerCase().includes(activeFilters.fecha.toLowerCase())) return false;
                             if (activeFilters.fallo && !String((r.preguntasErroneas || []).length).includes(activeFilters.fallo.trim())) return false;
                             return true;
@@ -2883,8 +2900,8 @@ ${text}`;
                                   <tr className="align-top">
                                     <th className="pb-2 pr-3"><input value={resultsFilters.dni} onChange={e => setResultsFilters(f => ({ ...f, dni: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
                                     <th className="pb-2 pr-3"><input value={resultsFilters.nombre} onChange={e => setResultsFilters(f => ({ ...f, nombre: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
-                                    <th className="pb-2 pr-3"><input value={resultsFilters.nota} onChange={e => setResultsFilters(f => ({ ...f, nota: e.target.value }))} placeholder="…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
-                                    <th className="pb-2"><input value={resultsFilters.porcentaje} onChange={e => setResultsFilters(f => ({ ...f, porcentaje: e.target.value }))} placeholder="…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2 pr-3"><input value={resultsFilters.nota} onChange={e => setResultsFilters(f => ({ ...f, nota: e.target.value }))} placeholder=">14" title="Usa >, <, >=, <=, = o un número. Ej: >14, <=10" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2"><input value={resultsFilters.porcentaje} onChange={e => setResultsFilters(f => ({ ...f, porcentaje: e.target.value }))} placeholder=">70" title="Usa >, <, >=, <=, = o un número. Ej: >70, <=50" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
                                     <th className="pb-2 pl-3"><input value={resultsFilters.fecha} onChange={e => setResultsFilters(f => ({ ...f, fecha: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
                                     <th className="pb-2 pl-3"><input value={resultsFilters.fallo} onChange={e => setResultsFilters(f => ({ ...f, fallo: e.target.value }))} placeholder="…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
                                     <th className="pb-2"></th>
