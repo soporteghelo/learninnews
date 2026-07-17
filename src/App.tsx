@@ -941,21 +941,37 @@ export default function App() {
               className="fixed inset-0 bg-black"
               style={{ zIndex: 99999 }}
             >
-              {/* iframe — siempre ocupa toda la pantalla (portrait y landscape) */}
+              {/* iframe — video: caja 16:9 centrada (evita que el reproductor de Drive
+                  infle sus controles al estirarse en pantallas verticales); pdf: pantalla completa */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.1, duration: 0.4 }}
-                className="absolute inset-0"
+                className={mediaOverlay.type === 'video' ? 'absolute inset-0 flex items-center justify-center' : 'absolute inset-0'}
               >
                 {embedUrl ? (
-                  <iframe
-                    key={embedUrl}
-                    src={embedUrl}
-                    className="w-full h-full border-0"
-                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-                    allowFullScreen
-                  />
+                  mediaOverlay.type === 'video' ? (
+                    <div
+                      className="w-full max-h-full"
+                      style={{ aspectRatio: '16 / 9', width: 'min(100vw, calc(100vh * 16 / 9))' }}
+                    >
+                      <iframe
+                        key={embedUrl}
+                        src={embedUrl}
+                        className="w-full h-full border-0"
+                        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  ) : (
+                    <iframe
+                      key={embedUrl}
+                      src={embedUrl}
+                      className="w-full h-full border-0"
+                      allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                      allowFullScreen
+                    />
+                  )
                 ) : (
                   <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
                     <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
