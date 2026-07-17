@@ -24,6 +24,12 @@ interface ActaTemplateProps {
   representanteFirmaSrc?: string;
   /** N° del acta (opcional; si no se pasa se imprime una línea en blanco). */
   numero?: string;
+  /** Folio de verificación único del acta. */
+  folio?: string;
+  /** Ubicación de la firma (GPS) como "lat, long", si se pudo capturar. */
+  geo?: string;
+  /** Correo al que se remitió la copia del acta. */
+  correo?: string;
 }
 
 const EMPTY_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -57,7 +63,7 @@ function blank(val: string | undefined, minWidth = '45px'): string {
 }
 
 const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props, ref) => {
-  const { signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero } = props;
+  const { signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero, folio, geo, correo } = props;
 
   const proxyUrl = (url?: string) => {
     if (!url || url.startsWith('data:') || url.includes('weserv.nl')) return url || '';
@@ -119,12 +125,13 @@ const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props,
       selfie_src: selfieData || EMPTY_IMG,
       timestamp: escapeHtml(timestamp),
       current_date: currentDate,
-      current_year: year,
-      acta_id: escapeHtml(signer.dni),
+      acta_folio: escapeHtml(folio || `AC-${signer.dni}`),
+      geo_info: geo ? ` · Ubicación: ${escapeHtml(geo)}` : '',
+      correo_info: escapeHtml(correo || 'no registrado'),
       device_info: dispositivo ? `Dispositivo: ${escapeHtml(dispositivo.slice(0, 90))}` : 'Registro almacenado en el sistema de gestión SST',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero]);
+  }, [signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero, folio, geo, correo]);
 
   return (
     <div

@@ -37,9 +37,13 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
   const [logoSrc, setLogoSrc] = useState('');
   const [firmaRepSrc, setFirmaRepSrc] = useState('');
   const [correo, setCorreo] = useState(userSession.correo || '');
+  const [geo, setGeo] = useState('');
 
   // Lista aplanada de documentos que van en el acta general
   const docs = useMemo(() => getGeneralActaDocuments(documentos), [documentos]);
+
+  // Folio de verificación único, estable durante esta firma
+  const folio = useMemo(() => 'AC-' + userSession.dni + '-' + Date.now().toString(36).toUpperCase(), [userSession.dni]);
 
   // Captura facial (MediaPipe) encapsulada en un hook compartido
   const {
@@ -81,6 +85,16 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
     if (appConfig.firmaRepresentante) fetchDriveImageAsBase64(appConfig.firmaRepresentante).then(setFirmaRepSrc);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appConfig]);
+
+  // Geolocalización (best-effort) para reforzar la verificación de identidad del acta
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setGeo(`${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`),
+      () => { /* permiso denegado o no disponible: se omite en el acta */ },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+  }, []);
 
   const handleNext = () => {
     if (step === 'confirm') {
@@ -274,7 +288,7 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
 
               {error && <p className="text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 mt-3"><AlertCircle className="w-3 h-3" /> {error}</p>}
               <p className="text-slate-500 text-[11px] text-center leading-relaxed mt-5">
-                Al firmar declaras haber recibido y comprendido los documentos detallados. Se generará un PDF con tu firma y verificación facial.
+                Al firmar declaras haber recibido y comprendido los documentos detallados. El acta incluye tu firma, verificación facial, folio único, ubicación aproximada y datos del dispositivo, y se remite a tu correo.
               </p>
             </motion.div>
           )}
@@ -450,6 +464,9 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
           appConfig={appConfig}
           logoSrc={logoSrc}
           representanteFirmaSrc={firmaRepSrc}
+          folio={folio}
+          geo={geo}
+          correo={correo.trim()}
         />
       </div>
     </div>
