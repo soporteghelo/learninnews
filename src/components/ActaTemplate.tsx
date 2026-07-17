@@ -87,15 +87,14 @@ const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props,
       `por parte de ${blank(appConfig?.contratista, '90px')}, ` +
       `al trabajador que suscribe la presente.`;
 
-    // Filas de la tabla de documentos (mínimo 5 filas, resto en blanco para anotar)
-    const totalRows = Math.max(documentos.length, 5);
+    // Filas de la tabla de documentos: solo los documentos reales (sin filas vacías)
     let docsRows = '';
-    for (let i = 0; i < totalRows; i++) {
+    for (let i = 0; i < documentos.length; i++) {
       const d = documentos[i];
       const bg = i % 2 === 0 ? '#ffffff' : '#f7f9fd';
-      const nombre = d ? escapeHtml(d.nombre) : '&nbsp;';
-      const tipoTexto = d ? (d.tipo === 'virtual' ? 'Digital' : 'Físico') : '&nbsp;';
-      const tipoColor = d ? (d.tipo === 'virtual' ? '#0f7b3f' : '#8a5a00') : '#1f2937';
+      const nombre = escapeHtml(d.nombre);
+      const tipoTexto = d.tipo === 'virtual' ? 'Digital' : 'Físico';
+      const tipoColor = d.tipo === 'virtual' ? '#0f7b3f' : '#8a5a00';
       docsRows +=
         `<tr style="background:${bg};">` +
         `<td style="padding:6px 6px;text-align:center;color:#1b4d89;font-weight:800;border-top:1px solid #e6edf8;">${i + 1}</td>` +
