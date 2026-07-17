@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   BookOpen, CheckCircle, Award,
   ChevronRight, TrendingUp, Clock,
-  ExternalLink, MessageCircle, FileSignature
+  ExternalLink, MessageCircle, FileSignature, Play
 } from 'lucide-react';
 import { APP_CONFIG, AUDIENCE_CONFIG } from '../config/app.config';
 import type { LearnTopic, DataChunk, QuizQuestion, UserProgress, AudienceType } from '../types';
@@ -37,8 +37,11 @@ interface DashboardProps {
   onOpenActas?: () => void;
   actasPendientes?: number;
   actasAsignadas?: number;
+  actasEnabled?: boolean;
   userSession: any;
   darkMode?: boolean;
+  tutorialUrl?: string;
+  onPlayTutorial?: () => void;
 }
 
 export default function Dashboard({
@@ -53,8 +56,11 @@ export default function Dashboard({
   onOpenActas,
   actasPendientes = 0,
   actasAsignadas = 0,
+  actasEnabled = true,
   userSession,
   darkMode = true,
+  tutorialUrl,
+  onPlayTutorial,
 }: DashboardProps) {
   const [showCertOptions, setShowCertOptions] = useState<string | null>(null);
 
@@ -144,9 +150,9 @@ export default function Dashboard({
       </motion.header>
 
       <div className="max-w-6xl mx-auto px-4 py-6 sm:px-8 space-y-8">
-        {/* Actas y Compromisos — visible siempre que el usuario tenga documentos asignados,
-            sin importar su avance en los cursos. Se muestra al inicio para que no pase desapercibido. */}
-        {onOpenActas && actasAsignadas > 0 && (
+        {/* Actas y Compromisos — visible si el módulo está habilitado en CONFIG (columna Actas)
+            y el usuario tiene documentos asignados, sin importar su avance en los cursos. */}
+        {onOpenActas && actasEnabled && actasAsignadas > 0 && (
           <motion.button
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -399,7 +405,19 @@ export default function Dashboard({
         )}
       </div>
 
-
+      {/* Botón flotante — tutorial en video */}
+      {tutorialUrl && (
+        <motion.button
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          whileTap={{ scale: 0.92 }}
+          onClick={onPlayTutorial}
+          title="Ver tutorial"
+          className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 shadow-lg shadow-blue-600/40 border border-white/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform safe-area-bottom"
+        >
+          <Play className="w-6 h-6 text-white fill-white ml-0.5" />
+        </motion.button>
+      )}
     </div>
   );
 }

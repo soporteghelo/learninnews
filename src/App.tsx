@@ -795,8 +795,11 @@ export default function App() {
               onOpenActas={() => setView('actas')}
               actasPendientes={actasPendientes}
               actasAsignadas={actasAsignadasTotal}
+              actasEnabled={appConfig?.actasHabilitado !== false}
               userSession={userSession}
               darkMode={darkMode}
+              tutorialUrl={appConfig?.tutorialUrl}
+              onPlayTutorial={() => appConfig?.tutorialUrl && setMediaOverlay({ url: appConfig.tutorialUrl, type: 'video' })}
             />
           </motion.div>
         )}
