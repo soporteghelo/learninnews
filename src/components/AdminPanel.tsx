@@ -431,7 +431,7 @@ export default function AdminPanel({
     setActaForm({
       titulo: d.titulo, descripcion: d.descripcion, perfiles: d.perfiles,
       dnis: d.dnisAsignados.join(', '),
-      items: d.items.map(it => ({ nombre: it.nombre, driveUrl: it.driveUrl || '' })),
+      items: d.items.map(it => ({ nombre: it.nombre, driveUrl: it.driveUrl || '', tipo: it.tipo || (it.driveUrl ? 'virtual' : 'fisico') })),
       requiereFirmaDibujada: d.requiereFirmaDibujada,
     });
     setEditingActaId(d.id);
@@ -439,7 +439,7 @@ export default function AdminPanel({
   };
 
   // Ítems (documentos que recibe el trabajador) del formulario de acta
-  const addActaItem = () => setActaForm(f => ({ ...f, items: [...f.items, { nombre: '', driveUrl: '' }] }));
+  const addActaItem = () => setActaForm(f => ({ ...f, items: [...f.items, { nombre: '', driveUrl: '', tipo: 'virtual' }] }));
   const updateActaItem = (i: number, patch: Partial<ActaItem>) =>
     setActaForm(f => ({ ...f, items: f.items.map((it, idx) => idx === i ? { ...it, ...patch } : it) }));
   const removeActaItem = (i: number) => setActaForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) }));
@@ -447,7 +447,10 @@ export default function AdminPanel({
   const handleSaveActa = async () => {
     // Ítems limpios: fila con nombre no vacío
     const cleanItems: ActaItem[] = actaForm.items
-      .map(it => ({ nombre: it.nombre.trim(), driveUrl: (it.driveUrl || '').trim() || undefined }))
+      .map(it => {
+        const tipo: 'virtual' | 'fisico' = it.tipo === 'fisico' ? 'fisico' : 'virtual';
+        return { nombre: it.nombre.trim(), tipo, driveUrl: tipo === 'virtual' ? ((it.driveUrl || '').trim() || undefined) : undefined };
+      })
       .filter(it => it.nombre);
     if (!actaForm.titulo.trim()) {
       showToast('El título del documento es obligatorio', 'error');
@@ -3466,22 +3469,39 @@ ${text}`;
                     {actaForm.items.length === 0 && (
                       <p className="text-[11px] text-[#9aa0a6] italic px-1">Sin documentos aún. Usa "Agregar documento" para listar lo que se recepciona.</p>
                     )}
-                    {actaForm.items.map((it, i) => (
+                    {actaForm.items.map((it, i) => {
+                      const tipo = it.tipo || 'virtual';
+                      return (
                       <div key={i} className="flex items-start gap-2 p-2.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg">
                         <span className="mt-2 text-[11px] font-black text-[#1b4d89] w-5 text-center flex-shrink-0">{i + 1}</span>
-                        <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="flex-1 min-w-0 space-y-2">
                           <input value={it.nombre} onChange={e => updateActaItem(i, { nombre: e.target.value })}
                             placeholder="Nombre del documento (ej. Reglamento Interno SST)"
                             className="w-full px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                          <input value={it.driveUrl || ''} onChange={e => updateActaItem(i, { driveUrl: e.target.value })}
-                            placeholder="Enlace de Drive (opcional)"
-                            className="w-full px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                          {tipo === 'virtual' ? (
+                            <input value={it.driveUrl || ''} onChange={e => updateActaItem(i, { driveUrl: e.target.value })}
+                              placeholder="Enlace de Drive (para ver y QR)"
+                              className="w-full px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                          ) : (
+                            <p className="text-[10px] text-[#9aa0a6] italic px-1">Entrega física — sin enlace de Drive.</p>
+                          )}
+                          {/* Tipo de documento */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-[#737781] uppercase tracking-wider mr-1">Tipo:</span>
+                            {(['virtual', 'fisico'] as const).map(t => (
+                              <button key={t} onClick={() => updateActaItem(i, { tipo: t })}
+                                className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                                  tipo === t ? 'bg-[#1b4d89] text-white' : 'bg-white border border-[#e1e3e4] text-[#737781] hover:border-[#1b4d89]/40'
+                                }`}>{t === 'virtual' ? 'Virtual' : 'Físico'}</button>
+                            ))}
+                          </div>
                         </div>
-                        {(it.driveUrl || '').trim() && <div className="flex-shrink-0"><QrPreview url={(it.driveUrl || '').trim()} size={48} /></div>}
+                        {tipo === 'virtual' && (it.driveUrl || '').trim() && <div className="flex-shrink-0"><QrPreview url={(it.driveUrl || '').trim()} size={48} /></div>}
                         <button onClick={() => removeActaItem(i)} title="Quitar documento"
                           className="mt-1 p-1.5 rounded-lg hover:bg-red-50 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4 text-red-400" /></button>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 

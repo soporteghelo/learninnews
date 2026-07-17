@@ -95,8 +95,8 @@ const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props,
       const d = documentos[i];
       const bg = i % 2 === 0 ? '#ffffff' : '#f7f9fd';
       const nombre = d ? escapeHtml(d.nombre) : '&nbsp;';
-      const digital = checkbox(!!(d && d.digital));
-      const fisico = checkbox(false); // siempre en blanco: se marca al entregar en físico
+      const digital = checkbox(!!(d && d.tipo === 'virtual'));
+      const fisico = checkbox(!!(d && d.tipo === 'fisico'));
       docsRows +=
         `<tr style="background:${bg};">` +
         `<td style="padding:6px 6px;text-align:center;color:#1b4d89;font-weight:800;border-top:1px solid #e6edf8;">${i + 1}</td>` +

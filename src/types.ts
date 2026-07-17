@@ -177,6 +177,7 @@ export interface ShortEvalWrongAnswer {
 export interface ActaItem {
   nombre: string;              // nombre del documento recepcionado
   driveUrl?: string;           // enlace de Drive del documento (opcional, genera QR por fila)
+  tipo?: 'virtual' | 'fisico'; // tipo de entrega: virtual (marca "Digital") o físico
 }
 
 /** Documento/compromiso configurable por el admin, firmable por el usuario. */

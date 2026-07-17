@@ -1311,6 +1311,7 @@ function parseActaItems(raw: unknown): ActaItem[] {
       .map((it: any): ActaItem => ({
         nombre: String(it?.nombre || '').trim(),
         driveUrl: String(it?.driveUrl || '').trim() || undefined,
+        tipo: it?.tipo === 'fisico' ? 'fisico' : (it?.tipo === 'virtual' ? 'virtual' : undefined),
       }))
       .filter(it => it.nombre);
   } catch {

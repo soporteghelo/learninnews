@@ -38,22 +38,26 @@ export const GENERAL_ACTA_TITULO = 'Acta de Recepción de Documentos';
 /** Un documento (fila) dentro del acta general. */
 export interface GeneralActaDoc {
   nombre: string;
-  digital: boolean;      // true si el documento tiene archivo en Drive (marca "Digital")
+  tipo: 'virtual' | 'fisico';  // marca la casilla "Digital" (virtual) o "Físico" en el acta
   driveUrl?: string;
 }
 
 /**
  * Aplana los documentos asignados en la lista que va en el acta general.
  * Cada documento asignado con sub-ítems aporta un renglón por ítem; si no tiene
- * ítems, el propio documento es un renglón (su título).
+ * ítems, el propio documento es un renglón (su título). El tipo (virtual/físico)
+ * se toma del ítem; si falta, se infiere: con enlace de Drive = virtual, si no = físico.
  */
 export function getGeneralActaDocuments(assigned: ActaDocumento[]): GeneralActaDoc[] {
   const out: GeneralActaDoc[] = [];
   for (const d of assigned) {
     if (d.items && d.items.length > 0) {
-      for (const it of d.items) out.push({ nombre: it.nombre, digital: !!it.driveUrl, driveUrl: it.driveUrl });
+      for (const it of d.items) {
+        const tipo: 'virtual' | 'fisico' = it.tipo || (it.driveUrl ? 'virtual' : 'fisico');
+        out.push({ nombre: it.nombre, tipo, driveUrl: it.driveUrl });
+      }
     } else {
-      out.push({ nombre: d.titulo, digital: !!d.driveDocUrl, driveUrl: d.driveDocUrl || undefined });
+      out.push({ nombre: d.titulo, tipo: d.driveDocUrl ? 'virtual' : 'fisico', driveUrl: d.driveDocUrl || undefined });
     }
   }
   return out;
