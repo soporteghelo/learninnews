@@ -941,8 +941,9 @@ export default function App() {
               className="fixed inset-0 bg-black"
               style={{ zIndex: 99999 }}
             >
-              {/* iframe — video: caja 16:9 centrada (evita que el reproductor de Drive
-                  infle sus controles al estirarse en pantallas verticales); pdf: pantalla completa */}
+              {/* iframe — video: el alto nunca supera el ancho (evita que el reproductor de
+                  Drive infle sus controles cuando el contenedor es muy alto y angosto, como en
+                  portrait; en landscape el ancho ya es mayor que el alto, así que ocupa todo). pdf: pantalla completa */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -952,8 +953,8 @@ export default function App() {
                 {embedUrl ? (
                   mediaOverlay.type === 'video' ? (
                     <div
-                      className="w-full max-h-full"
-                      style={{ aspectRatio: '16 / 9', width: 'min(100vw, calc(100vh * 16 / 9))' }}
+                      className="w-full"
+                      style={{ height: 'min(100vh, 100vw)' }}
                     >
                       <iframe
                         key={embedUrl}
