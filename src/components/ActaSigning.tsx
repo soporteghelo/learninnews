@@ -1,7 +1,7 @@
 import { useState, useRef, useLayoutEffect, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  X, Camera, PenTool, CheckCircle, Download,
+  X, Camera, PenTool, CheckCircle, Download, Check,
   ArrowRight, Loader2, AlertCircle, RefreshCw, FileSignature, Mail, FileText, ExternalLink
 } from 'lucide-react';
 import Webcam from 'react-webcam';
@@ -44,6 +44,16 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
 
   // Folio de verificación único, estable durante esta firma
   const folio = useMemo(() => 'AC-' + userSession.dni + '-' + Date.now().toString(36).toUpperCase(), [userSession.dni]);
+
+  // Documentos que el trabajador confirma recibir (por defecto todos marcados).
+  // Solo los marcados salen en el acta.
+  const [selectedIdx, setSelectedIdx] = useState<Set<number>>(() => new Set(docs.map((_, i) => i)));
+  const selectedDocs = useMemo(() => docs.filter((_, i) => selectedIdx.has(i)), [docs, selectedIdx]);
+  const toggleDoc = (i: number) => setSelectedIdx(prev => {
+    const next = new Set(prev);
+    if (next.has(i)) next.delete(i); else next.add(i);
+    return next;
+  });
 
   // Captura facial (MediaPipe) encapsulada en un hook compartido
   const {
@@ -98,6 +108,10 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
 
   const handleNext = () => {
     if (step === 'confirm') {
+      if (selectedIdx.size === 0) {
+        setError('Marca al menos un documento que estás recibiendo');
+        return;
+      }
       if (!correo.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo.trim())) {
         setError('Ingresa un correo válido para recibir el acta firmada');
         return;
@@ -241,27 +255,31 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
 
               {docs.length > 0 ? (
                 <div className="mb-5">
-                  <div className="flex items-center gap-2 mb-2.5">
+                  <div className="flex items-center gap-2 mb-1">
                     <FileText className="w-4 h-4 text-blue-400" />
-                    <p className="text-[11px] font-black text-blue-300 uppercase tracking-widest">Recibirás {docs.length} documento{docs.length !== 1 ? 's' : ''}</p>
+                    <p className="text-[11px] font-black text-blue-300 uppercase tracking-widest">Marca lo que recibes ({selectedIdx.size}/{docs.length})</p>
                   </div>
+                  <p className="text-slate-500 text-[10px] mb-2.5">Toca cada documento para marcarlo o desmarcarlo. Solo los marcados aparecerán en el acta.</p>
                   <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
-                    {docs.map((it, i) => (
-                      <div key={i} className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
-                          <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    {docs.map((it, i) => {
+                      const isSel = selectedIdx.has(i);
+                      return (
+                        <div key={i} className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 transition-all ${isSel ? 'bg-white/5 border-white/10' : 'bg-transparent border-white/5'}`}>
+                          <button type="button" onClick={() => toggleDoc(i)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                            <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 border-2 transition-colors ${isSel ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600'}`}>
+                              {isSel && <Check className="w-4 h-4 text-white" />}
+                            </div>
+                            <p className={`font-semibold text-[13px] leading-snug truncate ${isSel ? 'text-white' : 'text-slate-500 line-through'}`}>{it.nombre}</p>
+                          </button>
+                          {it.driveUrl && (
+                            <a href={it.driveUrl} target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-[10px] font-black text-blue-300 uppercase tracking-widest bg-blue-500/10 px-2.5 py-1.5 rounded-lg hover:bg-blue-500/20 transition-all flex-shrink-0">
+                              <ExternalLink className="w-3 h-3" /> Ver
+                            </a>
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white font-semibold text-[13px] leading-snug">{it.nombre}</p>
-                        </div>
-                        {it.driveUrl && (
-                          <a href={it.driveUrl} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-[10px] font-black text-blue-300 uppercase tracking-widest bg-blue-500/10 px-2.5 py-1.5 rounded-lg hover:bg-blue-500/20 transition-all flex-shrink-0">
-                            <ExternalLink className="w-3 h-3" /> Ver
-                          </a>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
@@ -271,8 +289,8 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
               {/* Declaración — debe leerse antes de firmar */}
               <div className="mb-5 p-3.5 rounded-xl bg-blue-500/5 border border-blue-500/20">
                 <p className="text-[10px] font-black text-blue-300 uppercase tracking-widest mb-1.5">Declaración</p>
-                <p className="text-slate-300 text-[12px] leading-relaxed">{ACTA_DECLARACION}</p>
-                <p className="text-slate-400 text-[11px] italic mt-2">La presente acta se firma en señal de conformidad.</p>
+                <p className="text-slate-300 text-[10.5px] leading-snug">{ACTA_DECLARACION}</p>
+                <p className="text-slate-400 text-[10px] italic mt-1.5">La presente acta se firma en señal de conformidad.</p>
               </div>
 
               {/* Email */}
@@ -456,7 +474,7 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
         <ActaTemplate
           ref={actaRef}
           signer={signer}
-          documentos={docs}
+          documentos={selectedDocs}
           signatureData={signatureData}
           selfieData={selfieData}
           timestamp={timestamp || new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' })}
