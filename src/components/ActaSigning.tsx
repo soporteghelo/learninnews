@@ -10,7 +10,7 @@ import html2pdf from 'html2pdf.js';
 import { saveActaFirma } from '../services/sheetsService';
 import type { UserSession, AppDynamicConfig, ActaDocumento } from '../types';
 import ActaTemplate, { type ActaSignerData } from './ActaTemplate';
-import { getGeneralActaDocuments, GENERAL_ACTA_ID, GENERAL_ACTA_TITULO } from '../lib/actaAssignment';
+import { getGeneralActaDocuments, GENERAL_ACTA_ID, GENERAL_ACTA_TITULO, ACTA_DECLARACION } from '../lib/actaAssignment';
 import { useFaceCapture } from '../hooks/useFaceCapture';
 import { fetchDriveImageAsBase64 } from '../lib/driveImage';
 
@@ -253,6 +253,13 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
               ) : (
                 <p className="text-slate-400 text-xs mb-5">No hay documentos asignados a tu perfil.</p>
               )}
+
+              {/* Declaración — debe leerse antes de firmar */}
+              <div className="mb-5 p-3.5 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                <p className="text-[10px] font-black text-blue-300 uppercase tracking-widest mb-1.5">Declaración</p>
+                <p className="text-slate-300 text-[12px] leading-relaxed">{ACTA_DECLARACION}</p>
+                <p className="text-slate-400 text-[11px] italic mt-2">La presente acta se firma en señal de conformidad.</p>
+              </div>
 
               {/* Email */}
               <div className="relative group">

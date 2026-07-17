@@ -35,6 +35,9 @@ export function getAssignedDocs(documentos: ActaDocumento[], user: AssignableUse
 export const GENERAL_ACTA_ID = 'ACTA_GENERAL';
 export const GENERAL_ACTA_TITULO = 'Acta de Recepción de Documentos';
 
+/** Texto de la declaración del acta (mostrado antes de firmar y en el PDF). */
+export const ACTA_DECLARACION = 'El trabajador declara haber recibido, leído y comprendido los documentos detallados, comprometiéndose a cumplir con las disposiciones, normas y procedimientos contenidos en ellos. Asimismo, reconoce que cualquier consulta sobre su contenido puede ser absuelta por su jefatura inmediata o por el área correspondiente.';
+
 /** Un documento (fila) dentro del acta general. */
 export interface GeneralActaDoc {
   nombre: string;

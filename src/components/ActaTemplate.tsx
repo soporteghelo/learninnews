@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import type { AppDynamicConfig } from '../types';
 import { interpolateActa, type ActaSignerData } from '../lib/actaInterpolate';
-import type { GeneralActaDoc } from '../lib/actaAssignment';
+import { ACTA_DECLARACION, type GeneralActaDoc } from '../lib/actaAssignment';
 
 // Vite raw import de la plantilla HTML (mismo patrón que el certificado)
 // @ts-ignore
@@ -56,13 +56,6 @@ function blank(val: string | undefined, minWidth = '45px'): string {
     : `<span style="display:inline-block;border-bottom:1px solid #9ca3af;min-width:${minWidth};">&nbsp;&nbsp;</span>`;
 }
 
-/** Casilla de verificación (☐ vacía / ☑ marcada) que renderiza bien en el PDF. */
-function checkbox(checked: boolean): string {
-  return checked
-    ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border:1.3px solid #0f2d6b;border-radius:2px;background:#0f2d6b;color:#ffffff;font-size:9px;font-weight:900;line-height:1;">&#10003;</span>`
-    : `<span style="display:inline-block;width:12px;height:12px;border:1.3px solid #0f2d6b;border-radius:2px;"></span>`;
-}
-
 const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props, ref) => {
   const { signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero } = props;
 
@@ -95,16 +88,13 @@ const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props,
       const d = documentos[i];
       const bg = i % 2 === 0 ? '#ffffff' : '#f7f9fd';
       const nombre = d ? escapeHtml(d.nombre) : '&nbsp;';
-      const digital = checkbox(!!(d && d.tipo === 'virtual'));
-      const fisico = checkbox(!!(d && d.tipo === 'fisico'));
+      const tipoTexto = d ? (d.tipo === 'virtual' ? 'Digital' : 'Físico') : '&nbsp;';
+      const tipoColor = d ? (d.tipo === 'virtual' ? '#0f7b3f' : '#8a5a00') : '#1f2937';
       docsRows +=
         `<tr style="background:${bg};">` +
         `<td style="padding:6px 6px;text-align:center;color:#1b4d89;font-weight:800;border-top:1px solid #e6edf8;">${i + 1}</td>` +
         `<td style="padding:6px 8px;color:#1f2937;font-weight:600;border-top:1px solid #e6edf8;">${nombre}</td>` +
-        `<td style="padding:6px 6px;border-top:1px solid #e6edf8;">&nbsp;</td>` +
-        `<td style="padding:6px 3px;text-align:center;border-top:1px solid #e6edf8;">${fisico}</td>` +
-        `<td style="padding:6px 3px;text-align:center;border-top:1px solid #e6edf8;">${digital}</td>` +
-        `<td style="padding:6px 8px;border-top:1px solid #e6edf8;">&nbsp;</td>` +
+        `<td style="padding:6px 6px;text-align:center;font-weight:800;letter-spacing:0.3px;color:${tipoColor};border-top:1px solid #e6edf8;">${tipoTexto}</td>` +
         `</tr>`;
     }
 
@@ -113,6 +103,7 @@ const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props,
       acta_numero: numero ? escapeHtml(numero) : `<span style="display:inline-block;border-bottom:1px solid #e8d5a3;min-width:40px;">&nbsp;</span>`,
       acta_year: year,
       intro_html: introHtml,
+      declaracion: escapeHtml(ACTA_DECLARACION),
       w_nombre: blank(nombreCompleto, '120px'),
       w_dni: blank(signer.dni, '60px'),
       w_cargo: blank(signer.cargo, '90px'),
