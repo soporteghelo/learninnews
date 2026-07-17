@@ -158,8 +158,12 @@ export default function ActasScreen({ userSession, appConfig, documentos, firmas
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[300] bg-slate-950/95 flex flex-col safe-area-top safe-area-bottom"
           >
-            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-900 border-b border-white/10 flex-shrink-0">
-              <div className="min-w-0">
+            <div className="flex items-center gap-3 px-4 py-3 bg-slate-900 border-b border-white/10 flex-shrink-0">
+              <button onClick={() => setViewingDoc(null)} title="Volver"
+                className="w-9 h-9 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center hover:bg-slate-700 transition-colors flex-shrink-0">
+                <ArrowLeft className="w-5 h-5 text-slate-300" />
+              </button>
+              <div className="min-w-0 flex-1">
                 <p className="text-white font-bold text-sm truncate">{viewingDoc.nombre}</p>
                 <p className={`text-[11px] font-bold flex items-center gap-1 ${viewingDoc.tipo === 'virtual' ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {viewingDoc.tipo === 'virtual' ? <Monitor className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
@@ -173,7 +177,7 @@ export default function ActasScreen({ userSession, appConfig, documentos, firmas
                     <ExternalLink className="w-3.5 h-3.5" /> Abrir
                   </a>
                 )}
-                <button onClick={() => setViewingDoc(null)}
+                <button onClick={() => setViewingDoc(null)} title="Cerrar"
                   className="w-9 h-9 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center hover:bg-slate-700 transition-colors">
                   <X className="w-5 h-5 text-slate-300" />
                 </button>

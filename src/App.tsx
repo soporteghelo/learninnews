@@ -715,7 +715,7 @@ export default function App() {
   return (
     <div className={`min-h-screen text-slate-200 selection:bg-blue-500/30 selection:text-blue-200 ${darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
       {/* Top-right floating buttons — hidden in views that have their own header */}
-      {view !== 'admin' && view !== 'learning' && view !== 'quiz' && view !== 'certificateClaim' && (
+      {view !== 'admin' && view !== 'learning' && view !== 'quiz' && view !== 'certificateClaim' && view !== 'actas' && (
         <div className="fixed top-4 right-4 z-[200] flex items-center gap-2">
           {userSession && (view === 'dashboard' || view === 'courseDetail') && (
             <button
