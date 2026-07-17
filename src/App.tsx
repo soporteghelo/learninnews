@@ -710,7 +710,7 @@ export default function App() {
   const actasPendientes = (() => {
     if (!userSession || assignedActas.length === 0) return 0;
     if (hasSignedGeneralActa(actaFirmas, userSession.dni)) return 0;
-    return getGeneralActaDocuments(assignedActas).length;
+    return getGeneralActaDocuments(assignedActas, userSession).length;
   })();
 
   return (
@@ -905,13 +905,14 @@ export default function App() {
         {view === 'admin' && (
           <motion.div key="admin">
             <Suspense fallback={<ViewLoader />}>
-              <AdminPanel 
+              <AdminPanel
                 topics={topics}
                 allChunks={chunks}
                 allQuizQuestions={quizQuestions}
                 onBack={() => (audience && audience.length > 0) ? setView('dashboard') : setView('login')}
                 onRefreshData={handleRefreshData}
                 adminPass={appConfig?.adminPass}
+                appConfig={appConfig}
               />
             </Suspense>
           </motion.div>

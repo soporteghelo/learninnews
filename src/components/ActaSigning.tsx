@@ -40,7 +40,7 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
   const [geo, setGeo] = useState('');
 
   // Lista aplanada de documentos que van en el acta general
-  const docs = useMemo(() => getGeneralActaDocuments(documentos), [documentos]);
+  const docs = useMemo(() => getGeneralActaDocuments(documentos, userSession), [documentos, userSession]);
 
   // Folio de verificación único, estable durante esta firma
   const folio = useMemo(() => 'AC-' + userSession.dni + '-' + Date.now().toString(36).toUpperCase(), [userSession.dni]);

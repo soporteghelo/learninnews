@@ -30,7 +30,7 @@ export default function ActasScreen({ userSession, appConfig, documentos, firmas
 
   // Todos los documentos asignados al trabajador (por perfil o DNI)
   const assigned = useMemo(() => getAssignedDocs(documentos, userSession), [documentos, userSession]);
-  const docs = useMemo(() => getGeneralActaDocuments(assigned), [assigned]);
+  const docs = useMemo(() => getGeneralActaDocuments(assigned, userSession), [assigned, userSession]);
 
   // La única firma que importa: la del acta general de este trabajador
   const generalFirma = useMemo(() => {

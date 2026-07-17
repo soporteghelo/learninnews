@@ -27,12 +27,15 @@ import type { IngresoRecord } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
   ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEval, ShortEvalWrongAnswer,
-  ActaDocumento, ActaFirma, ActaItem
+  ActaDocumento, ActaFirma, ActaItem, AppDynamicConfig
 } from '../types';
 import { parseInicio, getISOWeek, isoWeekLabel, isoWeekKey } from '../lib/dateUtils';
 import { matchNumericFilter } from '../lib/filterUtils';
-import { buildFirmaRoster, type FirmaRosterRow } from '../lib/firmaRoster';
+import { buildFirmaRoster, buildItemRoster, type FirmaRosterRow } from '../lib/firmaRoster';
 import { BarChart, Donut, ProgressBar } from './AdminCharts';
+import html2pdf from 'html2pdf.js';
+import { fetchDriveImageAsBase64 } from '../lib/driveImage';
+import ActaDistribucionTemplate, { type DistribucionRow } from './ActaDistribucionTemplate';
 import { useQrDataUrl } from '../hooks/useQrDataUrl';
 import DiagnosticoPanel, { DiagnosticoButton } from './DiagnosticoPanel';
 
@@ -87,6 +90,7 @@ interface AdminPanelProps {
   onBack: () => void;
   onRefreshData: () => Promise<void> | void;
   adminPass?: string;
+  appConfig?: AppDynamicConfig | null;
 }
 
 export default function AdminPanel({
@@ -96,6 +100,7 @@ export default function AdminPanel({
   onBack,
   onRefreshData,
   adminPass,
+  appConfig,
 }: AdminPanelProps) {
   // Auth
   const [isAuthenticated, setIsAuthenticated] = useState(() => sessionStorage.getItem(ADMIN_AUTH_KEY) === 'true');
@@ -338,9 +343,12 @@ export default function AdminPanel({
   const [showNewActaForm, setShowNewActaForm] = useState(false);
   const [editingActaId, setEditingActaId] = useState<string | null>(null);
   const [actaSaving, setActaSaving] = useState(false);
-  const [actaForm, setActaForm] = useState<{ titulo: string; descripcion: string; perfiles: string[]; dnis: string; items: ActaItem[]; requiereFirmaDibujada: boolean }>(
+  type ActaItemForm = Omit<ActaItem, 'perfiles' | 'dnisAsignados'> & { perfiles: string[]; dnisText: string };
+  const [actaForm, setActaForm] = useState<{ titulo: string; descripcion: string; perfiles: string[]; dnis: string; items: ActaItemForm[]; requiereFirmaDibujada: boolean }>(
     { titulo: '', descripcion: '', perfiles: [], dnis: '', items: [], requiereFirmaDibujada: true }
   );
+  // Filas de items con la sección de asignación/código propia expandida (colapsada por defecto)
+  const [expandedItemAdvanced, setExpandedItemAdvanced] = useState<Set<number>>(new Set());
   const [showFirmasFor, setShowFirmasFor] = useState<string | null>(null);
   const [resendingFirma, setResendingFirma] = useState<string | null>(null);
   // Sort & filter for the firmas table (one visible at a time)
@@ -355,6 +363,53 @@ export default function AdminPanel({
   const [firmaPage, setFirmaPage] = useState(1);
   // Límite incremental para la lista de usuarios (evita renderizar cientos de filas a la vez)
   const [progressLimit, setProgressLimit] = useState(30);
+
+  // Lista de distribución por documento (item): key = `${docId}:${itemIndex}`
+  const [generatingPdfKey, setGeneratingPdfKey] = useState<string | null>(null);
+  const [distribucionData, setDistribucionData] = useState<{ item: ActaItem; documentoTitulo: string; rows: DistribucionRow[] } | null>(null);
+  const distribucionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!distribucionData) return;
+    const element = distribucionRef.current;
+    if (!element) return;
+    const slug = (distribucionData.item.nombre || 'documento').toUpperCase().replace(/[^A-Z0-9]/gi, '_').replace(/_+/g, '_').slice(0, 40);
+    const opt = {
+      margin: 5,
+      filename: `LISTA_DISTRIBUCION_${slug}_${new Date().toISOString().split('T')[0]}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' as const },
+    };
+    // @ts-ignore
+    html2pdf().from(element).set(opt).save().finally(() => {
+      setDistribucionData(null);
+      setGeneratingPdfKey(null);
+    });
+  }, [distribucionData]);
+
+  const handleGenerateDistribucion = async (doc: ActaDocumento, item: ActaItem, key: string) => {
+    setGeneratingPdfKey(key);
+    try {
+      const roster = buildItemRoster(doc, item, actaFirmas, ingresoRecords).filter(r => r.firma);
+      if (roster.length === 0) {
+        showToast('Nadie ha firmado este documento todavía', 'error');
+        setGeneratingPdfKey(null);
+        return;
+      }
+      const rows: DistribucionRow[] = await Promise.all(roster.map(async (r): Promise<DistribucionRow> => {
+        const [fotoBase64, firmaBase64] = await Promise.all([
+          fetchDriveImageAsBase64(r.firma?.selfieUrl),
+          fetchDriveImageAsBase64(r.firma?.firmaUrl),
+        ]);
+        return { ...r, fotoBase64: fotoBase64 || undefined, firmaBase64: firmaBase64 || undefined };
+      }));
+      setDistribucionData({ item, documentoTitulo: doc.titulo, rows });
+    } catch {
+      showToast('Error al generar la lista de distribución', 'error');
+      setGeneratingPdfKey(null);
+    }
+  };
 
   // Toast notification
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -426,6 +481,7 @@ export default function AdminPanel({
 
   const resetActaForm = () => {
     setActaForm({ titulo: '', descripcion: '', perfiles: [], dnis: '', items: [], requiereFirmaDibujada: true });
+    setExpandedItemAdvanced(new Set());
     setEditingActaId(null);
     setShowNewActaForm(false);
   };
@@ -434,25 +490,43 @@ export default function AdminPanel({
     setActaForm({
       titulo: d.titulo, descripcion: d.descripcion, perfiles: d.perfiles,
       dnis: d.dnisAsignados.join(', '),
-      items: d.items.map(it => ({ nombre: it.nombre, driveUrl: it.driveUrl || '', tipo: it.tipo || (it.driveUrl ? 'virtual' : 'fisico') })),
+      items: d.items.map(it => ({
+        nombre: it.nombre, driveUrl: it.driveUrl || '', tipo: it.tipo || (it.driveUrl ? 'virtual' : 'fisico'),
+        perfiles: it.perfiles || [], dnisText: (it.dnisAsignados || []).join(', '),
+        codigo: it.codigo || '', version: it.version || '', fechaVersion: it.fechaVersion || '',
+      })),
       requiereFirmaDibujada: d.requiereFirmaDibujada,
     });
+    setExpandedItemAdvanced(new Set());
     setEditingActaId(d.id);
     setShowNewActaForm(true);
   };
 
   // Ítems (documentos que recibe el trabajador) del formulario de acta
-  const addActaItem = () => setActaForm(f => ({ ...f, items: [...f.items, { nombre: '', driveUrl: '', tipo: 'virtual' }] }));
-  const updateActaItem = (i: number, patch: Partial<ActaItem>) =>
+  const addActaItem = () => setActaForm(f => ({ ...f, items: [...f.items, { nombre: '', driveUrl: '', tipo: 'virtual', perfiles: [], dnisText: '', codigo: '', version: '', fechaVersion: '' }] }));
+  const updateActaItem = (i: number, patch: Partial<ActaItemForm>) =>
     setActaForm(f => ({ ...f, items: f.items.map((it, idx) => idx === i ? { ...it, ...patch } : it) }));
   const removeActaItem = (i: number) => setActaForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) }));
+  const toggleItemAdvanced = (i: number) => setExpandedItemAdvanced(prev => {
+    const next = new Set(prev);
+    if (next.has(i)) next.delete(i); else next.add(i);
+    return next;
+  });
 
   const handleSaveActa = async () => {
     // Ítems limpios: fila con nombre no vacío
     const cleanItems: ActaItem[] = actaForm.items
       .map(it => {
         const tipo: 'virtual' | 'fisico' = it.tipo === 'fisico' ? 'fisico' : 'virtual';
-        return { nombre: it.nombre.trim(), tipo, driveUrl: tipo === 'virtual' ? ((it.driveUrl || '').trim() || undefined) : undefined };
+        const dnisAsignados = it.dnisText.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+        return {
+          nombre: it.nombre.trim(), tipo, driveUrl: tipo === 'virtual' ? ((it.driveUrl || '').trim() || undefined) : undefined,
+          perfiles: it.perfiles.length > 0 ? it.perfiles : undefined,
+          dnisAsignados: dnisAsignados.length > 0 ? dnisAsignados : undefined,
+          codigo: it.codigo?.trim() || undefined,
+          version: it.version?.trim() || undefined,
+          fechaVersion: it.fechaVersion?.trim() || undefined,
+        };
       })
       .filter(it => it.nombre);
     if (!actaForm.titulo.trim()) {
@@ -3548,6 +3622,44 @@ ${text}`;
                                 }`}>{t === 'virtual' ? 'Virtual' : 'Físico'}</button>
                             ))}
                           </div>
+
+                          {/* Asignación y código propios del item (opcional, colapsado por defecto) */}
+                          <button type="button" onClick={() => toggleItemAdvanced(i)}
+                            className="text-[10px] font-bold text-[#1b4d89] hover:underline flex items-center gap-1">
+                            {expandedItemAdvanced.has(i) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            Asignación y código propios (opcional)
+                          </button>
+                          {expandedItemAdvanced.has(i) && (
+                            <div className="p-2 bg-white border border-[#e1e3e4] rounded-lg space-y-2">
+                              <p className="text-[9px] text-[#9aa0a6]">Si no defines nada aquí, este documento hereda la asignación general del acta.</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {AUDIENCE_CONFIG.profiles.map(p => {
+                                  const active = it.perfiles.includes(p.id);
+                                  return (
+                                    <button key={p.id} type="button"
+                                      onClick={() => updateActaItem(i, { perfiles: active ? it.perfiles.filter(x => x !== p.id) : [...it.perfiles, p.id] })}
+                                      className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-all ${active ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-white text-[#424750] border-[#e1e3e4] hover:border-[#1b4d89]/40'}`}>
+                                      {p.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <input value={it.dnisText} onChange={e => updateActaItem(i, { dnisText: e.target.value })}
+                                placeholder="…o DNIs específicos de este documento (separados por coma)"
+                                className="w-full px-3 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-xs text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                              <div className="grid grid-cols-3 gap-1.5">
+                                <input value={it.codigo || ''} onChange={e => updateActaItem(i, { codigo: e.target.value })}
+                                  placeholder="Código (ej. FPG-CL-SIG-06-05)"
+                                  className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                                <input value={it.version || ''} onChange={e => updateActaItem(i, { version: e.target.value })}
+                                  placeholder="Versión"
+                                  className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                                <input value={it.fechaVersion || ''} onChange={e => updateActaItem(i, { fechaVersion: e.target.value })}
+                                  placeholder="Fecha de actualización"
+                                  className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                              </div>
+                            </div>
+                          )}
                         </div>
                         {tipo === 'virtual' && (it.driveUrl || '').trim() && <div className="flex-shrink-0"><QrPreview url={(it.driveUrl || '').trim()} size={48} /></div>}
                         <button onClick={() => removeActaItem(i)} title="Quitar documento"
@@ -3654,6 +3766,28 @@ ${text}`;
                         const pageFirmas = filtered.slice((fPage - 1) * TABLE_PAGE_SIZE, fPage * TABLE_PAGE_SIZE);
                         return (
                           <div className="border-t border-[#f3f4f5] px-4 py-3 bg-[#f8f9fa]">
+                            {/* Lista de distribución por documento (item) */}
+                            {doc.items.length > 0 && (
+                              <div className="mb-3 space-y-1.5">
+                                <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider">Lista de distribución por documento</p>
+                                {doc.items.map((it, idx) => {
+                                  const itemRoster = buildItemRoster(doc, it, actaFirmas, ingresoRecords);
+                                  const itemFirmados = itemRoster.filter(r => r.firma).length;
+                                  const key = `${doc.id}:${idx}`;
+                                  return (
+                                    <div key={idx} className="flex items-center justify-between gap-2 bg-white border border-[#e1e3e4] rounded-lg px-3 py-1.5">
+                                      <span className="text-xs font-semibold text-[#424750] truncate">{it.nombre}</span>
+                                      <span className="text-[10px] text-[#737781] flex-shrink-0">{itemFirmados}/{itemRoster.length} firmado(s)</span>
+                                      <button onClick={() => handleGenerateDistribucion(doc, it, key)} disabled={itemFirmados === 0 || generatingPdfKey === key}
+                                        title="Generar lista de distribución en PDF"
+                                        className="flex items-center gap-1 px-2 py-1 bg-[#1b4d89]/10 text-[#1b4d89] rounded-md text-[10px] font-bold hover:bg-[#1b4d89]/20 transition-all disabled:opacity-40 flex-shrink-0">
+                                        {generatingPdfKey === key ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />} PDF
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                             <div className="flex items-center justify-between mb-2">
                               <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider">Firmas ({filtered.length}{filtered.length !== roster.length ? ` / ${roster.length}` : ''})</p>
                               <button onClick={() => handleExportFirmas(doc, filtered)} disabled={roster.length === 0}
@@ -3753,6 +3887,19 @@ ${text}`;
         >
           <Plus className="w-8 h-8 text-[#ffffff]" strokeWidth={3} />
         </motion.button>
+      )}
+
+      {/* Plantilla de lista de distribución — fuera de pantalla, solo para capturar con html2canvas/html2pdf */}
+      {distribucionData && (
+        <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+          <ActaDistribucionTemplate
+            ref={distribucionRef}
+            item={distribucionData.item}
+            documentoTitulo={distribucionData.documentoTitulo}
+            rows={distribucionData.rows}
+            appConfig={appConfig ?? null}
+          />
+        </div>
       )}
 
       {/* Edit User Profile Modal (perfil / correo / DNI) */}

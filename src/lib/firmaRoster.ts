@@ -4,8 +4,8 @@
  * registradas, marcando el estado firmado/pendiente de cada persona.
  * Pura y memoizable (antes vivía dentro de AdminPanel).
  */
-import type { ActaDocumento, ActaFirma } from '../types';
-import { GENERAL_ACTA_ID } from './actaAssignment';
+import type { ActaDocumento, ActaFirma, ActaItem } from '../types';
+import { GENERAL_ACTA_ID, getEffectiveAssignment } from './actaAssignment';
 
 export interface FirmaRosterRow {
   dni: string;
@@ -30,12 +30,14 @@ interface RosterIngreso {
   publico?: string;
 }
 
-export function buildFirmaRoster(
+function buildRosterForAssignment(
+  perfiles: string[],
+  dnisAsignados: string[],
   doc: ActaDocumento,
   firmas: ActaFirma[],
   ingresos: RosterIngreso[],
 ): FirmaRosterRow[] {
-  const perfilesLower = doc.perfiles.map(p => p.toLowerCase().trim());
+  const perfilesLower = perfiles.map(p => p.toLowerCase().trim());
   // Firmas específicas de este documento (modelo antiguo) + firma del acta general.
   // Una persona que firmó su acta general se considera firmante de todos sus documentos.
   const firmasDoc = firmas.filter(f => f.documentoId === doc.id);
@@ -63,7 +65,7 @@ export function buildFirmaRoster(
     });
   }
   // Por DNI explícito
-  doc.dnisAsignados.forEach(dni => {
+  dnisAsignados.forEach(dni => {
     const d = String(dni).trim();
     if (!d || roster.has(d)) return;
     const ing = ingresos.find(r => String(r.dni).trim() === d);
@@ -80,4 +82,24 @@ export function buildFirmaRoster(
     if (!roster.has(d)) roster.set(d, { dni: d, nombre: `${f.apellidos} ${f.nombres}`.trim(), apellidos: f.apellidos, nombres: f.nombres, cargo: f.cargo, area: f.area, empresa: f.empresa, correo: f.correo, firma: f });
   });
   return Array.from(roster.values());
+}
+
+export function buildFirmaRoster(
+  doc: ActaDocumento,
+  firmas: ActaFirma[],
+  ingresos: RosterIngreso[],
+): FirmaRosterRow[] {
+  return buildRosterForAssignment(doc.perfiles, doc.dnisAsignados, doc, firmas, ingresos);
+}
+
+/** Roster de firmas de UN documento (item) dentro de un acta, usando su asignación
+ *  efectiva (propia si la define, si no la heredada del acta padre). */
+export function buildItemRoster(
+  doc: ActaDocumento,
+  item: ActaItem,
+  firmas: ActaFirma[],
+  ingresos: RosterIngreso[],
+): FirmaRosterRow[] {
+  const { perfiles, dnisAsignados } = getEffectiveAssignment(doc, item);
+  return buildRosterForAssignment(perfiles, dnisAsignados, doc, firmas, ingresos);
 }

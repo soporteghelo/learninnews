@@ -182,6 +182,13 @@ export interface ActaItem {
   nombre: string;              // nombre del documento recepcionado
   driveUrl?: string;           // enlace de Drive del documento (opcional, genera QR por fila)
   tipo?: 'virtual' | 'fisico'; // tipo de entrega: virtual (marca "Digital") o físico
+  // Asignación propia del documento (override); vacío/undefined = hereda la del acta padre
+  perfiles?: string[];
+  dnisAsignados?: string[];
+  // Metadatos de control documental, usados en el PDF "Lista Maestra de Distribución"
+  codigo?: string;
+  version?: string;
+  fechaVersion?: string;        // "fecha de actualización" del documento (texto libre)
 }
 
 /** Documento/compromiso configurable por el admin, firmable por el usuario. */

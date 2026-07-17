@@ -1334,6 +1334,11 @@ function parseActaItems(raw: unknown): ActaItem[] {
         nombre: String(it?.nombre || '').trim(),
         driveUrl: String(it?.driveUrl || '').trim() || undefined,
         tipo: it?.tipo === 'fisico' ? 'fisico' : (it?.tipo === 'virtual' ? 'virtual' : undefined),
+        perfiles: Array.isArray(it?.perfiles) ? it.perfiles.filter(Boolean) : undefined,
+        dnisAsignados: Array.isArray(it?.dnisAsignados) ? it.dnisAsignados.filter(Boolean) : undefined,
+        codigo: String(it?.codigo || '').trim() || undefined,
+        version: String(it?.version || '').trim() || undefined,
+        fechaVersion: String(it?.fechaVersion || '').trim() || undefined,
       }))
       .filter(it => it.nombre);
   } catch {
