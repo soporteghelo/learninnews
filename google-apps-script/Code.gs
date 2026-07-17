@@ -212,6 +212,8 @@ function doPost(e) {
       const sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
       if (!sheet) return createResponse({ status: 'error', message: 'Hoja INGRESOS no encontrada' });
       return updateIngreso(sheet, data.ingreso);
+    } else if (data.action === 'updateUserProfile') {
+      return updateUserProfile(ss, data);
     } else if (data.action === 'saveCertificate') {
       return saveCertificate(ss, data);
     } else if (data.action === 'upsertTopic') {
@@ -557,6 +559,76 @@ function updateIngreso(sheet, ingreso) {
     }
   }
   return createResponse({ status: 'error', message: 'No se encontró el registro' });
+}
+
+/**
+ * Permite al admin corregir el perfil (Publico), correo y/o DNI de un usuario
+ * ya registrado en INGRESOS. Si cambia el DNI, replica el cambio en las hojas
+ * que lo usan como llave de asociación (CERTIFICADOS, SHORT_RESULTADOS,
+ * ACTAS_FIRMAS) para que el historial del usuario no quede huérfano bajo el
+ * DNI anterior. data: { dni (actual), nuevoDni?, publico?, correo? }
+ */
+function updateUserProfile(ss, data) {
+  var dni = String(data.dni || '').trim();
+  if (!dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+
+  var sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja INGRESOS no encontrada' });
+
+  var sheetData = sheet.getDataRange().getValues();
+  var headers = sheetData[0];
+  var colMap = {};
+  headers.forEach(function(h, i) { colMap[h] = i; });
+  var dniCol = getHeaderIndex(headers, ['DNI', 'Id']);
+  if (dniCol === -1) return createResponse({ status: 'error', message: 'Columna DNI no encontrada' });
+
+  var rowIndex = -1;
+  for (var i = 1; i < sheetData.length; i++) {
+    if (String(sheetData[i][dniCol] || '').trim() === dni) { rowIndex = i + 1; break; }
+  }
+  if (rowIndex === -1) return createResponse({ status: 'error', message: 'No se encontró ningún usuario con el DNI ' + dni });
+
+  var nuevoDni = data.nuevoDni ? String(data.nuevoDni).trim() : '';
+  if (nuevoDni && nuevoDni !== dni) {
+    for (var j = 1; j < sheetData.length; j++) {
+      if (j + 1 !== rowIndex && String(sheetData[j][dniCol] || '').trim() === nuevoDni) {
+        return createResponse({ status: 'error', message: 'Ya existe otro usuario registrado con el DNI ' + nuevoDni });
+      }
+    }
+  }
+
+  if (data.publico !== undefined && colMap['Publico'] !== undefined) {
+    sheet.getRange(rowIndex, colMap['Publico'] + 1).setValue(data.publico);
+  }
+  if (data.correo !== undefined && colMap['CORREO'] !== undefined) {
+    sheet.getRange(rowIndex, colMap['CORREO'] + 1).setValue(data.correo);
+  }
+  if (nuevoDni && nuevoDni !== dni) {
+    sheet.getRange(rowIndex, dniCol + 1).setValue(nuevoDni);
+    migrateDniAcrossSheets_(ss, dni, nuevoDni);
+  }
+
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Perfil actualizado correctamente', dni: nuevoDni || dni });
+}
+
+/** Reemplaza el DNI antiguo por el nuevo en las hojas que lo usan como llave
+ *  de asociación con el usuario (no en INGRESOS, que ya se actualiza aparte). */
+function migrateDniAcrossSheets_(ss, oldDni, newDni) {
+  ['CERTIFICADOS', SHORT_RESULTS_SHEET_NAME, ACTAS_FIRMAS_SHEET_NAME].forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) return;
+    var headers = data[0];
+    var dniCol = headers.indexOf('DNI');
+    if (dniCol === -1) return;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][dniCol] || '').trim() === oldDni) {
+        sheet.getRange(i + 1, dniCol + 1).setValue(newDni);
+      }
+    }
+  });
 }
 
 function saveCertificate(ss, data) {

@@ -18,7 +18,7 @@ import {
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  clearSheetCache, fetchAllIngresos, fetchAllCertificates,
+  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile,
   fetchShortEvals, createShortEval, updateShortEvalStatus, deleteShortEval, fetchAllShortResults,
   deleteShortEvalResult,
   fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo,
@@ -303,6 +303,9 @@ export default function AdminPanel({
   const [progressEmpresaFilter, setProgressEmpresaFilter] = useState('');
   const [progressPublicoFilter, setProgressPublicoFilter] = useState('');
   const [progressExpandedDni, setProgressExpandedDni] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<IngresoRecord | null>(null);
+  const [editForm, setEditForm] = useState<{ dni: string; publico: string[]; correo: string }>({ dni: '', publico: [], correo: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
 
   // Short Evaluaciones state
   const [shortEvals, setShortEvals] = useState<ShortEval[]>([]);
@@ -605,6 +608,46 @@ export default function AdminPanel({
       setAllCertificates(certs);
       setProgressLoading(false);
     }).catch(() => setProgressLoading(false));
+  };
+
+  const handleOpenEditUser = (record: IngresoRecord) => {
+    setEditingUser(record);
+    setEditForm({
+      dni: record.dni,
+      publico: (record.publico || '').split(',').map(p => p.trim()).filter(Boolean),
+      correo: record.correo || '',
+    });
+  };
+
+  const handleSaveUserProfile = async () => {
+    if (!editingUser) return;
+    const nuevoDni = editForm.dni.trim();
+    if (!nuevoDni) { showToast('El DNI no puede estar vacío', 'error'); return; }
+
+    setSavingProfile(true);
+    try {
+      const result = await updateUserProfile({
+        dni: editingUser.dni,
+        nuevoDni: nuevoDni !== editingUser.dni ? nuevoDni : undefined,
+        publico: editForm.publico.join(', '),
+        correo: editForm.correo.trim(),
+      });
+      if (result.success) {
+        const finalDni = result.dni || nuevoDni;
+        setIngresoRecords(prev => prev.map(r => r.dni === editingUser.dni
+          ? { ...r, dni: finalDni, publico: editForm.publico.join(', '), correo: editForm.correo.trim() }
+          : r));
+        if (progressExpandedDni === editingUser.dni) setProgressExpandedDni(finalDni);
+        showToast('Perfil actualizado correctamente');
+        setEditingUser(null);
+      } else {
+        showToast(result.message || 'No se pudo actualizar el perfil', 'error');
+      }
+    } catch {
+      showToast('Error al actualizar el perfil', 'error');
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   // Auth
@@ -2904,20 +2947,30 @@ ${text}`;
                             {isExpanded && (
                               <div className="border-t border-[#f3f4f5] px-4 py-4 bg-[#f8f9fa] space-y-4">
                                 {/* Profile info */}
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                  {[
-                                    { label: 'Área', value: record.area || '—' },
-                                    { label: 'Cargo', value: record.cargo || '—' },
-                                    { label: 'Correo', value: record.correo || '—' },
-                                    { label: 'Inicio', value: record.inicio || '—' },
-                                    { label: 'Último acceso', value: record.ultimoAcceso || '—' },
-                                    { label: 'Dispositivo', value: record.dispositivo || '—' },
-                                  ].map(({ label, value }) => (
-                                    <div key={label}>
-                                      <p className="text-[9px] text-[#737781] uppercase font-bold tracking-wide">{label}</p>
-                                      <p className="text-xs text-[#424750] font-semibold truncate">{value}</p>
-                                    </div>
-                                  ))}
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 flex-1">
+                                    {[
+                                      { label: 'Área', value: record.area || '—' },
+                                      { label: 'Cargo', value: record.cargo || '—' },
+                                      { label: 'Correo', value: record.correo || '—' },
+                                      { label: 'DNI', value: record.dni || '—' },
+                                      { label: 'Inicio', value: record.inicio || '—' },
+                                      { label: 'Último acceso', value: record.ultimoAcceso || '—' },
+                                      { label: 'Dispositivo', value: record.dispositivo || '—' },
+                                    ].map(({ label, value }) => (
+                                      <div key={label}>
+                                        <p className="text-[9px] text-[#737781] uppercase font-bold tracking-wide">{label}</p>
+                                        <p className="text-xs text-[#424750] font-semibold truncate">{value}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenEditUser(record); }}
+                                    title="Editar perfil, correo o DNI"
+                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#1b4d89] hover:bg-blue-50 hover:border-[#1b4d89]/30 transition-all"
+                                  >
+                                    <Edit3 className="w-3 h-3" /> Editar
+                                  </button>
                                 </div>
 
                                 {/* Per-topic progress */}
@@ -3701,6 +3754,120 @@ ${text}`;
           <Plus className="w-8 h-8 text-[#ffffff]" strokeWidth={3} />
         </motion.button>
       )}
+
+      {/* Edit User Profile Modal (perfil / correo / DNI) */}
+      <AnimatePresence>
+        {editingUser && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+            onClick={() => !savingProfile && setEditingUser(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl max-w-md w-full p-6 shadow-[0_16px_48px_rgba(0,0,0,0.15)]"
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0">
+                  <Edit3 className="w-5 h-5 text-[#1b4d89]" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-[#00366b]">Editar perfil de usuario</h3>
+                  <p className="text-sm text-[#737781]">{editingUser.nombres} {editingUser.apellidos}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-2">Perfil (público)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {AUDIENCE_CONFIG.profiles.map(profile => {
+                      const checked = editForm.publico.includes(profile.id);
+                      return (
+                        <button
+                          key={profile.id}
+                          type="button"
+                          onClick={() => setEditForm(prev => ({
+                            ...prev,
+                            publico: checked ? prev.publico.filter(p => p !== profile.id) : [...prev.publico, profile.id],
+                          }))}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                            checked
+                              ? 'bg-[#1b4d89] border-[#1b4d89] text-white'
+                              : 'bg-white border-[#e1e3e4] text-[#424750] hover:bg-[#f3f4f5]'
+                          }`}
+                        >
+                          {profile.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Correo</label>
+                  <input
+                    type="email"
+                    value={editForm.correo}
+                    onChange={e => setEditForm(prev => ({ ...prev, correo: e.target.value }))}
+                    placeholder="correo@ejemplo.com"
+                    className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">DNI</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={8}
+                    value={editForm.dni}
+                    onChange={e => setEditForm(prev => ({ ...prev, dni: e.target.value.replace(/\D/g, '') }))}
+                    className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none"
+                  />
+                  {editForm.dni !== editingUser.dni && (
+                    <p className="text-[10px] text-amber-600 font-semibold mt-1.5">
+                      Se actualizará también en certificados, actas firmadas y evaluaciones cortas de este usuario. El usuario deberá usar el nuevo DNI para volver a ingresar.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setEditingUser(null)}
+                  disabled={savingProfile}
+                  className="flex-1 py-3 rounded-xl border-2 border-[#e1e3e4] text-[#424750] font-semibold text-sm hover:bg-[#f3f4f5] transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveUserProfile}
+                  disabled={savingProfile}
+                  className="flex-1 py-3 rounded-xl bg-[#1b4d89] text-white font-semibold text-sm hover:bg-[#163e6f] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {savingProfile ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Guardar
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>

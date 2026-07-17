@@ -1055,6 +1055,25 @@ export async function updateIngresoProgress(data: {
   }
 }
 
+/** Permite al admin corregir el perfil (Publico), correo y/o DNI de un usuario ya registrado. */
+export async function updateUserProfile(data: {
+  dni: string;
+  nuevoDni?: string;
+  publico?: string;
+  correo?: string;
+}): Promise<{ success: boolean; message: string; dni?: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'updateUserProfile', ...data }) as any;
+    return {
+      success: result.status === 'ok',
+      message: result.message || 'Perfil actualizado correctamente',
+      dni: result.dni,
+    };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+}
+
 export async function fetchGlobalKnownUsers(): Promise<Record<string, { apellidos: string, nombres: string }>> {
   const url = getSheetUrl(SHEETS_CONFIG.sheets.ingresos);
   try {
