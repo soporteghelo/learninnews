@@ -625,6 +625,7 @@ html.light-mode .glass-card {
 
 /* Text colors */
 html.light-mode .text-white { color: #0f172a !important; }
+html.light-mode .text-slate-100 { color: #0f172a !important; }
 html.light-mode .text-slate-200 { color: #334155 !important; }
 html.light-mode .text-slate-300 { color: #475569 !important; }
 html.light-mode .text-slate-400 { color: #64748b !important; }
