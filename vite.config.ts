@@ -103,12 +103,101 @@ const apiExtractTextPlugin = () => ({
   }
 });
 
+// Plugin local para emular /api/drive-video: resuelve un ID de Drive al enlace
+// directo del archivo y reenvía los bytes (respetando Range) al navegador desde
+// nuestro propio origen. Google no manda CORS de forma confiable cuando un
+// <video> pide ese enlace directamente (bloqueo por Sec-Fetch-Dest/ORB), por
+// eso el proxy hace el fetch server-side y solo reenvía la respuesta.
+const apiDriveVideoPlugin = () => ({
+  name: 'api-drive-video',
+  configureServer(server: any) {
+    server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+      if (!req.url?.startsWith('/api/drive-video')) return next();
+
+      const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+      try {
+        const reqUrl = new URL(req.url, 'http://localhost');
+        const driveUrl = reqUrl.searchParams.get('url') || '';
+        if (!driveUrl) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({ error: 'Falta el parámetro url' }));
+        }
+
+        const match = driveUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                      driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+                      driveUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+                      (/^[a-zA-Z0-9_-]{25,}$/.test(driveUrl) ? [null, driveUrl] : null);
+        const fileId = match ? match[1] : null;
+        if (!fileId) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({ error: 'No se pudo encontrar el ID en la URL de Drive.' }));
+        }
+
+        const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+        const first = await axios.get(downloadUrl, {
+          headers: { 'User-Agent': USER_AGENT },
+          maxRedirects: 5,
+          responseType: 'stream',
+        });
+
+        const contentType = first.headers['content-type'] || '';
+        const responseUrl = first.request?.res?.responseUrl || downloadUrl;
+
+        let directUrl: string;
+        if (!contentType.includes('text/html')) {
+          first.data.destroy();
+          directUrl = responseUrl;
+        } else {
+          let html = '';
+          for await (const chunk of first.data) {
+            html += chunk.toString();
+            if (html.length > 50000) break;
+          }
+          if (html.includes('Google Drive - Quota exceeded')) {
+            throw new Error('Cuota de descarga de Google excedida para este archivo.');
+          }
+          const confirmMatch = html.match(/name="confirm"\s+value="([^"]+)"/) || html.match(/confirm=([^&"]+)/);
+          if (!confirmMatch) {
+            throw new Error('No se pudo resolver el enlace directo del video (verifica que sea público).');
+          }
+          const uuidMatch = html.match(/name="uuid"\s+value="([^"]+)"/);
+          const params = new URLSearchParams({ id: fileId, export: 'download', confirm: confirmMatch[1] });
+          if (uuidMatch) params.set('uuid', uuidMatch[1]);
+          directUrl = `https://drive.usercontent.google.com/download?${params.toString()}`;
+        }
+
+        const range = req.headers.range;
+        const upstream = await axios.get(directUrl, {
+          headers: { 'User-Agent': USER_AGENT, ...(range ? { Range: range } : {}) },
+          responseType: 'stream',
+          validateStatus: () => true,
+        });
+
+        res.statusCode = upstream.status;
+        res.setHeader('Content-Type', upstream.headers['content-type'] || 'video/mp4');
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-store');
+        if (upstream.headers['content-range']) res.setHeader('Content-Range', upstream.headers['content-range']);
+        if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+        upstream.data.pipe(res);
+      } catch (error: any) {
+        console.error('[DriveVideo] Error:', error.message);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ error: error.message || 'Error resolviendo el video' }));
+      }
+    });
+  }
+});
+
 export default defineConfig({
   base: '/',
   plugins: [
     react(),
     tailwindcss(),
     apiExtractTextPlugin(), // Inyectamos el "servidor EXTRACTOR" aquí
+    apiDriveVideoPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],

@@ -38,6 +38,7 @@ import type { ProfileFormData } from './components/ProfileForm';
 import Onboarding from './components/Onboarding';
 import Dashboard from './components/Dashboard';
 import CourseDetail from './components/CourseDetail';
+import DriveVideoPlayer from './components/DriveVideoPlayer';
 
 // Lazy loaded components for code splitting
 const LearningMode = lazy(() => import('./components/LearningMode'));
@@ -941,38 +942,32 @@ export default function App() {
               className="fixed inset-0 bg-black"
               style={{ zIndex: 99999 }}
             >
-              {/* iframe — video: el alto nunca supera el ancho (evita que el reproductor de
-                  Drive infle sus controles cuando el contenedor es muy alto y angosto, como en
-                  portrait; en landscape el ancho ya es mayor que el alto, así que ocupa todo). pdf: pantalla completa */}
+              {/* video: <video> nativo (vía /api/drive-video) en vez del iframe /preview de
+                  Drive, que infla sus propios controles en pantallas angostas. pdf: iframe a pantalla completa */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.1, duration: 0.4 }}
-                className={mediaOverlay.type === 'video' ? 'absolute inset-0 flex items-center justify-center' : 'absolute inset-0'}
+                className="absolute inset-0"
               >
-                {embedUrl ? (
-                  mediaOverlay.type === 'video' ? (
-                    <div
-                      className="w-full"
-                      style={{ height: 'min(100vh, 100vw)' }}
-                    >
-                      <iframe
-                        key={embedUrl}
-                        src={embedUrl}
-                        className="w-full h-full border-0"
-                        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-                        allowFullScreen
-                      />
-                    </div>
+                {mediaOverlay.type === 'video' ? (
+                  embedUrl ? (
+                    <DriveVideoPlayer key={mediaOverlay.url} driveUrl={mediaOverlay.url} fallbackEmbedUrl={embedUrl} />
                   ) : (
-                    <iframe
-                      key={embedUrl}
-                      src={embedUrl}
-                      className="w-full h-full border-0"
-                      allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-                      allowFullScreen
-                    />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
+                      <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
+                      <h3 className="text-xl font-bold text-white mb-2">Enlace no válido</h3>
+                      <p className="text-slate-400 max-w-sm text-sm">El enlace no corresponde a un archivo de Google Drive válido.</p>
+                    </div>
                   )
+                ) : embedUrl ? (
+                  <iframe
+                    key={embedUrl}
+                    src={embedUrl}
+                    className="w-full h-full border-0"
+                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                    allowFullScreen
+                  />
                 ) : (
                   <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
                     <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
