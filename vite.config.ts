@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { VitePWA } from 'vite-plugin-pwa'
 import axios from 'axios'
 import { IncomingMessage, ServerResponse } from 'http'
 import { createRequire } from 'module'
@@ -108,6 +109,61 @@ export default defineConfig({
     react(),
     tailwindcss(),
     apiExtractTextPlugin(), // Inyectamos el "servidor EXTRACTOR" aquí
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.svg'],
+      manifest: {
+        name: 'LearnDrive AI — Capacitaciones SST',
+        short_name: 'LearnDrive',
+        description: 'Plataforma de capacitación corporativa: cursos, evaluaciones, certificados y actas.',
+        theme_color: '#00366b',
+        background_color: '#0f172a',
+        display: 'standalone',
+        orientation: 'portrait',
+        start_url: '/',
+        icons: [
+          { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+          { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        navigateFallbackDenylist: [/^\/api\//],
+        runtimeCaching: [
+          {
+            // Contenido de Google Sheets (LEARN/DATA/QUIZ/…): funciona offline con lo último visto
+            urlPattern: /^https:\/\/docs\.google\.com\/spreadsheets\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'sheets-data',
+              networkTimeoutSeconds: 8,
+              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 7 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Imágenes proxied (logos/firmas) vía weserv
+            urlPattern: /^https:\/\/images\.weserv\.nl\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'proxied-images',
+              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
+      },
+    }),
   ],
   server: {
     port: 3000,

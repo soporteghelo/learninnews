@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import RichContent from './RichContent';
 import * as XLSX from 'xlsx';
@@ -9,7 +9,8 @@ import {
   Wifi, WifiOff, ChevronDown, ChevronUp,
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
   Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
-  ClipboardCheck, ExternalLink, ToggleLeft, ToggleRight, Globe, ArrowUpDown, ArrowUp, ArrowDown
+  ClipboardCheck, ClipboardList, ExternalLink, ToggleLeft, ToggleRight, Globe, ArrowUpDown, ArrowUp, ArrowDown,
+  FileSignature, Mail, Send, X, Menu, PanelLeftClose
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG, getPublicBaseUrl } from '../config/app.config';
 import {
@@ -20,15 +21,65 @@ import {
   clearSheetCache, fetchAllIngresos, fetchAllCertificates,
   fetchShortEvals, createShortEval, updateShortEvalStatus, deleteShortEval, fetchAllShortResults,
   deleteShortEvalResult,
+  fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo,
 } from '../services/sheetsService';
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
-  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEval, ShortEvalWrongAnswer
+  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEval, ShortEvalWrongAnswer,
+  ActaDocumento, ActaFirma, ActaItem
 } from '../types';
+import { parseInicio, getISOWeek, isoWeekLabel, isoWeekKey } from '../lib/dateUtils';
+import { matchNumericFilter } from '../lib/filterUtils';
+import { buildFirmaRoster, type FirmaRosterRow } from '../lib/firmaRoster';
+import { BarChart, Donut, ProgressBar } from './AdminCharts';
+import { useQrDataUrl } from '../hooks/useQrDataUrl';
+import DiagnosticoPanel, { DiagnosticoButton } from './DiagnosticoPanel';
 
 const ADMIN_AUTH_KEY = 'learndrive_admin_auth';
 
+// Filas por página en tablas grandes (resultados de evals cortas y firmas de actas)
+const TABLE_PAGE_SIZE = 25;
+
+/** Paginador compacto para tablas grandes. */
+function Pager({ page, totalPages, total, onPage }: { page: number; totalPages: number; total: number; onPage: (p: number) => void }) {
+  if (totalPages <= 1) return null;
+  const from = (page - 1) * TABLE_PAGE_SIZE + 1;
+  const to = Math.min(page * TABLE_PAGE_SIZE, total);
+  return (
+    <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-[#f3f4f5]">
+      <span className="text-[10px] text-[#737781]">{from}–{to} de {total}</span>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page <= 1}
+          className="px-2 py-1 rounded-md bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#424750] hover:bg-[#f3f4f5] disabled:opacity-40 disabled:cursor-not-allowed">‹ Ant.</button>
+        <span className="text-[10px] font-bold text-[#424750] px-1">Pág. {page}/{totalPages}</span>
+        <button onClick={() => onPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages}
+          className="px-2 py-1 rounded-md bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#424750] hover:bg-[#f3f4f5] disabled:opacity-40 disabled:cursor-not-allowed">Sig. ›</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * QR autogenerado del enlace de Drive del documento. Se muestra al asignar/listar documentos
+ * y es el mismo QR que aparece en el acta de entrega (PDF).
+ */
+function QrPreview({ url, size = 96, caption }: { url: string; size?: number; caption?: string }) {
+  const qr = useQrDataUrl(url, { size: Math.max(size * 2, 200) });
+  if (!url) return null;
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="rounded-lg border-2 border-[#1b4d89] bg-white p-1" style={{ width: size, height: size }}>
+        {qr
+          ? <img src={qr} alt="QR del documento" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          : <div className="w-full h-full flex items-center justify-center"><Loader2 className="w-4 h-4 text-[#1b4d89] animate-spin" /></div>}
+      </div>
+      {caption && <span className="text-[9px] text-[#737781] text-center leading-tight max-w-[110px]">{caption}</span>}
+    </div>
+  );
+}
+
+// Variables disponibles para interpolar en el cuerpo del acta
 interface AdminPanelProps {
   topics: LearnTopic[];
   allChunks: DataChunk[];
@@ -56,6 +107,7 @@ export default function AdminPanel({
   const [activeTab, setActiveTab] = useState<AdminTab>('topics');
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
   const [isTopicSelectorOpen, setIsTopicSelectorOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1024);
 
   // Topics management
   const [draftTopics, setDraftTopics] = useState<TopicDraft[]>([]);
@@ -97,6 +149,7 @@ export default function AdminPanel({
   // Connection test
   const [isTesting, setIsTesting] = useState(false);
   const [testResults, setTestResults] = useState<ConnectionTestResult | null>(null);
+  const [showDiagnostico, setShowDiagnostico] = useState(false);
 
   // Markdown full-screen preview / editor
   const [previewChunkId, setPreviewChunkId] = useState<string | null>(null);
@@ -274,23 +327,31 @@ export default function AdminPanel({
   const toggleResultsSort = (key: ResultsSortKey) => {
     setResultsSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
   };
-  // Numeric column filter: supports comparators (>, <, >=, <=, =) and plain-text/substring match
-  const matchNumericFilter = (value: number, raw: string, displayStr: string): boolean => {
-    const q = raw.trim().replace(',', '.');
-    const m = q.match(/^(>=|<=|>|<|=)\s*(-?\d+(?:\.\d+)?)$/);
-    if (m) {
-      const n = parseFloat(m[2]);
-      if (Number.isNaN(n)) return true;
-      switch (m[1]) {
-        case '>': return value > n;
-        case '<': return value < n;
-        case '>=': return value >= n;
-        case '<=': return value <= n;
-        case '=': return value === n;
-      }
-    }
-    return displayStr.includes(q);
+  const [resultsPage, setResultsPage] = useState(1);
+  // ===== Actas de Entrega / Compromisos =====
+  const [actaDocs, setActaDocs] = useState<ActaDocumento[]>([]);
+  const [actaFirmas, setActaFirmas] = useState<ActaFirma[]>([]);
+  const [actasLoading, setActasLoading] = useState(false);
+  const [showNewActaForm, setShowNewActaForm] = useState(false);
+  const [editingActaId, setEditingActaId] = useState<string | null>(null);
+  const [actaSaving, setActaSaving] = useState(false);
+  const [actaForm, setActaForm] = useState<{ titulo: string; descripcion: string; perfiles: string[]; dnis: string; items: ActaItem[]; requiereFirmaDibujada: boolean }>(
+    { titulo: '', descripcion: '', perfiles: [], dnis: '', items: [], requiereFirmaDibujada: true }
+  );
+  const [showFirmasFor, setShowFirmasFor] = useState<string | null>(null);
+  const [resendingFirma, setResendingFirma] = useState<string | null>(null);
+  // Sort & filter for the firmas table (one visible at a time)
+  type FirmaSortKey = 'dni' | 'nombre' | 'estado' | 'fecha' | 'correo';
+  const [firmaSort, setFirmaSort] = useState<{ key: FirmaSortKey; dir: 'asc' | 'desc' }>({ key: 'nombre', dir: 'asc' });
+  const [firmaFilters, setFirmaFilters] = useState<{ dni: string; nombre: string; estado: string; fecha: string; correo: string }>(
+    { dni: '', nombre: '', estado: '', fecha: '', correo: '' }
+  );
+  const toggleFirmaSort = (key: FirmaSortKey) => {
+    setFirmaSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
   };
+  const [firmaPage, setFirmaPage] = useState(1);
+  // Límite incremental para la lista de usuarios (evita renderizar cientos de filas a la vez)
+  const [progressLimit, setProgressLimit] = useState(30);
 
   // Toast notification
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -309,6 +370,9 @@ export default function AdminPanel({
       setAllCertificates(certs);
       setProgressLoading(false);
     }).catch(() => setProgressLoading(false));
+    // Vista 360°: precargar evals cortas y firmas de actas para el detalle por usuario
+    if (shortResults.length === 0) fetchAllShortResults().then(setShortResults).catch(() => {});
+    if (actaFirmas.length === 0) fetchActaFirmas().then(setActaFirmas).catch(() => {});
   }, [activeTab]);
 
   useEffect(() => {
@@ -331,6 +395,144 @@ export default function AdminPanel({
       setShortEvalsLoading(false);
     }).catch(() => setShortEvalsLoading(false));
   };
+
+  // ===== Actas: carga y handlers =====
+  useEffect(() => {
+    if (activeTab !== 'actas') return;
+    // Cargar el roster de usuarios (para calcular pendientes por perfil) si aún no está
+    if (ingresoRecords.length === 0) {
+      fetchAllIngresos().then(setIngresoRecords).catch(() => {});
+    }
+    if (actaDocs.length > 0 || actaFirmas.length > 0) return;
+    setActasLoading(true);
+    Promise.all([fetchActaDocumentos(), fetchActaFirmas()]).then(([docs, firmas]) => {
+      setActaDocs(docs);
+      setActaFirmas(firmas);
+      setActasLoading(false);
+    }).catch(() => setActasLoading(false));
+  }, [activeTab]);
+
+  const handleRefreshActas = () => {
+    setActasLoading(true);
+    Promise.all([fetchActaDocumentos(), fetchActaFirmas()]).then(([docs, firmas]) => {
+      setActaDocs(docs);
+      setActaFirmas(firmas);
+      setActasLoading(false);
+    }).catch(() => setActasLoading(false));
+  };
+
+  const resetActaForm = () => {
+    setActaForm({ titulo: '', descripcion: '', perfiles: [], dnis: '', items: [], requiereFirmaDibujada: true });
+    setEditingActaId(null);
+    setShowNewActaForm(false);
+  };
+
+  const handleEditActa = (d: ActaDocumento) => {
+    setActaForm({
+      titulo: d.titulo, descripcion: d.descripcion, perfiles: d.perfiles,
+      dnis: d.dnisAsignados.join(', '),
+      items: d.items.map(it => ({ nombre: it.nombre, driveUrl: it.driveUrl || '' })),
+      requiereFirmaDibujada: d.requiereFirmaDibujada,
+    });
+    setEditingActaId(d.id);
+    setShowNewActaForm(true);
+  };
+
+  // Ítems (documentos que recibe el trabajador) del formulario de acta
+  const addActaItem = () => setActaForm(f => ({ ...f, items: [...f.items, { nombre: '', driveUrl: '' }] }));
+  const updateActaItem = (i: number, patch: Partial<ActaItem>) =>
+    setActaForm(f => ({ ...f, items: f.items.map((it, idx) => idx === i ? { ...it, ...patch } : it) }));
+  const removeActaItem = (i: number) => setActaForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) }));
+
+  const handleSaveActa = async () => {
+    // Ítems limpios: fila con nombre no vacío
+    const cleanItems: ActaItem[] = actaForm.items
+      .map(it => ({ nombre: it.nombre.trim(), driveUrl: (it.driveUrl || '').trim() || undefined }))
+      .filter(it => it.nombre);
+    if (!actaForm.titulo.trim()) {
+      showToast('El título del documento es obligatorio', 'error');
+      return;
+    }
+    if (cleanItems.length === 0) {
+      showToast('Agrega al menos un documento en "Documentos que recibe el trabajador"', 'error');
+      return;
+    }
+    if (actaForm.perfiles.length === 0 && !actaForm.dnis.trim()) {
+      showToast('Asigna al menos un perfil o un DNI', 'error');
+      return;
+    }
+    setActaSaving(true);
+    const id = editingActaId || `acta_${Date.now()}`;
+    const dnisAsignados = actaForm.dnis.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+    const result = await saveActaDocumento({
+      id,
+      titulo: actaForm.titulo.trim(),
+      descripcion: actaForm.descripcion.trim(),
+      perfiles: actaForm.perfiles,
+      dnisAsignados,
+      cuerpoHtml: '',
+      items: cleanItems,
+      driveDocUrl: '',
+      requiereFirmaDibujada: actaForm.requiereFirmaDibujada,
+      activo: true,
+    });
+    setActaSaving(false);
+    if (result.success) {
+      showToast(editingActaId ? 'Documento actualizado' : 'Documento creado');
+      resetActaForm();
+      handleRefreshActas();
+    } else {
+      showToast(result.message || 'Error al guardar', 'error');
+    }
+  };
+
+  const handleDeleteActa = async (id: string) => {
+    if (!window.confirm('¿Eliminar este documento? Las firmas ya registradas se conservan.')) return;
+    setActaDocs(prev => prev.filter(d => d.id !== id));
+    try { await deleteActaDocumento(id); showToast('Documento eliminado'); }
+    catch { showToast('Error al eliminar', 'error'); handleRefreshActas(); }
+  };
+
+  const handleResendActa = async (firma: ActaFirma) => {
+    setResendingFirma(firma.id);
+    const result = await resendActaCorreo(firma.id, firma.correo);
+    setResendingFirma(null);
+    if (result.success) {
+      showToast(`Correo reenviado a ${firma.correo}`);
+      setActaFirmas(prev => prev.map(f => f.id === firma.id ? { ...f, correoEnviado: 'SI' } : f));
+    } else {
+      showToast(result.message || 'Error al reenviar', 'error');
+    }
+  };
+
+  const handleExportFirmas = (doc: ActaDocumento, rows: FirmaRosterRow[]) => {
+    const data = rows.map(r => ({
+      'DNI': r.dni,
+      'APELLIDOS Y NOMBRES': r.nombre,
+      'CARGO': r.cargo,
+      'AREA': r.area,
+      'EMPRESA': r.empresa,
+      'CORREO': r.correo,
+      'ESTADO': r.firma ? 'FIRMADO' : 'PENDIENTE',
+      'FECHA_FIRMA': r.firma?.fechaFirma || '',
+      'CORREO_ENVIADO': r.firma?.correoEnviado || '',
+      'ACTA_PDF': r.firma?.actaPdfUrl || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws['!cols'] = [{ wch: 12 }, { wch: 32 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 26 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 40 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Firmas');
+    const slug = (doc.titulo || 'acta').toUpperCase().replace(/[^A-Z0-9]/gi, '_').replace(/_+/g, '_').slice(0, 30);
+    XLSX.writeFile(wb, `FIRMAS_${slug}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    showToast('✓ Firmas exportadas');
+  };
+
+  // Rosters de firmas memoizados por documento (evita recomputar en cada tecleo de filtro)
+  const rostersByDoc = useMemo(() => {
+    const map = new Map<string, FirmaRosterRow[]>();
+    for (const d of actaDocs) map.set(d.id, buildFirmaRoster(d, actaFirmas, ingresoRecords));
+    return map;
+  }, [actaDocs, actaFirmas, ingresoRecords]);
 
   const handleCreateShortEval = async () => {
     if (!newEvalNombre.trim() || !newEvalTopicId) return;
@@ -1248,6 +1450,38 @@ ${text}`;
   });
   const avgNota = allQuizScores.length === 0 ? '—' : `${Math.round(allQuizScores.reduce((a, b) => a + b, 0) / allQuizScores.length / 20 * 100)}%`;
 
+  // Analíticas del panel (distribución de notas, registros por semana, aprobación)
+  const progressAnalytics = useMemo(() => {
+    const buckets = [
+      { label: '0–10', color: '#ef4444', value: 0 },
+      { label: '11–13', color: '#f59e0b', value: 0 },
+      { label: '14–15', color: '#3b82f6', value: 0 },
+      { label: '16–17', color: '#14b8a6', value: 0 },
+      { label: '18–20', color: '#10b981', value: 0 },
+    ];
+    const weekMap = new Map<string, { key: string; label: string; value: number }>();
+    let approved = 0, evaluated = 0;
+    for (const r of filteredIngresos) {
+      let scores: number[] = [];
+      try { scores = (JSON.parse(r.progressJson || '[]') as UserProgress[]).filter(p => p.quizScore !== undefined).map(p => p.quizScore!); } catch { /* ignore */ }
+      if (scores.length) {
+        const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+        const idx = avg >= 18 ? 4 : avg >= 16 ? 3 : avg >= 14 ? 2 : avg >= 11 ? 1 : 0;
+        buckets[idx].value++;
+        evaluated++;
+        if (avg >= 14) approved++;
+      }
+      const d = parseInicio(r.inicio);
+      if (d) {
+        const key = isoWeekKey(d);
+        if (!weekMap.has(key)) weekMap.set(key, { key, label: `S${getISOWeek(d)}`, value: 0 });
+        weekMap.get(key)!.value++;
+      }
+    }
+    const weeks = Array.from(weekMap.values()).sort((a, b) => a.key.localeCompare(b.key)).slice(-8);
+    return { buckets, weeks, approved, notApproved: evaluated - approved, evaluated };
+  }, [filteredIngresos]);
+
   const handleExportProgressExcel = () => {
     const rows = filteredIngresos.map(r => {
       const prog = parseUserProgress(r.progressJson);
@@ -1281,29 +1515,108 @@ ${text}`;
     showToast('✓ Exportado a Excel');
   };
 
+  const handleExportUsuariosBasico = () => {
+    const sorted = filteredIngresos.slice().sort((a, b) => {
+      const da = parseInicio(a.inicio)?.getTime() ?? 0;
+      const db = parseInicio(b.inicio)?.getTime() ?? 0;
+      return db - da;
+    });
+    const rows = sorted.map(r => {
+      const date = parseInicio(r.inicio);
+      const fechaInicio = date
+        ? date.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+        : (r.inicio || '');
+      return {
+        'FECHA_INICIO': fechaInicio,
+        'SEMANA': date ? getISOWeek(date) : '',
+        'AREA': r.area || '',
+        'CARGO': r.cargo || '',
+        'APELLIDOS Y NOMBRES': `${r.apellidos} ${r.nombres}`.trim(),
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 14 }, { wch: 8 }, { wch: 22 }, { wch: 24 }, { wch: 34 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Usuarios');
+    XLSX.writeFile(wb, `usuarios_${new Date().toISOString().split('T')[0]}.xlsx`);
+    showToast('✓ Usuarios exportados');
+  };
+
+  // ========== SIDEBAR NAV ITEMS (módulos del panel) ==========
+  const sidebarTabItems = ([
+    { key: 'topics', label: 'Detalles', icon: BookOpen, badge: null },
+    { key: 'overview', label: 'Resumen', icon: TrendingUp, badge: null },
+    { key: 'content', label: 'Contenido', icon: FileText, badge: selectedTopicId ? activeContentCount : null },
+    { key: 'quiz', label: 'Quizzes', icon: HelpCircle, badge: selectedTopicId ? activeQuizCount : null },
+    { key: 'progress', label: 'Usuarios', icon: Users, badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
+    { key: 'shortEvals', label: 'Evals', icon: ClipboardCheck, badge: shortEvals.length > 0 ? shortEvals.length : null },
+    { key: 'actas', label: 'Actas', icon: FileSignature, badge: actaDocs.length > 0 ? actaDocs.length : null },
+  ] as { key: AdminTab; label: string; icon: typeof BookOpen; badge: number | null }[]);
+
+  const sidebarNav = (
+    <nav className="flex-1 overflow-y-auto scrollbar-hide p-3 space-y-1">
+      {sidebarTabItems.map(tab => {
+        const alwaysEnabled = tab.key === 'topics' || tab.key === 'progress' || tab.key === 'shortEvals' || tab.key === 'actas';
+        const isDisabled = !alwaysEnabled && !selectedTopicId;
+        const isActive = activeTab === tab.key;
+        const Icon = tab.icon;
+        return (
+          <button
+            key={tab.key}
+            disabled={isDisabled}
+            onClick={() => { setActiveTab(tab.key); if (window.innerWidth < 1024) setSidebarOpen(false); }}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
+              isActive
+                ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-white shadow-md shadow-[#00366b]/25'
+                : isDisabled
+                ? 'text-[#c3c6d1] cursor-not-allowed opacity-70'
+                : 'text-[#57606f] hover:bg-[#f3f4f5] hover:text-[#00366b]'
+            }`}
+          >
+            <Icon className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1 text-left">{tab.label}</span>
+            {tab.badge !== null && (
+              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[16px] text-center leading-none ${
+                isActive ? 'bg-white/25 text-white' : 'bg-[#eef1f6] text-[#424750]'
+              }`}>{tab.badge}</span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
   // ========== MAIN PANEL ==========
   return (
     <div className="min-h-screen bg-[#f8f9fa] safe-area-top safe-area-bottom pb-24">
       {/* Header */}
-      <header className="w-full top-0 sticky bg-white border-b border-[#e1e3e4] z-50">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-2 rounded-xl bg-[#f3f4f5] hover:bg-[#e7e8e9] transition-colors active:scale-95 duration-150">
+      <header className="w-full top-0 sticky bg-white/90 backdrop-blur-md border-b border-[#e1e3e4] z-50 shadow-[0_1px_0_rgba(0,27,60,0.04)]">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Ocultar módulos' : 'Mostrar módulos'}
+              className="p-2 rounded-xl bg-[#f3f4f5] hover:bg-[#e7e8e9] transition-colors active:scale-95 duration-150 flex-shrink-0">
+              {sidebarOpen ? <PanelLeftClose className="w-5 h-5 text-[#424750]" /> : <Menu className="w-5 h-5 text-[#424750]" />}
+            </button>
+            <button onClick={onBack} className="p-2 rounded-xl bg-[#f3f4f5] hover:bg-[#e7e8e9] transition-colors active:scale-95 duration-150 flex-shrink-0">
               <ChevronLeft className="w-5 h-5 text-[#424750]" />
             </button>
-            <div className="flex items-center gap-3">
-              <Settings className="w-7 h-7 text-[#1b4d89]" />
-              <h1 className="text-xl font-bold tracking-tight text-[#00366b]">Admin Control Center</h1>
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00366b] to-[#1b4d89] flex items-center justify-center flex-shrink-0 shadow-md shadow-[#00366b]/25">
+              <Settings className="w-5 h-5 text-white" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg font-black tracking-tight text-[#00366b] leading-tight truncate">Admin Control Center</h1>
+              <p className="text-[10px] font-bold text-[#9aa0a6] uppercase tracking-widest leading-none mt-0.5 hidden sm:block">Panel de administración</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={handleTestConnection} disabled={isTesting} className="p-2.5 rounded-xl hover:bg-[#f3f4f5] transition-colors" title="Test conexión">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            <button onClick={handleTestConnection} disabled={isTesting} className="p-2.5 rounded-xl bg-[#f8f9fa] border border-[#e1e3e4] hover:bg-[#f3f4f5] hover:border-[#1b4d89]/30 transition-colors" title="Test conexión">
               {isTesting ? <Loader2 className="w-5 h-5 animate-spin text-[#1b4d89]" /> : <Wifi className="w-5 h-5 text-[#424750]" />}
             </button>
-            <button onClick={onRefreshData} className="p-2.5 rounded-xl hover:bg-[#f3f4f5] transition-colors" title="Refrescar datos">
+            <DiagnosticoButton onClick={() => setShowDiagnostico(true)} />
+            <button onClick={onRefreshData} className="p-2.5 rounded-xl bg-[#f8f9fa] border border-[#e1e3e4] hover:bg-[#f3f4f5] hover:border-[#1b4d89]/30 transition-colors" title="Refrescar datos">
               <RefreshCw className="w-5 h-5 text-[#424750]" />
             </button>
-            <button onClick={handleLogout} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-[#ba1a1a] hover:bg-[#ffdad6]/40 transition-colors" title="Cerrar sesión admin">
+            <button onClick={handleLogout} className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold text-[#ba1a1a] hover:bg-[#ffdad6]/50 transition-colors" title="Cerrar sesión admin">
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Cerrar sesión</span>
             </button>
@@ -1311,7 +1624,33 @@ ${text}`;
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 pt-3 pb-8">
+      {/* Sidebar - Módulos (ocultable/mostrable) */}
+      <AnimatePresence initial={false}>
+        {sidebarOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setSidebarOpen(false)}
+              className="fixed inset-0 bg-[#00132b]/40 z-40 lg:hidden"
+            />
+            <motion.aside
+              initial={{ x: -288 }} animate={{ x: 0 }} exit={{ x: -288 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 42 }}
+              className="fixed left-0 top-0 lg:top-[65px] bottom-0 w-72 bg-white border-r border-[#e1e3e4] z-50 lg:z-30 flex flex-col shadow-2xl lg:shadow-[2px_0_16px_rgba(0,27,60,0.04)]"
+            >
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-[#e1e3e4] lg:hidden">
+                <span className="text-xs font-black text-[#00366b] uppercase tracking-widest">Módulos</span>
+                <button onClick={() => setSidebarOpen(false)} className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
+                  <X className="w-4 h-4 text-[#737781]" />
+                </button>
+              </div>
+              {sidebarNav}
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
+      <div className={`max-w-7xl mx-auto px-4 pt-3 pb-8 ${sidebarOpen ? 'lg:ml-72' : ''}`}>
         {/* Global Notifications Section - STATIC FOR RELIABILITY */}
         <div className={`space-y-3 ${(error || statusMessage) ? 'mb-4' : ''}`}>
           {error && (
@@ -1491,38 +1830,6 @@ ${text}`;
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Tab bar */}
-        <div className="mb-6 grid grid-cols-6 gap-1">
-          {([
-            { key: 'topics', label: 'Detalles', badge: null },
-            { key: 'overview', label: 'Resumen', badge: null },
-            { key: 'content', label: 'Contenido', badge: selectedTopicId ? activeContentCount : null },
-            { key: 'quiz', label: 'Quizzes', badge: selectedTopicId ? activeQuizCount : null },
-            { key: 'progress', label: 'Usuarios', badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
-            { key: 'shortEvals', label: 'Evals', badge: shortEvals.length > 0 ? shortEvals.length : null },
-          ] as { key: AdminTab; label: string; badge: number | null }[]).map(tab => (
-            <button
-              key={tab.key}
-              disabled={tab.key !== 'topics' && tab.key !== 'progress' && tab.key !== 'shortEvals' && !selectedTopicId}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center justify-center gap-1 px-1 py-1.5 text-[10px] xs:text-[11px] font-bold rounded-xl transition-all border ${
-                activeTab === tab.key
-                  ? 'bg-[#1b4d89] text-white border-[#1b4d89] shadow-sm'
-                  : (tab.key !== 'topics' && tab.key !== 'progress' && tab.key !== 'shortEvals' && !selectedTopicId)
-                  ? 'bg-[#f8f9fa]/50 text-[#c3c6d1] border-[#e1e3e4]/60 cursor-not-allowed opacity-60'
-                  : 'bg-white text-[#737781] border-[#e1e3e4] hover:bg-[#f3f4f5] hover:border-[#1b4d89]/30 hover:text-[#00366b]'
-              }`}
-            >
-              <span className="truncate">{tab.label}</span>
-              {tab.badge !== null && (
-                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[15px] text-center leading-none ${
-                  activeTab === tab.key ? 'bg-white/25 text-white' : 'bg-[#e1e3e4] text-[#424750]'
-                }`}>{tab.badge}</span>
-              )}
-            </button>
-          ))}
-        </div>
 
         {/* Notifications */}
         <AnimatePresence>
@@ -2427,6 +2734,33 @@ ${text}`;
                   </div>
                 </div>
 
+                {/* Panel de analíticas (gráficos) */}
+                {progressAnalytics.evaluated > 0 && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                    <div className="bg-white rounded-xl p-4 border border-[#e1e3e4]">
+                      <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-3">Distribución de notas</p>
+                      <BarChart data={progressAnalytics.buckets} />
+                    </div>
+                    <div className="bg-white rounded-xl p-4 border border-[#e1e3e4]">
+                      <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-3">Registros por semana</p>
+                      {progressAnalytics.weeks.length > 0
+                        ? <BarChart data={progressAnalytics.weeks.map(w => ({ label: w.label, value: w.value, color: '#1b4d89' }))} />
+                        : <p className="text-xs text-[#737781] italic">Sin datos de fecha</p>}
+                    </div>
+                    <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] flex flex-col justify-center">
+                      <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-3">Aprobación (≥14)</p>
+                      <Donut
+                        segments={[
+                          { label: 'Aprobados', value: progressAnalytics.approved, color: '#10b981' },
+                          { label: 'Desaprob.', value: progressAnalytics.notApproved, color: '#f59e0b' },
+                        ]}
+                        centerLabel={`${Math.round((progressAnalytics.approved / Math.max(1, progressAnalytics.evaluated)) * 100)}%`}
+                        centerSub="APROB."
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Filters */}
                 <div className="flex flex-col sm:flex-row gap-2">
                   <div className="relative flex-1">
@@ -2466,6 +2800,15 @@ ${text}`;
                     <FileSpreadsheet className="w-4 h-4" />
                     Excel
                   </button>
+                  <button
+                    onClick={handleExportUsuariosBasico}
+                    disabled={filteredIngresos.length === 0}
+                    title="Exportar: FECHA_INICIO, SEMANA, AREA, CARGO, APELLIDOS Y NOMBRES"
+                    className="flex items-center gap-2 px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#1b4d89] hover:bg-blue-50 transition-all disabled:opacity-40"
+                  >
+                    <Users className="w-4 h-4" />
+                    Usuarios
+                  </button>
                 </div>
 
                 {/* Users list */}
@@ -2480,36 +2823,18 @@ ${text}`;
                     </p>
                   </div>
                 ) : (() => {
-                  const parseInicio = (s: string): Date | null => {
-                    const m = s?.match(/(\d{2})\/(\d{2})\/(\d{4})\s*-\s*\((\d{2}):(\d{2}):(\d{2})\)/);
-                    return m ? new Date(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}`) : null;
-                  };
-                  const getISOWeek = (d: Date): number => {
-                    const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-                    tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
-                    const y = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
-                    return Math.ceil((((tmp.getTime() - y.getTime()) / 86400000) + 1) / 7);
-                  };
-                  const sorted = filteredIngresos.slice().sort((a, b) => {
+                  const sortedAll = filteredIngresos.slice().sort((a, b) => {
                     const da = parseInicio(a.inicio)?.getTime() ?? 0;
                     const db = parseInicio(b.inicio)?.getTime() ?? 0;
                     return db - da;
                   });
+                  const sorted = sortedAll.slice(0, progressLimit);
+                  const hasMore = sortedAll.length > sorted.length;
                   const groupMap = new Map<string, { label: string; records: typeof sorted }>();
                   for (const record of sorted) {
                     const date = parseInicio(record.inicio);
-                    let key = '0000-W00';
-                    let label = 'Sin fecha';
-                    if (date) {
-                      const week = getISOWeek(date);
-                      const year = date.getFullYear();
-                      key = `${year}-W${String(week).padStart(2, '0')}`;
-                      const dow = date.getDay() || 7;
-                      const mon = new Date(date); mon.setDate(date.getDate() - dow + 1);
-                      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-                      const fmt = (d: Date) => d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' });
-                      label = `Semana ${week}  ·  ${fmt(mon)} – ${fmt(sun)}, ${year}`;
-                    }
+                    const key = isoWeekKey(date);
+                    const label = date ? isoWeekLabel(date) : 'Sin fecha';
                     if (!groupMap.has(key)) groupMap.set(key, { label, records: [] });
                     groupMap.get(key)!.records.push(record);
                   }
@@ -2651,6 +2976,61 @@ ${text}`;
                                     </div>
                                   )}
                                 </div>
+
+                                {/* Vista 360°: evaluaciones cortas, certificados y actas */}
+                                {(() => {
+                                  const userEvals = shortResults.filter(r => String(r.dni).trim() === String(record.dni).trim());
+                                  const userFirmas = actaFirmas.filter(f => String(f.dni).trim() === String(record.dni).trim());
+                                  const userCerts = allCertificates[record.dni] ? Object.entries(allCertificates[record.dni]) : [];
+                                  return (
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                      {/* Evals cortas */}
+                                      <div className="bg-white rounded-lg border border-[#e1e3e4] p-3">
+                                        <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Evals cortas ({userEvals.length})</p>
+                                        {userEvals.length === 0 ? <p className="text-[10px] text-[#a0a4ab] italic">Sin registros</p> : (
+                                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                            {userEvals.map((e, i) => (
+                                              <div key={i} className="flex items-center justify-between gap-2">
+                                                <span className="text-[10px] text-[#424750] truncate" title={e.tema}>{e.tema || 'Eval'}</span>
+                                                <span className={`text-[10px] font-bold flex-shrink-0 ${e.nota >= 16 ? 'text-emerald-600' : e.nota >= 12 ? 'text-amber-600' : 'text-red-500'}`}>{e.nota.toFixed(1)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                      {/* Certificados */}
+                                      <div className="bg-white rounded-lg border border-[#e1e3e4] p-3">
+                                        <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2 flex items-center gap-1"><Award className="w-3 h-3" /> Certificados ({userCerts.length})</p>
+                                        {userCerts.length === 0 ? <p className="text-[10px] text-[#a0a4ab] italic">Sin certificados</p> : (
+                                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                            {userCerts.map(([tid, url]) => {
+                                              const t = topics.find(tp => tp.id === tid);
+                                              return (
+                                                <a key={tid} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] text-[#1b4d89] hover:underline truncate">
+                                                  <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" /> <span className="truncate">{t?.title || tid}</span>
+                                                </a>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                      {/* Actas firmadas */}
+                                      <div className="bg-white rounded-lg border border-[#e1e3e4] p-3">
+                                        <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2 flex items-center gap-1"><FileSignature className="w-3 h-3" /> Actas firmadas ({userFirmas.length})</p>
+                                        {userFirmas.length === 0 ? <p className="text-[10px] text-[#a0a4ab] italic">Sin actas</p> : (
+                                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                            {userFirmas.map((f, i) => (
+                                              <div key={i} className="flex items-center justify-between gap-2">
+                                                <span className="text-[10px] text-[#424750] truncate" title={f.documentoTitulo}>{f.documentoTitulo}</span>
+                                                {f.actaPdfUrl && <a href={f.actaPdfUrl} target="_blank" rel="noopener noreferrer" className="text-[#1b4d89] flex-shrink-0" title="Ver acta"><ExternalLink className="w-3 h-3" /></a>}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             )}
                           </div>
@@ -2659,6 +3039,15 @@ ${text}`;
                           </div>
                         </div>
                       ))}
+                      {hasMore && (
+                        <div className="flex flex-col items-center gap-1.5 pt-2">
+                          <button onClick={() => setProgressLimit(l => l + 30)}
+                            className="px-5 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#1b4d89] hover:bg-[#f3f4f5] hover:border-[#1b4d89]/30 transition-all">
+                            Ver más usuarios (+{Math.min(30, sortedAll.length - sorted.length)})
+                          </button>
+                          <span className="text-[10px] text-[#737781]">Mostrando {sorted.length} de {sortedAll.length}</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -2824,6 +3213,7 @@ ${text}`;
                               setShowResultsFor(showResults ? null : ev.id);
                               setResultsSort({ key: 'fecha', dir: 'asc' });
                               setResultsFilters({ dni: '', nombre: '', nota: '', porcentaje: '', fecha: '', fallo: '' });
+                              setResultsPage(1);
                             }} title="Ver resultados"
                             className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
                             <TrendingUp className="w-4 h-4 text-[#1b4d89]" />
@@ -2865,6 +3255,9 @@ ${text}`;
                             ? (resultsSort.dir === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />)
                             : <ArrowUpDown className="w-2.5 h-2.5 opacity-30" />
                         );
+                        const rTotalPages = Math.max(1, Math.ceil(displayResults.length / TABLE_PAGE_SIZE));
+                        const rPage = Math.min(resultsPage, rTotalPages);
+                        const pageResults = displayResults.slice((rPage - 1) * TABLE_PAGE_SIZE, rPage * TABLE_PAGE_SIZE);
                         return (
                         <div className="border-t border-[#f3f4f5] px-4 py-3 bg-[#f8f9fa]">
                           <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">
@@ -2910,7 +3303,7 @@ ${text}`;
                                 <tbody className="divide-y divide-[#f3f4f5]">
                                   {displayResults.length === 0 ? (
                                     <tr><td colSpan={7} className="py-3 text-center text-[#737781] italic text-[11px]">Sin resultados para los filtros aplicados</td></tr>
-                                  ) : displayResults.map((r) => {
+                                  ) : pageResults.map((r) => {
                                     const rowKey = `${r.evaluacionId}__${r.dni}`;
                                     const wrong = r.preguntasErroneas || [];
                                     const isExpanded = expandedResult === rowKey;
@@ -2978,9 +3371,286 @@ ${text}`;
                                   })}
                                 </tbody>
                               </table>
+                              <Pager page={rPage} totalPages={rTotalPages} total={displayResults.length} onPage={setResultsPage} />
                             </div>
                           )}
                         </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ====== TAB: ACTAS ====== */}
+        {activeTab === 'actas' && (
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <FileSignature className="w-5 h-5 text-[#1b4d89]" />
+                <div>
+                  <h2 className="text-lg font-black text-[#00366b]">Actas y Compromisos</h2>
+                  <p className="text-xs text-[#737781]">Crea documentos, asígnalos por perfil o DNI, y revisa las firmas con verificación facial</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={handleRefreshActas} className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] transition-all">
+                  <RefreshCw className={`w-4 h-4 ${actasLoading ? 'animate-spin' : ''}`} /> Actualizar
+                </button>
+                <button onClick={() => { resetActaForm(); setShowNewActaForm(true); }} className="flex items-center gap-2 px-3 py-2 bg-[#1b4d89] text-white rounded-xl text-xs font-bold hover:bg-[#00366b] transition-all">
+                  <Plus className="w-4 h-4" /> Nuevo
+                </button>
+              </div>
+            </div>
+
+            {/* Create / edit form */}
+            {showNewActaForm && (
+              <div className="bg-white rounded-2xl border border-[#1b4d89]/20 p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-black text-[#00366b]">{editingActaId ? 'Editar documento' : 'Nuevo documento'}</h3>
+                  <button onClick={resetActaForm} className="text-[#737781] hover:text-[#00366b]"><X className="w-4 h-4" /></button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Título *</label>
+                    <input value={actaForm.titulo} onChange={e => setActaForm(f => ({ ...f, titulo: e.target.value }))}
+                      placeholder="Ej. Compromiso de Seguridad SST"
+                      className="w-full mt-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Descripción</label>
+                    <input value={actaForm.descripcion} onChange={e => setActaForm(f => ({ ...f, descripcion: e.target.value }))}
+                      placeholder="Breve resumen del documento"
+                      className="w-full mt-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                </div>
+
+                {/* Perfiles */}
+                <div>
+                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Asignar a perfiles</label>
+                  <div className="flex flex-wrap gap-2 mt-1.5">
+                    {AUDIENCE_CONFIG.profiles.map(p => {
+                      const active = actaForm.perfiles.includes(p.id);
+                      return (
+                        <button key={p.id} onClick={() => setActaForm(f => ({ ...f, perfiles: active ? f.perfiles.filter(x => x !== p.id) : [...f.perfiles, p.id] }))}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${active ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-white text-[#424750] border-[#e1e3e4] hover:border-[#1b4d89]/40'}`}>
+                          {p.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DNIs */}
+                <div>
+                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">…o asignar a DNIs específicos (separados por coma)</label>
+                  <input value={actaForm.dnis} onChange={e => setActaForm(f => ({ ...f, dnis: e.target.value }))}
+                    placeholder="Ej. 70115721, 46879832"
+                    className="w-full mt-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                </div>
+
+                {/* Documentos que recibe el trabajador (fila a fila) */}
+                <div>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Documentos que recibe el trabajador</label>
+                    <button onClick={addActaItem}
+                      className="text-[10px] font-bold text-[#1b4d89] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Agregar documento</button>
+                  </div>
+                  <p className="text-[10px] text-[#737781] mt-0.5">Cada fila se lista en la pantalla de recepción y en el PDF del acta. El enlace de Drive genera un QR por documento.</p>
+                  <div className="space-y-2 mt-2">
+                    {actaForm.items.length === 0 && (
+                      <p className="text-[11px] text-[#9aa0a6] italic px-1">Sin documentos aún. Usa "Agregar documento" para listar lo que se recepciona.</p>
+                    )}
+                    {actaForm.items.map((it, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg">
+                        <span className="mt-2 text-[11px] font-black text-[#1b4d89] w-5 text-center flex-shrink-0">{i + 1}</span>
+                        <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input value={it.nombre} onChange={e => updateActaItem(i, { nombre: e.target.value })}
+                            placeholder="Nombre del documento (ej. Reglamento Interno SST)"
+                            className="w-full px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                          <input value={it.driveUrl || ''} onChange={e => updateActaItem(i, { driveUrl: e.target.value })}
+                            placeholder="Enlace de Drive (opcional)"
+                            className="w-full px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                        </div>
+                        {(it.driveUrl || '').trim() && <div className="flex-shrink-0"><QrPreview url={(it.driveUrl || '').trim()} size={48} /></div>}
+                        <button onClick={() => removeActaItem(i)} title="Quitar documento"
+                          className="mt-1 p-1.5 rounded-lg hover:bg-red-50 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4 text-red-400" /></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Firma dibujada */}
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input type="checkbox" checked={actaForm.requiereFirmaDibujada} onChange={e => setActaForm(f => ({ ...f, requiereFirmaDibujada: e.target.checked }))}
+                    className="w-4 h-4 accent-[#1b4d89]" />
+                  <span className="text-xs font-semibold text-[#424750]">Requiere firma dibujada (además del rostro)</span>
+                </label>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button onClick={resetActaForm} className="px-4 py-2 rounded-lg text-xs font-bold text-[#737781] hover:bg-[#f3f4f5] transition-all">Cancelar</button>
+                  <button onClick={handleSaveActa} disabled={actaSaving}
+                    className="flex items-center gap-2 px-4 py-2 bg-[#1b4d89] text-white rounded-lg text-xs font-bold hover:bg-[#00366b] transition-all disabled:opacity-50">
+                    {actaSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {editingActaId ? 'Guardar cambios' : 'Crear documento'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Documents list */}
+            {actasLoading && actaDocs.length === 0 ? (
+              <div className="flex flex-col items-center py-12"><Loader2 className="w-8 h-8 text-[#1b4d89] animate-spin mb-2" /><p className="text-sm text-[#737781]">Cargando documentos…</p></div>
+            ) : actaDocs.length === 0 ? (
+              <div className="flex flex-col items-center py-12 text-center">
+                <FileSignature className="w-12 h-12 text-[#e1e3e4] mb-3" />
+                <p className="text-sm font-bold text-[#737781]">Sin documentos</p>
+                <p className="text-xs text-[#737781] mt-1">Haz clic en "Nuevo" para crear la primera acta o compromiso</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {actaDocs.map(doc => {
+                  const roster = rostersByDoc.get(doc.id) || [];
+                  const firmados = roster.filter(r => r.firma).length;
+                  const showFirmas = showFirmasFor === doc.id;
+                  return (
+                    <div key={doc.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
+                      <div className="px-4 py-3.5 flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0">
+                          <FileSignature className="w-5 h-5 text-[#1b4d89]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-[#00366b] text-sm">{doc.titulo}</p>
+                          {doc.descripcion && <p className="text-xs text-[#737781] mt-0.5">{doc.descripcion}</p>}
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            {doc.perfiles.map(p => <span key={p} className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{p}</span>)}
+                            {doc.dnisAsignados.length > 0 && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{doc.dnisAsignados.length} DNI(s)</span>}
+                            {doc.items.length > 0 && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 flex items-center gap-1"><ClipboardList className="w-2.5 h-2.5" /> {doc.items.length} doc(s)</span>}
+                            {doc.driveDocUrl && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 flex items-center gap-1"><ExternalLink className="w-2.5 h-2.5" /> adjunto</span>}
+                          </div>
+                          <p className="text-[10px] text-[#737781] mt-1.5">
+                            <span className="font-semibold text-emerald-600">{firmados}</span> firmado(s) · <span className="font-semibold">{roster.length}</span> asignado(s)
+                            {roster.length > 0 && <span className="ml-1 font-bold text-[#1b4d89]">({Math.round((firmados / roster.length) * 100)}%)</span>}
+                          </p>
+                          {roster.length > 0 && <div className="mt-1.5 max-w-[220px]"><ProgressBar value={firmados} max={roster.length} /></div>}
+                        </div>
+                        {doc.driveDocUrl && (
+                          <div className="flex-shrink-0 hidden sm:block">
+                            <QrPreview url={doc.driveDocUrl} size={64} caption="QR del acta" />
+                          </div>
+                        )}
+                        <div className="flex flex-col gap-1.5 flex-shrink-0">
+                          <button onClick={() => { setShowFirmasFor(showFirmas ? null : doc.id); setFirmaFilters({ dni: '', nombre: '', estado: '', fecha: '', correo: '' }); setFirmaSort({ key: 'nombre', dir: 'asc' }); setFirmaPage(1); }}
+                            title="Ver firmas" className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors"><TrendingUp className="w-4 h-4 text-[#1b4d89]" /></button>
+                          <button onClick={() => handleEditActa(doc)} title="Editar" className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors"><Edit3 className="w-4 h-4 text-[#737781]" /></button>
+                          <button onClick={() => handleDeleteActa(doc.id)} title="Eliminar" className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"><Trash2 className="w-4 h-4 text-red-400" /></button>
+                        </div>
+                      </div>
+
+                      {/* Firmas table */}
+                      {showFirmas && (() => {
+                        const filtered = roster.filter(r => {
+                          const estado = r.firma ? 'firmado' : 'pendiente';
+                          if (firmaFilters.dni && !r.dni.toLowerCase().includes(firmaFilters.dni.toLowerCase())) return false;
+                          if (firmaFilters.nombre && !r.nombre.toLowerCase().includes(firmaFilters.nombre.toLowerCase())) return false;
+                          if (firmaFilters.estado && !estado.includes(firmaFilters.estado.toLowerCase())) return false;
+                          if (firmaFilters.fecha && !(r.firma?.fechaFirma || '').toLowerCase().includes(firmaFilters.fecha.toLowerCase())) return false;
+                          if (firmaFilters.correo && !(r.correo || '').toLowerCase().includes(firmaFilters.correo.toLowerCase())) return false;
+                          return true;
+                        }).sort((a, b) => {
+                          const dir = firmaSort.dir === 'asc' ? 1 : -1;
+                          switch (firmaSort.key) {
+                            case 'dni': return a.dni.localeCompare(b.dni, 'es', { numeric: true }) * dir;
+                            case 'nombre': return a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }) * dir;
+                            case 'estado': return ((a.firma ? 1 : 0) - (b.firma ? 1 : 0)) * dir;
+                            case 'fecha': return (a.firma?.fechaFirma || '').localeCompare(b.firma?.fechaFirma || '', 'es') * dir;
+                            case 'correo': return (a.correo || '').localeCompare(b.correo || '', 'es') * dir;
+                            default: return 0;
+                          }
+                        });
+                        const FSortIcon = ({ col }: { col: FirmaSortKey }) => (
+                          firmaSort.key === col ? (firmaSort.dir === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />) : <ArrowUpDown className="w-2.5 h-2.5 opacity-30" />
+                        );
+                        const fTotalPages = Math.max(1, Math.ceil(filtered.length / TABLE_PAGE_SIZE));
+                        const fPage = Math.min(firmaPage, fTotalPages);
+                        const pageFirmas = filtered.slice((fPage - 1) * TABLE_PAGE_SIZE, fPage * TABLE_PAGE_SIZE);
+                        return (
+                          <div className="border-t border-[#f3f4f5] px-4 py-3 bg-[#f8f9fa]">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider">Firmas ({filtered.length}{filtered.length !== roster.length ? ` / ${roster.length}` : ''})</p>
+                              <button onClick={() => handleExportFirmas(doc, filtered)} disabled={roster.length === 0}
+                                className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-[#e1e3e4] rounded-lg text-[10px] font-bold text-[#006d36] hover:bg-emerald-50 transition-all disabled:opacity-40">
+                                <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+                              </button>
+                            </div>
+                            {roster.length === 0 ? (
+                              <p className="text-xs text-[#737781] italic">Nadie asignado todavía. Verifica los perfiles/DNIs o que existan usuarios en INGRESOS.</p>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-[9px] text-[#737781] uppercase">
+                                      <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('dni')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">DNI <FSortIcon col="dni" /></button></th>
+                                      <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('nombre')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Apellidos y Nombres <FSortIcon col="nombre" /></button></th>
+                                      <th className="text-center pb-1 pr-3"><button onClick={() => toggleFirmaSort('estado')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Estado <FSortIcon col="estado" /></button></th>
+                                      <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('fecha')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Fecha <FSortIcon col="fecha" /></button></th>
+                                      <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('correo')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Correo <FSortIcon col="correo" /></button></th>
+                                      <th className="pb-1"></th>
+                                    </tr>
+                                    <tr className="align-top">
+                                      <th className="pb-2 pr-3"><input value={firmaFilters.dni} onChange={e => setFirmaFilters(f => ({ ...f, dni: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                      <th className="pb-2 pr-3"><input value={firmaFilters.nombre} onChange={e => setFirmaFilters(f => ({ ...f, nombre: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                      <th className="pb-2 pr-3"><input value={firmaFilters.estado} onChange={e => setFirmaFilters(f => ({ ...f, estado: e.target.value }))} placeholder="firmado…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-center focus:outline-none focus:border-[#1b4d89]" /></th>
+                                      <th className="pb-2 pr-3"><input value={firmaFilters.fecha} onChange={e => setFirmaFilters(f => ({ ...f, fecha: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                      <th className="pb-2 pr-3"><input value={firmaFilters.correo} onChange={e => setFirmaFilters(f => ({ ...f, correo: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                      <th className="pb-2"></th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-[#f3f4f5]">
+                                    {filtered.length === 0 ? (
+                                      <tr><td colSpan={6} className="py-3 text-center text-[#737781] italic text-[11px]">Sin resultados para los filtros aplicados</td></tr>
+                                    ) : pageFirmas.map(r => (
+                                      <tr key={r.dni}>
+                                        <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
+                                        <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.nombre}</td>
+                                        <td className="py-1.5 pr-3 text-center">
+                                          {r.firma
+                                            ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 font-bold text-[10px]"><CheckCircle2 className="w-3 h-3" /> Firmado</span>
+                                            : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-600 font-bold text-[10px]">Pendiente</span>}
+                                        </td>
+                                        <td className="py-1.5 pr-3 text-[#737781] whitespace-nowrap">{r.firma?.fechaFirma || '—'}</td>
+                                        <td className="py-1.5 pr-3 text-[#737781]">
+                                          <span className="inline-flex items-center gap-1">
+                                            {r.correo || '—'}
+                                            {r.firma && (r.firma.correoEnviado === 'SI'
+                                              ? <span title="Correo enviado" className="text-emerald-500"><Mail className="w-3 h-3" /></span>
+                                              : <span title="Correo no enviado" className="text-amber-500"><Mail className="w-3 h-3" /></span>)}
+                                          </span>
+                                        </td>
+                                        <td className="py-1.5 text-right whitespace-nowrap">
+                                          {r.firma?.actaPdfUrl && (
+                                            <a href={r.firma.actaPdfUrl} target="_blank" rel="noopener noreferrer" title="Ver PDF" className="inline-flex p-1 rounded-md hover:bg-slate-100 text-[#1b4d89]"><ExternalLink className="w-3.5 h-3.5" /></a>
+                                          )}
+                                          {r.firma && r.correo && (
+                                            <button onClick={() => handleResendActa(r.firma!)} disabled={resendingFirma === r.firma.id} title="Reenviar correo"
+                                              className="inline-flex p-1 rounded-md hover:bg-blue-50 text-blue-500 disabled:opacity-40">
+                                              {resendingFirma === r.firma.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                <Pager page={fPage} totalPages={fTotalPages} total={filtered.length} onPage={setFirmaPage} />
+                              </div>
+                            )}
+                          </div>
                         );
                       })()}
                     </div>
@@ -3224,9 +3894,12 @@ ${text}`;
         })()}
       </AnimatePresence>
 
+      {/* Módulo de verificación del sistema */}
+      <DiagnosticoPanel open={showDiagnostico} onClose={() => setShowDiagnostico(false)} />
+
       {/* Floating Sheets shortcut */}
       <a
-        href="https://docs.google.com/spreadsheets/d/1fXcrk-6YSA5NcgDbCBinu4WaPpyJMRK0og6miVE8ZZw/edit?usp=sharing"
+        href="https://docs.google.com/spreadsheets/d/1tKXR0sRb3jZYFrQ8WUVjB3hhIpx1_qbQYfAjJIPPgTA/edit?usp=sharing"
         target="_blank"
         rel="noopener noreferrer"
         title="Abrir Google Sheets"

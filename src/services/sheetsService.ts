@@ -1,6 +1,12 @@
 import Papa from 'papaparse';
 import { SHEETS_CONFIG, MOCK_DATA_CONFIG, getSheetUrl, APPS_SCRIPT_CONFIG, APP_CONFIG, ADMIN_CONFIG } from '../config/app.config';
 import type { LearnTopic, DataChunk, QuizQuestion, UserProgress, AppDynamicConfig, QuizSavedProgress } from '../types';
+import { enqueueWrite, flushQueue } from '../lib/offlineQueue';
+
+/** Reintenta las escrituras encoladas offline (progreso/eval) usando el proxy de Apps Script. */
+export async function flushOfflineQueue(): Promise<number> {
+  return flushQueue((payload) => postToAppsScript(payload as object));
+}
 
 // =============================================
 // CACHE - 30s TTL fresh, 10min stale-while-revalidate
@@ -484,6 +490,118 @@ export async function testAppsScriptConnection(): Promise<{ ok: boolean; error?:
 }
 
 // =============================================
+// DIAGNÓSTICO DEL SISTEMA (verificación de configuración)
+// =============================================
+
+export type DiagnosticLevel = 'ok' | 'warn' | 'error';
+
+export interface DiagnosticCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  level: DiagnosticLevel;
+  detail?: string;
+}
+
+export interface DiagnosticReport {
+  ok: boolean;
+  errores: number;
+  advertencias: number;
+  checks: DiagnosticCheck[];
+  resumen: string;
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function summarizeChecks(checks: DiagnosticCheck[]): DiagnosticReport {
+  const errores = checks.filter((c) => c.level === 'error').length;
+  const advertencias = checks.filter((c) => c.level === 'warn').length;
+  const ok = errores === 0;
+  const resumen = ok
+    ? (advertencias
+        ? `Configuración correcta con ${advertencias} advertencia(s).`
+        : '¡Todo correcto! El sistema está bien configurado.')
+    : `Se detectaron ${errores} problema(s) crítico(s) que impiden el funcionamiento.`;
+  return { ok, errores, advertencias, checks, resumen };
+}
+
+/**
+ * Ejecuta una verificación completa del sistema y devuelve un reporte con el
+ * estado de cada configuración. Combina chequeos del lado del cliente (URL del
+ * Web App, hoja pública legible, backend accesible) con el diagnóstico del
+ * servidor (hojas, columnas, carpetas de Drive y permisos).
+ */
+export async function runSystemDiagnostics(): Promise<DiagnosticReport> {
+  const checks: DiagnosticCheck[] = [];
+  const add = (id: string, label: string, level: DiagnosticLevel, detail?: string) =>
+    checks.push({ id, label, ok: level === 'ok', level, detail });
+
+  // A) URL del Web App configurada (.env)
+  if (APPS_SCRIPT_CONFIG.url) {
+    add('client_env', 'URL del Web App configurada', 'ok', 'VITE_APPS_SCRIPT_URL presente');
+  } else {
+    add('client_env', 'URL del Web App configurada', 'error', 'Falta VITE_APPS_SCRIPT_URL en el archivo .env');
+  }
+
+  // B) Hoja pública legible como CSV (necesario para que la app cargue datos)
+  try {
+    const resp = await fetch(getSheetUrl(SHEETS_CONFIG.sheets.learn), { cache: 'no-store' });
+    const text = await resp.text();
+    if (resp.ok && text && !text.toLowerCase().includes('<html')) {
+      add('client_csv', 'Hoja pública legible (CSV)', 'ok', 'La hoja responde como CSV público');
+    } else {
+      add('client_csv', 'Hoja pública legible (CSV)', 'error',
+        'La hoja no es pública. Compártela como "Cualquiera con el enlace → Lector".');
+    }
+  } catch (e) {
+    add('client_csv', 'Hoja pública legible (CSV)', 'error', 'No se pudo leer la hoja: ' + errMsg(e));
+  }
+
+  // C) Backend (Apps Script) accesible + diagnóstico del servidor
+  if (!APPS_SCRIPT_CONFIG.url) {
+    add('backend', 'Backend (Apps Script) accesible', 'error', 'Sin URL configurada; no se puede verificar el servidor');
+    return summarizeChecks(checks);
+  }
+  try {
+    const resp = await fetch(APPS_SCRIPT_CONFIG.url, {
+      method: 'POST',
+      redirect: 'follow',
+      body: JSON.stringify({ action: 'diagnostico' }),
+    });
+    const text = await resp.text();
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      add('backend', 'Backend (Apps Script) accesible', 'error',
+        text.toLowerCase().includes('<html')
+          ? 'Devolvió HTML: redeploya como Web App con acceso "Cualquiera" y usa la última versión.'
+          : 'Respuesta no válida del backend: ' + text.substring(0, 120));
+      return summarizeChecks(checks);
+    }
+    if (parsed.status === 'ok' && parsed.report) {
+      add('backend', 'Backend (Apps Script) accesible', 'ok', 'Conexión y diagnóstico del servidor correctos');
+      const serverChecks: DiagnosticCheck[] = (parsed.report.checks || []).map((c: any) => ({
+        id: 'srv_' + c.id,
+        label: c.label,
+        ok: !!c.ok,
+        level: (c.level as DiagnosticLevel) || (c.ok ? 'ok' : 'error'),
+        detail: c.detail,
+      }));
+      checks.push(...serverChecks);
+    } else {
+      add('backend', 'Backend (Apps Script) accesible', 'error', parsed.message || 'Respuesta inesperada del backend');
+    }
+  } catch (e) {
+    add('backend', 'Backend (Apps Script) accesible', 'error', errMsg(e));
+  }
+
+  return summarizeChecks(checks);
+}
+
+// =============================================
 // MOCK DATA HELPERS
 // =============================================
 
@@ -567,6 +685,8 @@ export async function fetchAppDynamicConfig(): Promise<AppDynamicConfig> {
             firmaRepresentante: row.FirmaRepresentante || '',
             nombreRepresentante: row.NombreRepresentante || '',
             cargoRepresentante: row.CargoRepresentante || '',
+            lugar: row.Lugar || '',
+            contratista: row.Contratista || '',
           });
         },
         error: () => resolve(defaultConfig),
@@ -905,27 +1025,30 @@ export async function updateIngresoProgress(data: {
   intentosQuiz?: number;
   progress?: UserProgress[];
 }): Promise<{ success: boolean; message: string }> {
+  const payload = {
+    action: 'updateIngreso',
+    ingreso: {
+      DNI: data.dni,
+      Avance: data.avance,
+      Nota: data.nota,
+      UltimoAcceso: getPeruTimeFormatted(),
+      Dispositivo: getDeviceInfo(),
+      ModulosCompletados: String(data.modulosCompletados ?? ''),
+      IntentosQuiz: String(data.intentosQuiz ?? ''),
+      ProgressJSON: data.progress ? JSON.stringify(data.progress) : undefined,
+    },
+  };
   try {
-    const result = await postToAppsScript({
-      action: 'updateIngreso',
-      ingreso: {
-        DNI: data.dni,
-        Avance: data.avance,
-        Nota: data.nota,
-        UltimoAcceso: getPeruTimeFormatted(),
-        Dispositivo: getDeviceInfo(),
-        ModulosCompletados: String(data.modulosCompletados ?? ''),
-        IntentosQuiz: String(data.intentosQuiz ?? ''),
-        ProgressJSON: data.progress ? JSON.stringify(data.progress) : undefined,
-      },
-    });
+    const result = await postToAppsScript(payload);
     return {
       success: result.status === 'ok',
       message: result.message || 'Progreso actualizado',
     };
   } catch (error) {
-    console.error('Error updating ingreso:', error);
-    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+    // Sin conexión: encolar para reintentar al reconectar
+    console.warn('Progreso encolado offline:', error);
+    enqueueWrite(payload);
+    return { success: false, message: 'Guardado localmente; se sincronizará al reconectar' };
   }
 }
 
@@ -1162,5 +1285,165 @@ export async function saveShortEvalResult(data: {
   correctas: number;
   preguntasErroneas: ShortEvalWrongAnswer[];
 }): Promise<void> {
-  await postToAppsScript({ action: 'saveShortEvalResult', ...data });
+  const payload = { action: 'saveShortEvalResult', ...data };
+  try {
+    await postToAppsScript(payload);
+  } catch (error) {
+    // Sin conexión: encolar (el backend es anti-duplicado por evaluación+DNI)
+    console.warn('Resultado de eval encolado offline:', error);
+    enqueueWrite(payload);
+  }
+}
+
+// =============================================
+// ACTAS DE ENTREGA / COMPROMISOS
+// =============================================
+import type { ActaDocumento, ActaFirma, ActaItem } from '../types';
+
+/** Parsea la columna `Items` (JSON) de un documento de actas de forma tolerante. */
+function parseActaItems(raw: unknown): ActaItem[] {
+  const text = String(raw || '').trim();
+  if (!text) return [];
+  try {
+    const arr = JSON.parse(text);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((it: any): ActaItem => ({
+        nombre: String(it?.nombre || '').trim(),
+        driveUrl: String(it?.driveUrl || '').trim() || undefined,
+      }))
+      .filter(it => it.nombre);
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchActaDocumentos(): Promise<ActaDocumento[]> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.actasDocs);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          resolve((results.data as any[]).filter(r => r.Id).map((r: any): ActaDocumento => ({
+            id: String(r.Id || '').trim(),
+            titulo: String(r.Titulo || '').trim(),
+            descripcion: String(r.Descripcion || '').trim(),
+            perfiles: r.Perfiles ? String(r.Perfiles).split('|').map((s: string) => s.trim()).filter(Boolean) : [],
+            dnisAsignados: r.DnisAsignados ? String(r.DnisAsignados).split('|').map((s: string) => s.trim()).filter(Boolean) : [],
+            cuerpoHtml: String(r.CuerpoHtml || ''),
+            items: parseActaItems(r.Items),
+            driveDocUrl: String(r.DriveDocUrl || '').trim(),
+            requiereFirmaDibujada: String(r.RequiereFirmaDibujada || '').toLowerCase() !== 'false',
+            activo: String(r.Activo || '').toLowerCase() === 'true' || String(r.Activo || '') === '1',
+            fechaCreacion: String(r.FechaCreacion || '').trim(),
+          })));
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch { return []; }
+}
+
+export async function fetchActaFirmas(): Promise<ActaFirma[]> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.actasFirmas);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          resolve((results.data as any[]).filter(r => r.DocumentoId && r.DNI).map((r: any): ActaFirma => ({
+            id: String(r.Id || '').trim(),
+            documentoId: String(r.DocumentoId || '').trim(),
+            documentoTitulo: String(r.DocumentoTitulo || '').trim(),
+            dni: String(r.DNI || '').trim(),
+            apellidos: String(r.Apellidos || '').trim(),
+            nombres: String(r.Nombres || '').trim(),
+            cargo: String(r.Cargo || '').trim(),
+            area: String(r.Area || '').trim(),
+            empresa: String(r.Empresa || '').trim(),
+            correo: String(r.Correo || '').trim(),
+            fechaFirma: String(r.FechaFirma || '').trim(),
+            actaPdfUrl: String(r.ActaPdfUrl || '').trim(),
+            selfieUrl: String(r.SelfieUrl || '').trim(),
+            firmaUrl: String(r.FirmaUrl || '').trim(),
+            correoEnviado: String(r.CorreoEnviado || '').trim(),
+            dispositivo: String(r.Dispositivo || '').trim(),
+          })));
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch { return []; }
+}
+
+export async function saveActaDocumento(data: {
+  id: string;
+  titulo: string;
+  descripcion: string;
+  perfiles: string[];
+  dnisAsignados: string[];
+  cuerpoHtml: string;
+  items: ActaItem[];
+  driveDocUrl: string;
+  requiereFirmaDibujada: boolean;
+  activo: boolean;
+}): Promise<{ success: boolean; message?: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'upsertActaDocumento', ...data, items: JSON.stringify(data.items || []) });
+    return result.status === 'ok' ? { success: true } : { success: false, message: result.message };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+}
+
+export async function deleteActaDocumento(id: string): Promise<void> {
+  await postToAppsScript({ action: 'deleteActaDocumento', id });
+}
+
+export async function saveActaFirma(data: {
+  documentoId: string;
+  documentoTitulo: string;
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  cargo?: string;
+  area?: string;
+  empresa?: string;
+  correo: string;
+  driveDocUrl?: string;
+  pdfBase64: string;
+  signatureBase64?: string;
+  selfieBase64?: string;
+  dispositivo?: string;
+}): Promise<{ success: boolean; url?: string; correoEnviado?: string; duplicate?: boolean; message?: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'saveActaFirma', ...data });
+    if (result.status === 'ok') {
+      return {
+        success: true,
+        url: (result as any).url,
+        correoEnviado: (result as any).correoEnviado,
+        duplicate: (result as any).duplicate === true,
+      };
+    }
+    return { success: false, message: result.message || 'Error al guardar la firma del acta' };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+}
+
+export async function resendActaCorreo(id: string, correo?: string): Promise<{ success: boolean; message?: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'resendActaCorreo', id, correo });
+    return result.status === 'ok' ? { success: true } : { success: false, message: result.message };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
 }

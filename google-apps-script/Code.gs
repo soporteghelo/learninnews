@@ -1,22 +1,175 @@
 /**
  * Google Apps Script - LearnDrive AI v2 Proxy
- * 
+ *
+ * CONFIGURACIÓN: este script solo necesita DOS IDs (definidos más abajo):
+ *   - SPREADSHEET_ID         → la hoja de cálculo (base de datos)
+ *   - PROJECT_ROOT_FOLDER_ID → la carpeta raíz del proyecto en Drive
+ * Todas las subcarpetas (CERTIFICADOS, ACTAS/DOCUMENTOS, ACTAS/DOC_ENTREGAS) se
+ * detectan por nombre dentro de la carpeta raíz y se crean solas si faltan.
+ * No existe ningún otro ID hardcodeado.
+ *
  * Instrucciones de Instalación:
  * 1. En tu Google Sheet, ve a Extensiones -> Apps Script.
  * 2. Borra el contenido de Code.gs y pega este código.
- * 3. Cambia el SPREADSHEET_ID por el ID de tu hoja de cálculo.
- * 4. Haz clic en "Implementar" -> "Nueva implementación".
- * 5. Tipo: Aplicación web.
- * 6. Quién tiene acceso: Cualquiera (Anyone).
+ * 3. Ajusta SPREADSHEET_ID y PROJECT_ROOT_FOLDER_ID con los IDs de tu hoja y tu carpeta raíz.
+ * 4. Recarga la hoja y usa el menú "⚙️ Configuración del Proyecto" -> "🚀 Crear carpetas y hojas"
+ *    (o ejecuta la función CrearCarpetas desde el editor). Crea/asegura en 1 clic las subcarpetas
+ *    de Drive dentro de la raíz y todas las hojas necesarias.
+ * 5. Haz clic en "Implementar" -> "Nueva implementación".
+ * 6. Tipo: Aplicación web.
+ * 7. Quién tiene acceso: Cualquiera (Anyone).
  */
 
-const SPREADSHEET_ID = '1fXcrk-6YSA5NcgDbCBinu4WaPpyJMRK0og6miVE8ZZw';
+const SPREADSHEET_ID = '1tKXR0sRb3jZYFrQ8WUVjB3hhIpx1_qbQYfAjJIPPgTA';
 const QUIZ_SHEET_NAME = 'QUIZ';
 const DATA_SHEET_NAME = 'DATA';
 const INGRESOS_SHEET_NAME = 'INGRESOS';
 const LEARN_SHEET_NAME = 'LEARN';
 const SHORT_EVALS_SHEET_NAME = 'SHORT_EVALUACIONES';
 const SHORT_RESULTS_SHEET_NAME = 'SHORT_RESULTADOS';
+const ACTAS_DOCS_SHEET_NAME = 'ACTAS_DOCUMENTOS';
+const ACTAS_FIRMAS_SHEET_NAME = 'ACTAS_FIRMAS';
+
+// =============================================
+// CONFIGURACIÓN DE CARPETAS DE DRIVE
+// =============================================
+// Único ID de carpeta del proyecto: la carpeta RAÍZ. Todas las subcarpetas se
+// detectan por nombre (o se crean si faltan) dentro de ella automáticamente:
+//   <RAÍZ>/CERTIFICADOS
+//   <RAÍZ>/ACTAS/DOCUMENTOS          → archivos a entregar (los sube el admin)
+//   <RAÍZ>/ACTAS/DOC_ENTREGAS/<DNI>/ → actas firmadas por persona
+const PROJECT_ROOT_FOLDER_ID = '1bi_81jpB1fEYVE8qnPjOT5wLxCH03zmy';
+
+// Nombres de las subcarpetas dentro de la raíz (no son IDs; se resuelven por nombre).
+const CERT_FOLDER_NAME  = 'CERTIFICADOS';
+const ACTAS_FOLDER_NAME = 'ACTAS';
+
+/** Carpeta raíz del proyecto en Drive (único ID de carpeta del proyecto). */
+function getRootFolder_() {
+  return DriveApp.getFolderById(PROJECT_ROOT_FOLDER_ID);
+}
+/** Subcarpeta CERTIFICADOS dentro de la raíz (se detecta o se crea). */
+function getCertFolder_() {
+  return getOrCreateSubFolder(getRootFolder_(), CERT_FOLDER_NAME);
+}
+/** Subcarpeta ACTAS dentro de la raíz (se detecta o se crea). */
+function getActasFolder_() {
+  return getOrCreateSubFolder(getRootFolder_(), ACTAS_FOLDER_NAME);
+}
+/** Devuelve una subcarpeta por nombre SIN crearla (null si no existe). */
+function findSubFolder_(parent, name) {
+  var it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : null;
+}
+
+// =============================================
+// DIAGNÓSTICO DEL SISTEMA
+// =============================================
+/**
+ * Verifica que toda la configuración esté correcta: hoja de cálculo, hojas
+ * requeridas con sus columnas, carpeta raíz y subcarpetas de Drive, permiso de
+ * escritura en Drive y permiso de correo. Devuelve un reporte estructurado que
+ * la app muestra en el módulo "Verificación del sistema".
+ */
+function ejecutarDiagnostico() {
+  var checks = [];
+  function add(id, label, level, detail) {
+    // level: 'ok' | 'warn' | 'error'
+    checks.push({ id: id, label: label, ok: level === 'ok', level: level, detail: detail || '' });
+  }
+
+  // 1) Hoja de cálculo accesible
+  var ss = null;
+  try {
+    ss = getSpreadsheet_();
+    add('spreadsheet', 'Hoja de cálculo accesible', 'ok', ss.getName() + ' · ' + ss.getId());
+  } catch (e) {
+    add('spreadsheet', 'Hoja de cálculo accesible', 'error', 'No se pudo abrir SPREADSHEET_ID. Revisa el ID o los permisos. ' + e);
+  }
+
+  // 2) Hojas requeridas y sus columnas
+  if (ss) {
+    var defs = getSheetDefinitions();
+    Object.keys(defs).forEach(function (name) {
+      var sheet = ss.getSheetByName(name);
+      if (!sheet) {
+        add('sheet_' + name, 'Hoja "' + name + '"', 'error', 'No existe. Ejecuta "🚀 Crear carpetas y hojas".');
+        return;
+      }
+      var lastCol = sheet.getLastColumn();
+      var headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); }) : [];
+      var missing = defs[name].filter(function (h) { return headers.indexOf(h) === -1; });
+      if (missing.length) add('sheet_' + name, 'Hoja "' + name + '"', 'warn', 'Faltan columnas: ' + missing.join(', '));
+      else add('sheet_' + name, 'Hoja "' + name + '"', 'ok', headers.length + ' columnas correctas');
+    });
+
+    // CONFIG con al menos una fila (necesario para que la app arranque)
+    var cfg = ss.getSheetByName('CONFIG');
+    if (cfg) {
+      var tieneDatos = cfg.getLastRow() >= 2;
+      add('config_row', 'CONFIG con datos iniciales', tieneDatos ? 'ok' : 'warn',
+        tieneDatos ? 'Fila de configuración presente' : 'CONFIG vacía: la app puede no arrancar. Ejecuta "Crear carpetas y hojas".');
+    }
+  }
+
+  // 3) Carpeta raíz de Drive
+  var root = null;
+  try {
+    root = getRootFolder_();
+    add('root_folder', 'Carpeta raíz de Drive accesible', 'ok', root.getName() + ' · ' + root.getId());
+  } catch (e) {
+    add('root_folder', 'Carpeta raíz de Drive accesible', 'error', 'No se pudo abrir PROJECT_ROOT_FOLDER_ID. Revisa el ID o comparte la carpeta con esta cuenta. ' + e);
+  }
+
+  // 4) Subcarpetas del proyecto (solo se reporta si existen; no se crean aquí)
+  if (root) {
+    var cert = findSubFolder_(root, CERT_FOLDER_NAME);
+    add('cert_folder', 'Subcarpeta ' + CERT_FOLDER_NAME, cert ? 'ok' : 'warn',
+      cert ? cert.getId() : 'Aún no existe; se crea sola al emitir el primer certificado (o con "Crear carpetas y hojas").');
+
+    var actas = findSubFolder_(root, ACTAS_FOLDER_NAME);
+    if (actas) {
+      var faltan = [];
+      if (!findSubFolder_(actas, 'DOCUMENTOS')) faltan.push('DOCUMENTOS');
+      if (!findSubFolder_(actas, 'DOC_ENTREGAS')) faltan.push('DOC_ENTREGAS');
+      add('actas_folder', 'Subcarpeta ' + ACTAS_FOLDER_NAME, faltan.length ? 'warn' : 'ok',
+        faltan.length ? actas.getId() + ' — faltan: ' + faltan.join(', ') : actas.getId() + ' (DOCUMENTOS y DOC_ENTREGAS OK)');
+    } else {
+      add('actas_folder', 'Subcarpeta ' + ACTAS_FOLDER_NAME, 'warn',
+        'Aún no existe; se crea sola al firmar la primera acta (o con "Crear carpetas y hojas").');
+    }
+
+    // 5) Permiso de escritura en Drive (crea y borra un archivo de prueba)
+    try {
+      var tmp = root.createFile('__diagnostico__' + Date.now() + '.txt', 'ok', MimeType.PLAIN_TEXT);
+      tmp.setTrashed(true);
+      add('drive_write', 'Permiso de escritura en Drive', 'ok', 'Se creó y borró un archivo de prueba en la carpeta raíz');
+    } catch (e) {
+      add('drive_write', 'Permiso de escritura en Drive', 'error', 'No se pudo escribir en Drive. Autoriza los permisos y verifica que la cuenta sea dueña/editora de la carpeta. ' + e);
+    }
+  }
+
+  // 6) Permiso de correo (para el envío de actas firmadas)
+  try {
+    var quota = MailApp.getRemainingDailyQuota();
+    add('mail', 'Envío de correo (actas)', quota > 0 ? 'ok' : 'warn', 'Cuota diaria de correo restante: ' + quota);
+  } catch (e) {
+    add('mail', 'Envío de correo (actas)', 'warn', 'Sin autorización de correo todavía; se pedirá al ejecutar el script. ' + e);
+  }
+
+  var errores = checks.filter(function (c) { return c.level === 'error'; }).length;
+  var advertencias = checks.filter(function (c) { return c.level === 'warn'; }).length;
+  var ok = errores === 0;
+  return {
+    ok: ok,
+    errores: errores,
+    advertencias: advertencias,
+    checks: checks,
+    resumen: ok
+      ? (advertencias ? 'Configuración correcta con ' + advertencias + ' advertencia(s).' : '¡Todo correcto! El sistema está bien configurado.')
+      : 'Se detectaron ' + errores + ' problema(s) crítico(s) que impiden el funcionamiento normal.'
+  };
+}
 
 function doPost(e) {
   try {
@@ -79,6 +232,21 @@ function doPost(e) {
       return saveShortEvalResult(ss, data);
     } else if (data.action === 'deleteShortEvalResult') {
       return deleteShortEvalResult(ss, data);
+    } else if (data.action === 'upsertActaDocumento') {
+      return upsertActaDocumento(ss, data);
+    } else if (data.action === 'deleteActaDocumento') {
+      return deleteActaDocumento(ss, data);
+    } else if (data.action === 'saveActaFirma') {
+      return saveActaFirma(ss, data);
+    } else if (data.action === 'resendActaCorreo') {
+      return resendActaCorreo(ss, data);
+    } else if (data.action === 'diagnostico') {
+      // Verificación de configuración: hojas, columnas, carpetas y permisos.
+      return createResponse({ status: 'ok', report: ejecutarDiagnostico() });
+    } else if (data.action === 'crearEstructura') {
+      // Permite disparar la creación de carpetas/hojas desde la app (además del menú del editor).
+      var resumen = crearEstructuraProyecto();
+      return createResponse({ status: 'ok', message: resumen.mensaje, detalle: resumen });
     }
 
     return createResponse({ status: 'error', message: 'Acción no reconocida' });
@@ -394,8 +562,7 @@ function updateIngreso(sheet, ingreso) {
 function saveCertificate(ss, data) {
   try {
     if (!data.dni) return createResponse({ status: 'error', message: 'DNI requerido' });
-    const CERT_FOLDER_ID = '1uHzYb5jM8gVYdE8IdChetEAxC_caCt5i';
-    const parentFolder = DriveApp.getFolderById(CERT_FOLDER_ID);
+    const parentFolder = getCertFolder_();
     const now = new Date();
     const year  = now.getFullYear().toString();
     const month = (now.getMonth() + 1).toString().padStart(2, '0');
@@ -567,6 +734,26 @@ function getOrCreateSheetWithHeaders(ss, name, headers) {
   return sheet;
 }
 
+/**
+ * Asegura que una hoja exista con sus cabeceras SIN modificar hojas ya existentes.
+ *  - Si la hoja NO existe: la crea y escribe la fila de cabeceras.
+ *  - Si la hoja YA existe: no se toca nada (ni cabeceras ni filas con datos).
+ *    Única excepción segura: si existe pero está totalmente vacía (sin encabezados
+ *    ni datos), se escriben solo las cabeceras.
+ * Devuelve true únicamente cuando la hoja se creó nueva.
+ */
+function ensureSheetHeaders_(ss, name, headers) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    ss.insertSheet(name).getRange(1, 1, 1, headers.length).setValues([headers]);
+    return true;
+  }
+  if (sheet.getLastRow() === 0 && sheet.getLastColumn() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  return false;
+}
+
 function buildRowFromObject(headers, valueMap) {
   return headers.map(function(h) {
     return valueMap[h] !== undefined && valueMap[h] !== null ? valueMap[h] : '';
@@ -693,6 +880,441 @@ function deleteShortEvalResult(ss, data) {
   }
   SpreadsheetApp.flush();
   return createResponse({ status: 'ok', message: 'Resultado eliminado', deleted: deleted });
+}
+
+// =============================================
+// ACTAS DE ENTREGA / COMPROMISOS
+// =============================================
+
+var ACTAS_DOCS_HEADERS = ['Id', 'Titulo', 'Descripcion', 'Perfiles', 'DnisAsignados', 'CuerpoHtml', 'Items', 'DriveDocUrl', 'RequiereFirmaDibujada', 'Activo', 'FechaCreacion'];
+var ACTAS_FIRMAS_HEADERS = ['Id', 'DocumentoId', 'DocumentoTitulo', 'DNI', 'Apellidos', 'Nombres', 'Cargo', 'Area', 'Empresa', 'Correo', 'FechaFirma', 'ActaPdfUrl', 'SelfieUrl', 'FirmaUrl', 'CorreoEnviado', 'Dispositivo'];
+
+function upsertActaDocumento(ss, data) {
+  var sheet = getOrCreateSheetWithHeaders(ss, ACTAS_DOCS_SHEET_NAME, ACTAS_DOCS_HEADERS);
+  // Asegura la columna Items en hojas creadas antes de esta versión
+  getOrCreateColumn(sheet, 'Items');
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var idIdx = headers.indexOf('Id');
+  var perfiles = Array.isArray(data.perfiles) ? data.perfiles.join('|') : String(data.perfiles || '');
+  var dnis = Array.isArray(data.dnisAsignados) ? data.dnisAsignados.join('|') : String(data.dnisAsignados || '');
+  // `items` llega como cadena JSON desde el cliente; se guarda tal cual
+  var itemsJson = typeof data.items === 'string' ? data.items : JSON.stringify(data.items || []);
+  var valueMap = {
+    Id: String(data.id || '').trim(),
+    Titulo: String(data.titulo || '').trim(),
+    Descripcion: String(data.descripcion || '').trim(),
+    Perfiles: perfiles,
+    DnisAsignados: dnis,
+    CuerpoHtml: String(data.cuerpoHtml || ''),
+    Items: itemsJson,
+    DriveDocUrl: String(data.driveDocUrl || '').trim(),
+    RequiereFirmaDibujada: (data.requiereFirmaDibujada === false || String(data.requiereFirmaDibujada) === 'false') ? 'false' : 'true',
+    Activo: (data.activo === false || String(data.activo) === 'false') ? 'false' : 'true',
+    FechaCreacion: data.fechaCreacion ? String(data.fechaCreacion) : nowPeruString()
+  };
+
+  // Update if the Id already exists, else append
+  var values = sheet.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][idIdx]).trim() === valueMap.Id && valueMap.Id !== '') {
+      // Preserve original FechaCreacion
+      var fcIdx = headers.indexOf('FechaCreacion');
+      if (fcIdx !== -1 && values[i][fcIdx]) valueMap.FechaCreacion = values[i][fcIdx];
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([buildRowFromObject(headers, valueMap)]);
+      SpreadsheetApp.flush();
+      return createResponse({ status: 'ok', message: 'Documento actualizado' });
+    }
+  }
+  sheet.appendRow(buildRowFromObject(headers, valueMap));
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Documento creado' });
+}
+
+function deleteActaDocumento(ss, data) {
+  var sheet = ss.getSheetByName(ACTAS_DOCS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja ACTAS_DOCUMENTOS no encontrada' });
+  var values = sheet.getDataRange().getValues();
+  var idIdx = values[0].indexOf('Id');
+  if (idIdx === -1) return createResponse({ status: 'error', message: 'Columna Id no encontrada' });
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (String(values[i][idIdx]).trim() === String(data.id).trim()) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Documento eliminado' });
+}
+
+function saveActaFirma(ss, data) {
+  try {
+    if (!data.dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+    if (!data.documentoId) return createResponse({ status: 'error', message: 'Documento requerido' });
+
+    var sheet = getOrCreateSheetWithHeaders(ss, ACTAS_FIRMAS_SHEET_NAME, ACTAS_FIRMAS_HEADERS);
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+    // Anti-duplicado por DocumentoId + DNI
+    var values = sheet.getDataRange().getValues();
+    var docIdx = headers.indexOf('DocumentoId');
+    var dniIdx = headers.indexOf('DNI');
+    if (docIdx !== -1 && dniIdx !== -1) {
+      for (var i = 1; i < values.length; i++) {
+        if (String(values[i][docIdx]).trim() === String(data.documentoId).trim() &&
+            String(values[i][dniIdx]).trim() === String(data.dni).trim()) {
+          var urlIdx = headers.indexOf('ActaPdfUrl');
+          return createResponse({ status: 'ok', message: 'Ya firmado', duplicate: true, url: urlIdx !== -1 ? values[i][urlIdx] : '' });
+        }
+      }
+    }
+
+    var now = new Date();
+    var dni = String(data.dni).trim();
+    var docId = now.getTime();
+
+    // Estructura: <GENERAL>/DOC_ENTREGAS/<DNI>/  (y aseguramos que exista DOCUMENTOS)
+    var parentFolder = getActasFolder_();
+    getOrCreateSubFolder(parentFolder, 'DOCUMENTOS');
+    var entregasFolder = getOrCreateSubFolder(parentFolder, 'DOC_ENTREGAS');
+    var dniFolder = getOrCreateSubFolder(entregasFolder, dni);
+
+    var slug = data.documentoTitulo
+      ? String(data.documentoTitulo).trim().toUpperCase().replace(/[^A-Z0-9ÁÉÍÓÚÜÑ]/gi, '_').replace(/_+/g, '_')
+      : 'ACTA';
+
+    // 1. Guardar el PDF del acta — nombre: <DNI>_<TITULO_DOC>_<ID>.pdf
+    var rawPdf = data.pdfBase64.includes(',') ? data.pdfBase64.split(',')[1] : data.pdfBase64;
+    var pdfName = dni + '_' + slug + '_' + docId + '.pdf';
+    var pdfBlob = Utilities.newBlob(Utilities.base64Decode(rawPdf), 'application/pdf', pdfName);
+    var pdfFile = dniFolder.createFile(pdfBlob);
+    pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    var pdfUrl = pdfFile.getUrl();
+
+    // 2. Selfie y firma (opcionales) — misma carpeta del DNI
+    var selfieUrl = '';
+    if (data.selfieBase64) {
+      var rawSelfie = data.selfieBase64.includes(',') ? data.selfieBase64.split(',')[1] : data.selfieBase64;
+      var selfieBlob = Utilities.newBlob(Utilities.base64Decode(rawSelfie), 'image/jpeg', dni + '_' + slug + '_SELFIE_' + docId + '.jpg');
+      var selfieFile = dniFolder.createFile(selfieBlob);
+      selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      selfieUrl = selfieFile.getUrl();
+    }
+    var firmaUrl = '';
+    if (data.signatureBase64) {
+      var rawFirma = data.signatureBase64.includes(',') ? data.signatureBase64.split(',')[1] : data.signatureBase64;
+      var firmaBlob = Utilities.newBlob(Utilities.base64Decode(rawFirma), 'image/png', dni + '_' + slug + '_FIRMA_' + docId + '.png');
+      var firmaFile = dniFolder.createFile(firmaBlob);
+      firmaFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      firmaUrl = firmaFile.getUrl();
+    }
+
+    // 3. Enviar correo con acta adjunta + documento digital de Drive (si existe)
+    var correoEnviado = 'NO';
+    var correo = String(data.correo || '').trim();
+    if (correo && /@/.test(correo)) {
+      try {
+        var attachments = [pdfBlob];
+        if (data.driveDocUrl) {
+          var driveId = extractDriveId(data.driveDocUrl);
+          if (driveId) {
+            try { attachments.push(DriveApp.getFileById(driveId).getBlob()); } catch (eAtt) { /* doc inaccesible, se omite */ }
+          }
+        }
+        MailApp.sendEmail({
+          to: correo,
+          subject: 'Acta firmada: ' + (data.documentoTitulo || 'Documento'),
+          htmlBody: buildActaEmailHtml({
+            nombres: data.nombres, apellidos: data.apellidos, dni: dni,
+            documentoTitulo: data.documentoTitulo, fecha: nowPeruString(), pdfUrl: pdfUrl
+          }),
+          attachments: attachments,
+          name: 'Capacitaciones SST'
+        });
+        correoEnviado = 'SI';
+      } catch (eMail) {
+        correoEnviado = 'NO';
+      }
+    }
+
+    // 4. Registrar la firma
+    var rowData = buildRowFromObject(headers, {
+      Id: dni + '-' + String(data.documentoId).trim() + '-' + now.getTime(),
+      DocumentoId: String(data.documentoId).trim(),
+      DocumentoTitulo: String(data.documentoTitulo || '').trim(),
+      DNI: dni,
+      Apellidos: String(data.apellidos || '').trim(),
+      Nombres: String(data.nombres || '').trim(),
+      Cargo: String(data.cargo || '').trim(),
+      Area: String(data.area || '').trim(),
+      Empresa: String(data.empresa || '').trim(),
+      Correo: correo,
+      FechaFirma: nowPeruString(),
+      ActaPdfUrl: pdfUrl,
+      SelfieUrl: selfieUrl,
+      FirmaUrl: firmaUrl,
+      CorreoEnviado: correoEnviado,
+      Dispositivo: String(data.dispositivo || '').trim()
+    });
+    sheet.appendRow(rowData);
+    SpreadsheetApp.flush();
+    return createResponse({ status: 'ok', url: pdfUrl, correoEnviado: correoEnviado });
+  } catch (err) {
+    return createResponse({ status: 'error', message: err.toString() });
+  }
+}
+
+function resendActaCorreo(ss, data) {
+  try {
+    var sheet = ss.getSheetByName(ACTAS_FIRMAS_SHEET_NAME);
+    if (!sheet) return createResponse({ status: 'error', message: 'Hoja ACTAS_FIRMAS no encontrada' });
+    var values = sheet.getDataRange().getValues();
+    var headers = values[0];
+    var idIdx = headers.indexOf('Id');
+    var correoIdx = headers.indexOf('Correo');
+    var pdfIdx = headers.indexOf('ActaPdfUrl');
+    var tituloIdx = headers.indexOf('DocumentoTitulo');
+    var enviadoIdx = headers.indexOf('CorreoEnviado');
+    var nombresIdx = headers.indexOf('Nombres');
+    var apellidosIdx = headers.indexOf('Apellidos');
+    var dniIdx = headers.indexOf('DNI');
+
+    for (var i = 1; i < values.length; i++) {
+      if (String(values[i][idIdx]).trim() === String(data.id).trim()) {
+        var correo = String(data.correo || values[i][correoIdx] || '').trim();
+        if (!correo || !/@/.test(correo)) return createResponse({ status: 'error', message: 'Correo inválido' });
+        var pdfUrl = String(values[i][pdfIdx] || '');
+        var attachments = [];
+        var driveId = extractDriveId(pdfUrl);
+        if (driveId) { try { attachments.push(DriveApp.getFileById(driveId).getBlob()); } catch (e) { /* ignore */ } }
+        MailApp.sendEmail({
+          to: correo,
+          subject: 'Acta firmada: ' + (values[i][tituloIdx] || 'Documento'),
+          htmlBody: buildActaEmailHtml({
+            nombres: values[i][nombresIdx], apellidos: values[i][apellidosIdx], dni: values[i][dniIdx],
+            documentoTitulo: values[i][tituloIdx], fecha: nowPeruString(), pdfUrl: pdfUrl
+          }),
+          attachments: attachments,
+          name: 'Capacitaciones SST'
+        });
+        if (enviadoIdx !== -1) sheet.getRange(i + 1, enviadoIdx + 1).setValue('SI');
+        if (correoIdx !== -1 && data.correo) sheet.getRange(i + 1, correoIdx + 1).setValue(correo);
+        SpreadsheetApp.flush();
+        return createResponse({ status: 'ok', message: 'Correo reenviado' });
+      }
+    }
+    return createResponse({ status: 'error', message: 'Firma no encontrada' });
+  } catch (err) {
+    return createResponse({ status: 'error', message: err.toString() });
+  }
+}
+
+/** Extrae el fileId de una URL de Google Drive (varios formatos). */
+function extractDriveId(url) {
+  if (!url) return '';
+  url = String(url);
+  var m = url.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+          url.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+          url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  // Si ya es un ID pelado
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(url)) return url;
+  return '';
+}
+
+/** Plantilla HTML del correo de entrega del acta firmada. */
+function buildActaEmailHtml(r) {
+  var nombre = ((r.nombres || '') + ' ' + (r.apellidos || '')).trim();
+  return '' +
+'<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;background:#f4f6f8;padding:24px;">' +
+  '<div style="background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e1e3e4;">' +
+    '<div style="background:linear-gradient(135deg,#00366b,#1b4d89);padding:28px 24px;text-align:center;">' +
+      '<div style="font-size:13px;letter-spacing:2px;color:#9dc0e8;font-weight:bold;text-transform:uppercase;">Constancia de firma</div>' +
+      '<div style="font-size:22px;color:#ffffff;font-weight:bold;margin-top:6px;">Acta de Entrega / Compromiso</div>' +
+    '</div>' +
+    '<div style="padding:28px 28px 8px 28px;color:#333;">' +
+      '<p style="font-size:15px;margin:0 0 12px 0;">Estimado(a) <strong>' + nombre + '</strong>,</p>' +
+      '<p style="font-size:14px;line-height:1.6;margin:0 0 16px 0;">Confirmamos que ha firmado correctamente el siguiente documento. Adjuntamos a este correo el acta firmada en formato PDF para tus registros.</p>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0 20px 0;">' +
+        '<tr><td style="padding:8px 0;color:#737781;width:130px;">Documento</td><td style="padding:8px 0;color:#191c1d;font-weight:bold;">' + (r.documentoTitulo || '') + '</td></tr>' +
+        '<tr><td style="padding:8px 0;color:#737781;">DNI</td><td style="padding:8px 0;color:#191c1d;">' + (r.dni || '') + '</td></tr>' +
+        '<tr><td style="padding:8px 0;color:#737781;">Fecha de firma</td><td style="padding:8px 0;color:#191c1d;">' + (r.fecha || '') + '</td></tr>' +
+      '</table>' +
+      (r.pdfUrl ? '<div style="text-align:center;margin:8px 0 20px 0;"><a href="' + r.pdfUrl + '" style="display:inline-block;background:#1b4d89;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 26px;border-radius:10px;">Ver acta en línea</a></div>' : '') +
+      '<p style="font-size:12px;color:#9aa0a6;line-height:1.6;margin:16px 0 0 0;border-top:1px solid #eef0f2;padding-top:16px;">Este es un mensaje automático generado tras la firma con verificación facial. Si no reconoces esta actividad, comunícate con el área de Seguridad y Salud en el Trabajo.</p>' +
+    '</div>' +
+    '<div style="background:#f8f9fa;padding:16px 24px;text-align:center;font-size:11px;color:#9aa0a6;">Capacitaciones SST &middot; Plataforma de aprendizaje corporativo</div>' +
+  '</div>' +
+'</div>';
+}
+
+// =============================================
+// CONFIGURACIÓN / REPLICACIÓN DEL PROYECTO
+// (Crea en 1 clic todas las carpetas de Drive y las hojas necesarias)
+// =============================================
+
+/** Menú "⚙️ Configuración del Proyecto" al abrir la hoja de cálculo. */
+function onOpen() {
+  try {
+    SpreadsheetApp.getUi()
+      .createMenu('⚙️ Configuración del Proyecto')
+      .addItem('🚀 Crear carpetas y hojas', 'CrearCarpetas')
+      .addItem('🔎 Ver IDs de carpetas', 'MostrarConfiguracion')
+      .addItem('🩺 Diagnóstico del sistema', 'MostrarDiagnostico')
+      .addToUi();
+  } catch (e) { /* sin UI (ejecución headless) */ }
+}
+
+/**
+ * FUNCIÓN PRINCIPAL — ejecútala desde el menú "⚙️ Configuración del Proyecto"
+ * o con el botón ▶ del editor. Es idempotente y NO destructiva:
+ *   - Asegura las subcarpetas dentro de la carpeta raíz (CERTIFICADOS, ACTAS/DOCUMENTOS, ACTAS/DOC_ENTREGAS)
+ *   - Crea las hojas de cálculo que falten, con sus cabeceras
+ *   - Las hojas, carpetas y datos que YA existen no se modifican
+ *   - Registra los IDs actuales en la hoja CONFIG_SISTEMA (metadatos de referencia)
+ */
+function CrearCarpetas() {
+  var resumen = crearEstructuraProyecto();
+  try {
+    SpreadsheetApp.getUi().alert('✅ Estructura del proyecto lista', resumen.mensaje, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    Logger.log(resumen.mensaje);
+  }
+  return resumen;
+}
+
+/** Muestra los IDs actuales de carpetas y de la hoja. */
+function MostrarConfiguracion() {
+  var msg = 'SPREADSHEET_ID (activo): ' + getSpreadsheet_().getId() + '\n' +
+    'PROJECT_ROOT_FOLDER_ID: ' + PROJECT_ROOT_FOLDER_ID + '\n' +
+    'CERT_FOLDER_ID: ' + getCertFolder_().getId() + '\n' +
+    'ACTAS_FOLDER_ID: ' + getActasFolder_().getId();
+  try { SpreadsheetApp.getUi().alert('IDs del proyecto', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
+  catch (e) { Logger.log(msg); }
+}
+
+/** Ejecuta el diagnóstico y muestra el resultado en un cuadro de diálogo. */
+function MostrarDiagnostico() {
+  var r = ejecutarDiagnostico();
+  var icono = { ok: '✅', warn: '⚠️', error: '❌' };
+  var lineas = r.checks.map(function (c) {
+    return (icono[c.level] || '•') + ' ' + c.label + (c.detail ? '\n     ' + c.detail : '');
+  }).join('\n');
+  var msg = r.resumen + '\n\n' + lineas;
+  try { SpreadsheetApp.getUi().alert('🩺 Diagnóstico del sistema', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
+  catch (e) { Logger.log(msg); }
+}
+
+/**
+ * Crea/asegura carpetas, subcarpetas, hojas y sus cabeceras de forma NO destructiva.
+ * Reglas:
+ *   - Carpetas/subcarpetas: se crean solo si faltan; si ya existen se reutilizan sin tocarlas.
+ *   - Hojas: se crean con sus cabeceras solo si NO existen. Si una hoja ya existe,
+ *     no se modifican ni sus cabeceras ni sus filas con datos.
+ * Es seguro ejecutarla varias veces: nunca borra ni sobrescribe datos existentes.
+ */
+function crearEstructuraProyecto() {
+  var ss = getSpreadsheet_();
+
+  // 1) Carpeta raíz del proyecto (por ID fijo — no se crea ninguna otra)
+  var root = getRootFolder_();
+
+  // 2) Subcarpetas: se crean solo si faltan; si ya existen se reutilizan sin modificarlas
+  var certFolder  = getOrCreateSubFolder(root, CERT_FOLDER_NAME);
+  var actasFolder = getOrCreateSubFolder(root, ACTAS_FOLDER_NAME);
+  getOrCreateSubFolder(actasFolder, 'DOCUMENTOS');
+  getOrCreateSubFolder(actasFolder, 'DOC_ENTREGAS');
+
+  // 3) Hojas: se crean con cabeceras solo si faltan; las ya existentes NO se tocan
+  var defs = getSheetDefinitions();
+  var creadas = [], existentes = [];
+  Object.keys(defs).forEach(function (name) {
+    var fueCreada = ensureSheetHeaders_(ss, name, defs[name]);
+    (fueCreada ? creadas : existentes).push(name);
+  });
+  // Siembra la fila por defecto de CONFIG solo si la hoja está vacía (no toca datos existentes)
+  seedConfigDefaults_(ss);
+
+  // 4) Guardar los IDs detectados en la hoja CONFIG_SISTEMA (solo informativo/referencia)
+  var kv = {
+    'PROJECT_ROOT_FOLDER_ID': root.getId(),
+    'CERT_FOLDER_ID': certFolder.getId(),
+    'ACTAS_FOLDER_ID': actasFolder.getId(),
+    'SPREADSHEET_ID': ss.getId()
+  };
+  writeSystemConfig_(ss, kv);
+  SpreadsheetApp.flush();
+
+  var mensaje =
+    'Carpeta raíz: ' + root.getName() + '\n  ID: ' + root.getId() + '\n\n' +
+    'CERTIFICADOS  → ' + certFolder.getId() + '\n' +
+    'ACTAS         → ' + actasFolder.getId() + '\n   (subcarpetas DOCUMENTOS y DOC_ENTREGAS listas)\n\n' +
+    'Hojas nuevas: ' + (creadas.length ? creadas.join(', ') : '(ninguna, ya existían)') + '\n' +
+    'Hojas existentes (sin cambios): ' + (existentes.length ? existentes.join(', ') : '—') + '\n\n' +
+    'Las hojas, carpetas y datos ya existentes se conservan sin modificar.';
+
+  return {
+    ok: true,
+    rootFolderId: root.getId(),
+    certFolderId: certFolder.getId(),
+    actasFolderId: actasFolder.getId(),
+    spreadsheetId: ss.getId(),
+    hojasCreadas: creadas,
+    hojasExistentes: existentes,
+    mensaje: mensaje
+  };
+}
+
+/** Definición central de todas las hojas y sus cabeceras. */
+function getSheetDefinitions() {
+  return {
+    'LEARN': ['Id', 'Titulo', 'Publico', 'Detalles', 'Resumen', 'PuntosClave', 'Orden', 'Activo'],
+    'DATA': ['Cod', 'IdMain', 'Tema', 'Contenido', 'Video_1', 'Video_2', 'Video_3', 'ComentarioVideo', 'PDF', 'Contexto', 'Orden'],
+    'QUIZ': ['IdQuiz', 'IdMain', 'Pregunta', 'OpcionA', 'OpcionB', 'OpcionC', 'OpcionD', 'RespuestaCorrecta', 'Explicacion', 'Dificultad', 'Categoria_contenido'],
+    'INGRESOS': ['Id', 'Apellidos', 'Nombres', 'DNI', 'Inicio', 'Avance', 'Publico', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON', 'CertificadoUrl', 'EMPRESA', 'AREA', 'CARGO', 'FECHA_INGRESO', 'FECHA_NACIMIENTO', 'CORREO', 'CELULAR', 'NUMERO_CONTACTO_1', 'PARENTESCO_CONTACTO_1', 'NUMERO_CONTACTO_2', 'PARENTESCO_CONTACTO_2'],
+    'CONFIG': ['Titulo', 'Mensaje', 'Contacto', 'PassAdmin', 'Estatus', 'LogoCertificado', 'FirmaRepresentante', 'NombreRepresentante', 'CargoRepresentante', 'Lugar', 'Contratista'],
+    'CERTIFICADOS': ['Id', 'DNI', 'APELLIDOS', 'NOMBRES', 'CARGO', 'NOTA', 'CELULAR', 'FOTO', 'TITULO_CERTIFICADO', 'LinkCertificado', 'Fecha', 'FIRMA', 'TopicId'],
+    'SHORT_EVALUACIONES': SHORT_EVALS_HEADERS,
+    'SHORT_RESULTADOS': SHORT_RESULTS_HEADERS,
+    'ACTAS_DOCUMENTOS': ACTAS_DOCS_HEADERS,
+    'ACTAS_FIRMAS': ACTAS_FIRMAS_HEADERS,
+    'CONFIG_SISTEMA': ['Clave', 'Valor', 'Descripcion', 'Actualizado']
+  };
+}
+
+/** Devuelve la hoja activa (script enlazado) o abre por ID como respaldo. */
+function getSpreadsheet_() {
+  var ss = null;
+  try { ss = SpreadsheetApp.getActiveSpreadsheet(); } catch (e) {}
+  if (ss) return ss;
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}
+
+/** Siembra una fila por defecto en CONFIG si está vacía (para que la app arranque). */
+function seedConfigDefaults_(ss) {
+  var sheet = ss.getSheetByName('CONFIG');
+  if (!sheet || sheet.getLastRow() >= 2) return;
+  sheet.appendRow(['Capacitaciones SST', 'Identifícate para comenzar tu capacitación', '', '123456', 'Activo', '', '', '', '']);
+}
+
+/** Escribe/actualiza pares clave-valor en la hoja CONFIG_SISTEMA. */
+function writeSystemConfig_(ss, kv) {
+  var sheet = getOrCreateSheetWithHeaders(ss, 'CONFIG_SISTEMA', ['Clave', 'Valor', 'Descripcion', 'Actualizado']);
+  var descripciones = {
+    'PROJECT_ROOT_FOLDER_ID': 'Carpeta raíz del proyecto en Drive',
+    'CERT_FOLDER_ID': 'Carpeta de certificados emitidos',
+    'ACTAS_FOLDER_ID': 'Carpeta de actas / entrega de documentos',
+    'SPREADSHEET_ID': 'ID de esta hoja de cálculo'
+  };
+  var data = sheet.getDataRange().getValues();
+  var ahora = nowPeruString();
+  Object.keys(kv).forEach(function (clave) {
+    var rowIndex = -1;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === clave) { rowIndex = i + 1; break; }
+    }
+    var row = [clave, kv[clave], descripciones[clave] || '', ahora];
+    if (rowIndex > 0) { sheet.getRange(rowIndex, 1, 1, 4).setValues([row]); }
+    else { sheet.appendRow(row); data.push(row); }
+  });
 }
 
 function createResponse(obj) {

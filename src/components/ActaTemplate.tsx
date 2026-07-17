@@ -1,0 +1,149 @@
+import React, { useMemo } from 'react';
+import type { AppDynamicConfig } from '../types';
+import { interpolateActa, type ActaSignerData } from '../lib/actaInterpolate';
+import type { GeneralActaDoc } from '../lib/actaAssignment';
+
+// Vite raw import de la plantilla HTML (mismo patrón que el certificado)
+// @ts-ignore
+import actaBaseHtml from '../templates/acta.html?raw';
+
+export { interpolateActa, type ActaSignerData };
+
+interface ActaTemplateProps {
+  /** Datos del trabajador que RECIBE (incluye fecha de ingreso para el acta). */
+  signer: ActaSignerData & { fechaIngreso?: string };
+  /** Documentos que se listan en la tabla "Documentos entregados". */
+  documentos: GeneralActaDoc[];
+  signatureData: string | null;
+  selfieData: string | null;
+  timestamp: string;      // fecha/hora Lima legible
+  dispositivo: string;
+  appConfig: AppDynamicConfig | null;
+  logoSrc?: string;
+  /** Firma del representante (quien ENTREGA), ya como data URL base64. */
+  representanteFirmaSrc?: string;
+  /** N° del acta (opcional; si no se pasa se imprime una línea en blanco). */
+  numero?: string;
+}
+
+const EMPTY_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/** Escapa texto plano para incrustarlo con seguridad en el HTML de la plantilla. */
+function escapeHtml(s: string): string {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Reemplaza {{clave}} en la plantilla usando split/join (evita problemas con `$`). */
+function fillTemplate(tpl: string, map: Record<string, string>): string {
+  let out = tpl;
+  for (const key of Object.keys(map)) {
+    out = out.split(`{{${key}}}`).join(map[key]);
+  }
+  return out;
+}
+
+/** Valor escapado, o una línea en blanco subrayada si está vacío. */
+function blank(val: string | undefined, minWidth = '45px'): string {
+  const v = String(val || '').trim();
+  return v
+    ? escapeHtml(v)
+    : `<span style="display:inline-block;border-bottom:1px solid #9ca3af;min-width:${minWidth};">&nbsp;&nbsp;</span>`;
+}
+
+/** Casilla de verificación (☐ vacía / ☑ marcada) que renderiza bien en el PDF. */
+function checkbox(checked: boolean): string {
+  return checked
+    ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border:1.3px solid #0f2d6b;border-radius:2px;background:#0f2d6b;color:#ffffff;font-size:9px;font-weight:900;line-height:1;">&#10003;</span>`
+    : `<span style="display:inline-block;width:12px;height:12px;border:1.3px solid #0f2d6b;border-radius:2px;"></span>`;
+}
+
+const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props, ref) => {
+  const { signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero } = props;
+
+  const proxyUrl = (url?: string) => {
+    if (!url || url.startsWith('data:') || url.includes('weserv.nl')) return url || '';
+    const cleanUrl = url.replace(/^https?:\/\//, '');
+    return `https://images.weserv.nl/?url=${cleanUrl}&default=${encodeURIComponent(url)}`;
+  };
+
+  const finalHtml = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear().toString();
+    const dia = now.getDate();
+    const mes = MESES[now.getMonth()];
+    const currentDate = now.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const nombreCompleto = `${signer.apellidos || ''} ${signer.nombres || ''}`.trim().toUpperCase();
+    const logo = proxyUrl(logoSrc || appConfig?.logoCertificado) || 'https://via.placeholder.com/150x40?text=LOGO';
+
+    // Párrafo de introducción con datos fijos (config) y fecha actual
+    const introHtml =
+      `En ${blank(appConfig?.lugar, '60px')}, a los ${dia} días del mes de ${mes} de ${year}, ` +
+      `se deja constancia de la entrega y recepción de los documentos que se detallan a continuación, ` +
+      `por parte de ${blank(appConfig?.contratista, '90px')}, ` +
+      `al trabajador que suscribe la presente.`;
+
+    // Filas de la tabla de documentos (mínimo 5 filas, resto en blanco para anotar)
+    const totalRows = Math.max(documentos.length, 5);
+    let docsRows = '';
+    for (let i = 0; i < totalRows; i++) {
+      const d = documentos[i];
+      const bg = i % 2 === 0 ? '#ffffff' : '#f7f9fd';
+      const nombre = d ? escapeHtml(d.nombre) : '&nbsp;';
+      const digital = checkbox(!!(d && d.digital));
+      const fisico = checkbox(false); // siempre en blanco: se marca al entregar en físico
+      docsRows +=
+        `<tr style="background:${bg};">` +
+        `<td style="padding:6px 6px;text-align:center;color:#1b4d89;font-weight:800;border-top:1px solid #e6edf8;">${i + 1}</td>` +
+        `<td style="padding:6px 8px;color:#1f2937;font-weight:600;border-top:1px solid #e6edf8;">${nombre}</td>` +
+        `<td style="padding:6px 6px;border-top:1px solid #e6edf8;">&nbsp;</td>` +
+        `<td style="padding:6px 3px;text-align:center;border-top:1px solid #e6edf8;">${fisico}</td>` +
+        `<td style="padding:6px 3px;text-align:center;border-top:1px solid #e6edf8;">${digital}</td>` +
+        `<td style="padding:6px 8px;border-top:1px solid #e6edf8;">&nbsp;</td>` +
+        `</tr>`;
+    }
+
+    return fillTemplate(actaBaseHtml, {
+      acta_logo_src: logo,
+      acta_numero: numero ? escapeHtml(numero) : `<span style="display:inline-block;border-bottom:1px solid #e8d5a3;min-width:40px;">&nbsp;</span>`,
+      acta_year: year,
+      intro_html: introHtml,
+      w_nombre: blank(nombreCompleto, '120px'),
+      w_dni: blank(signer.dni, '60px'),
+      w_cargo: blank(signer.cargo, '90px'),
+      w_area: blank(signer.area, '90px'),
+      w_fecha_ingreso: blank(signer.fechaIngreso, '70px'),
+      docs_rows: docsRows,
+      entrega_firma_src: proxyUrl(representanteFirmaSrc || appConfig?.firmaRepresentante) || EMPTY_IMG,
+      entrega_nombre: blank(appConfig?.nombreRepresentante, '110px'),
+      entrega_cargo: blank(appConfig?.cargoRepresentante, '90px'),
+      recibe_firma_src: signatureData || EMPTY_IMG,
+      recibe_nombre: blank(nombreCompleto, '110px'),
+      recibe_dni: blank(signer.dni, '55px'),
+      selfie_src: selfieData || EMPTY_IMG,
+      timestamp: escapeHtml(timestamp),
+      current_date: currentDate,
+      current_year: year,
+      acta_id: escapeHtml(signer.dni),
+      device_info: dispositivo ? `Dispositivo: ${escapeHtml(dispositivo.slice(0, 90))}` : 'Registro almacenado en el sistema de gestión SST',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero]);
+
+  return (
+    <div
+      ref={ref}
+      style={{ width: '210mm', background: '#ffffff' }}
+      dangerouslySetInnerHTML={{ __html: finalHtml }}
+    />
+  );
+});
+
+ActaTemplate.displayName = 'ActaTemplate';
+
+export default ActaTemplate;

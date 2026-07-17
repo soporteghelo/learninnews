@@ -12,17 +12,23 @@ import {
   fetchAppDynamicConfig,
   fetchGlobalKnownUsers,
   getStaleCachedSheetData,
+  fetchActaDocumentos,
+  fetchActaFirmas,
+  flushOfflineQueue,
 } from './services/sheetsService';
 import { getStorageKey, APP_CONFIG } from './config/app.config';
-import type { 
-  LearnTopic, 
-  DataChunk, 
-  QuizQuestion, 
-  UserProgress, 
+import { getAssignedDocs, getGeneralActaDocuments, hasSignedGeneralActa } from './lib/actaAssignment';
+import type {
+  LearnTopic,
+  DataChunk,
+  QuizQuestion,
+  UserProgress,
   UserSession,
-  AudienceType, 
+  AudienceType,
   AppView,
-  AppDynamicConfig 
+  AppDynamicConfig,
+  ActaDocumento,
+  ActaFirma
 } from './types';
 
 // Regular imports for immediate load
@@ -39,6 +45,7 @@ const QuizMode = lazy(() => import('./components/QuizMode'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const CertificateClaim = lazy(() => import('./components/CertificateClaim'));
 const ShortEvalPage = lazy(() => import('./components/ShortEvalPage'));
+const ActasScreen = lazy(() => import('./components/ActasScreen'));
 
 // Loading Fallback Component
 const ViewLoader = () => (
@@ -146,12 +153,34 @@ export default function App() {
   });
   const [mediaOverlay, setMediaOverlay] = useState<{ url: string; type: 'video' | 'pdf' } | null>(null);
   const [globalKnownUsers, setGlobalKnownUsers] = useState<Record<string, { apellidos: string, nombres: string }>>({});
+  const [actaDocumentos, setActaDocumentos] = useState<ActaDocumento[]>([]);
+  const [actaFirmas, setActaFirmas] = useState<ActaFirma[]>([]);
 
   // Apply theme class to html
   useEffect(() => {
     document.documentElement.classList.toggle('light-mode', !darkMode);
     localStorage.setItem('learn-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
+
+  // Load Actas (documentos asignados + firmas) for the active user
+  const loadActas = useCallback(async () => {
+    const [docs, firmas] = await Promise.all([fetchActaDocumentos(), fetchActaFirmas()]);
+    setActaDocumentos(docs);
+    setActaFirmas(firmas);
+  }, []);
+
+  useEffect(() => {
+    if (!userSession?.dni || shortEvalId) return;
+    loadActas().catch(console.error);
+  }, [userSession?.dni, shortEvalId, loadActas]);
+
+  // Reintenta escrituras encoladas offline (progreso/eval) al arrancar y al recuperar conexión
+  useEffect(() => {
+    const flush = () => { flushOfflineQueue().catch(() => {}); };
+    flush();
+    window.addEventListener('online', flush);
+    return () => window.removeEventListener('online', flush);
+  }, []);
 
   // --- Initialization ---
   useEffect(() => {
@@ -672,6 +701,17 @@ export default function App() {
     );
   }
 
+  // Documentos de actas asignados al usuario (total y pendientes de firma)
+  const assignedActas = userSession ? getAssignedDocs(actaDocumentos, userSession) : [];
+  const actasAsignadasTotal = assignedActas.length;
+  // Modelo de acta general: una sola acta reúne todos los documentos del perfil.
+  // "Pendientes" = cantidad de documentos por recibir si aún no firmó su acta general.
+  const actasPendientes = (() => {
+    if (!userSession || assignedActas.length === 0) return 0;
+    if (hasSignedGeneralActa(actaFirmas, userSession.dni)) return 0;
+    return getGeneralActaDocuments(assignedActas).length;
+  })();
+
   return (
     <div className={`min-h-screen text-slate-200 selection:bg-blue-500/30 selection:text-blue-200 ${darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
       {/* Top-right floating buttons — hidden in views that have their own header */}
@@ -752,9 +792,27 @@ export default function App() {
               onChangeAudience={handleChangeAudience}
               onOpenAdmin={() => setView('admin')}
               onClaimCertificate={(topic) => { setSelectedTopic(topic); setView('certificateClaim'); }}
+              onOpenActas={() => setView('actas')}
+              actasPendientes={actasPendientes}
+              actasAsignadas={actasAsignadasTotal}
               userSession={userSession}
               darkMode={darkMode}
             />
+          </motion.div>
+        )}
+
+        {view === 'actas' && userSession && (
+          <motion.div key="actas" className="fixed inset-0 z-50">
+            <Suspense fallback={<ViewLoader />}>
+              <ActasScreen
+                userSession={userSession}
+                appConfig={appConfig}
+                documentos={actaDocumentos}
+                firmas={actaFirmas}
+                onBack={() => setView('dashboard')}
+                onSigned={() => { loadActas().catch(console.error); }}
+              />
+            </Suspense>
           </motion.div>
         )}
 

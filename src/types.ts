@@ -11,6 +11,9 @@ export interface AppDynamicConfig {
   firmaRepresentante?: string;
   nombreRepresentante?: string;
   cargoRepresentante?: string;
+  // Datos fijos del acta de recepción de documentos (from CONFIG sheet)
+  lugar?: string;            // lugar / proyecto minero
+  contratista?: string;      // nombre de la contratista que entrega
 }
 
 export interface UserSession {
@@ -132,7 +135,7 @@ export interface ConnectionTestResult {
   geminiApi: { ok: boolean; error?: string };
 }
 
-export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'shortEvals';
+export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'shortEvals' | 'actas';
 
 export type AppView =
   | 'login'
@@ -144,7 +147,8 @@ export type AppView =
   | 'quiz'
   | 'admin'
   | 'certificateClaim'
-  | 'shortEval';
+  | 'shortEval'
+  | 'actas';
 
 export interface ShortEval {
   id: string;
@@ -163,4 +167,49 @@ export interface ShortEvalWrongAnswer {
   selected: string;
   correct: string;
   explanation: string;
+}
+
+// =============================================
+// ACTAS DE ENTREGA / COMPROMISOS
+// =============================================
+
+/** Un documento/ítem que el trabajador recibe dentro de un acta (fila a fila). */
+export interface ActaItem {
+  nombre: string;              // nombre del documento recepcionado
+  driveUrl?: string;           // enlace de Drive del documento (opcional, genera QR por fila)
+}
+
+/** Documento/compromiso configurable por el admin, firmable por el usuario. */
+export interface ActaDocumento {
+  id: string;
+  titulo: string;
+  descripcion: string;
+  perfiles: string[];          // audiencias objetivo (vacío = todas)
+  dnisAsignados: string[];     // DNIs específicos (opcional, además de perfiles)
+  cuerpoHtml: string;          // plantilla HTML con variables {nombres} {dni} {cargo} ...
+  items: ActaItem[];           // documentos que recibe el trabajador (se listan fila a fila)
+  driveDocUrl: string;         // documento digital adjunto (opcional) guardado en Drive
+  requiereFirmaDibujada: boolean;
+  activo: boolean;
+  fechaCreacion: string;
+}
+
+/** Registro de una firma: una persona firmó un documento (una fila por documento+DNI). */
+export interface ActaFirma {
+  id: string;
+  documentoId: string;
+  documentoTitulo: string;
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  cargo: string;
+  area: string;
+  empresa: string;
+  correo: string;
+  fechaFirma: string;
+  actaPdfUrl: string;
+  selfieUrl: string;
+  firmaUrl: string;
+  correoEnviado: string;   // 'SI' | 'NO'
+  dispositivo: string;
 }

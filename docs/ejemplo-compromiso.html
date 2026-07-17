@@ -1,0 +1,40 @@
+<!--
+  EJEMPLO DE COMPROMISO / ACTA
+  ============================
+  Este es el cuerpo (CuerpoHtml) que el administrador puede pegar como plantilla
+  de un documento en Admin → Actas → Nuevo → "Usar ejemplo".
+
+  Variables disponibles (se reemplazan al firmar):
+    {nombreCompleto}  Apellidos y nombres del trabajador
+    {nombres}         Solo nombres
+    {apellidos}       Solo apellidos
+    {dni}             Documento de identidad
+    {cargo}           Cargo / puesto
+    {area}            Área
+    {empresa}         Empresa
+    {fecha}           Fecha/hora de firma (zona horaria Lima)
+
+  El acta final se genera en PDF (A4) con estos datos + la firma dibujada +
+  la selfie de verificación facial + un pie de trazabilidad.
+-->
+<h2 style="text-align:center;color:#00366b;">COMPROMISO DE CUMPLIMIENTO EN SEGURIDAD Y SALUD EN EL TRABAJO</h2>
+
+<p>Yo, <strong>{nombreCompleto}</strong>, identificado(a) con DNI N° <strong>{dni}</strong>, en mi
+calidad de <strong>{cargo}</strong> del área de <strong>{area}</strong> de la empresa
+<strong>{empresa}</strong>, declaro haber recibido y comprendido la capacitación e inducción en
+materia de Seguridad y Salud en el Trabajo, y me <strong>comprometo</strong> a:</p>
+
+<ol>
+  <li>Cumplir las normas, procedimientos y estándares de seguridad establecidos por la empresa.</li>
+  <li>Utilizar de manera correcta y permanente los Equipos de Protección Personal (EPP) asignados.</li>
+  <li>Reportar de inmediato todo acto o condición insegura, incidente o accidente de trabajo.</li>
+  <li>Participar activamente en los programas de capacitación, simulacros y actividades preventivas.</li>
+  <li>No realizar trabajos para los cuales no me encuentre autorizado o capacitado.</li>
+  <li>Respetar la señalización, el bloqueo y etiquetado (LOTO) y los permisos de trabajo de alto riesgo.</li>
+</ol>
+
+<p>Declaro que asumo este compromiso de forma libre y voluntaria, entendiendo que su incumplimiento
+puede derivar en las medidas disciplinarias correspondientes conforme al Reglamento Interno de
+Seguridad y Salud en el Trabajo.</p>
+
+<p style="margin-top:16px;">Firmado en señal de conformidad el <strong>{fecha}</strong>.</p>

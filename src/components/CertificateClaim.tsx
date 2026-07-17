@@ -10,6 +10,8 @@ import html2pdf from 'html2pdf.js';
 import { saveCertificate } from '../services/sheetsService';
 import type { UserSession, AppDynamicConfig, UserProgress, QuizQuestion, LearnTopic } from '../types';
 import CertificateTemplate from './CertificateTemplate';
+import { useFaceCapture } from '../hooks/useFaceCapture';
+import { fetchDriveImageAsBase64 } from '../lib/driveImage';
 
 interface CertificateClaimProps {
   userSession: UserSession;
@@ -40,30 +42,21 @@ export default function CertificateClaim({
   // Data states
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [hasDrawn, setHasDrawn] = useState(false);
-  const [selfieData, setSelfieData] = useState<string | null>(null);
-  const [timestamp, setTimestamp] = useState<string>('');
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const [cameraSessionKey, setCameraSessionKey] = useState(0);
   const [certificateLogoSrc, setCertificateLogoSrc] = useState('');
   const [certificateSignatureSrc, setCertificateSignatureSrc] = useState('');
   const [nombre, setNombre] = useState(`${userSession.nombres} ${userSession.apellidos}`.trim());
   const [cargo, setCargo] = useState(userSession.cargo || '');
   const [celular, setCelular] = useState(userSession.celular || '');
 
-  // Face detection states
-  type FaceStatus = 'loading' | 'no_face' | 'too_close' | 'too_far' | 'off_center' | 'good';
-  const [faceStatus, setFaceStatus] = useState<FaceStatus>('loading');
-  const [stabilityProgress, setStabilityProgress] = useState(0);
-
-  // MediaPipe refs (CDN globals — typed as any)
-  const faceDetectionRef = useRef<any>(null);
-  const mediaCameraRef = useRef<any>(null);
-  const stabilityStartRef = useRef<number | null>(null);
+  // Captura facial (MediaPipe) encapsulada en un hook compartido
+  const {
+    faceStatus, stabilityProgress, selfieData, setIsCameraReady,
+    cameraSessionKey, timestamp, webcamRef, resetSelfie, restartCamera, onCameraReady,
+  } = useFaceCapture(step === 'selfie');
 
   // Refs
   const sigCanvas = useRef<SignatureCanvas>(null);
   const sigContainerRef = useRef<HTMLDivElement>(null);
-  const webcamRef = useRef<Webcam>(null);
   const certificateRef = useRef<HTMLDivElement>(null);
 
   // Resize canvas to match container pixel dimensions to fix coordinate offset
@@ -116,62 +109,11 @@ export default function CertificateClaim({
     }
   };
 
-  const cropAndSave = (imageSrc: string) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { setSelfieData(imageSrc); return; }
-      const targetAspect = 3 / 4;
-      const curAspect = img.width / img.height;
-      let sw: number, sh: number, sx: number, sy: number;
-      if (curAspect > targetAspect) {
-        sh = img.height; sw = sh * targetAspect;
-        sx = (img.width - sw) / 2; sy = 0;
-      } else {
-        sw = img.width; sh = sw / targetAspect;
-        sx = 0; sy = (img.height - sh) / 2;
-      }
-      canvas.width = 600; canvas.height = 800;
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 600, 800);
-      setSelfieData(canvas.toDataURL('image/jpeg', 0.95));
-      setTimestamp(new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' }));
-    };
-    img.src = imageSrc;
-  };
-
-  // Fetch any URL (Drive or otherwise) and return a base64 data URL for html2canvas compatibility
-  const fetchAsBase64 = async (rawUrl?: string | null): Promise<string> => {
-    const url = String(rawUrl || '').trim();
-    if (!url) return '';
-    if (url.startsWith('data:')) return url;
-
-    const idMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
-                    url.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
-                    url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    const proxyUrl = idMatch?.[1]
-      ? `https://images.weserv.nl/?url=lh3.googleusercontent.com/d/${idMatch[1]}`
-      : `https://images.weserv.nl/?url=${encodeURIComponent(url)}`;
-
-    try {
-      const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      return await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      return '';
-    }
-  };
-
   // Load branding assets as base64 so html2canvas can render them without CORS issues
   useEffect(() => {
     if (!appConfig) return;
-    fetchAsBase64(appConfig.logoCertificado).then(setCertificateLogoSrc);
-    fetchAsBase64(appConfig.firmaRepresentante).then(setCertificateSignatureSrc);
+    fetchDriveImageAsBase64(appConfig.logoCertificado).then(setCertificateLogoSrc);
+    fetchDriveImageAsBase64(appConfig.firmaRepresentante).then(setCertificateSignatureSrc);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appConfig]);
 
@@ -179,131 +121,6 @@ export default function CertificateClaim({
     // Assets are already base64 data URLs — no external loading needed
     await new Promise<void>(resolve => setTimeout(resolve, 300));
   };
-
-  // MediaPipe face detection — runs when on selfie step, stops when captured
-  useEffect(() => {
-    if (step !== 'selfie' || selfieData || !isCameraReady) return;
-
-    setFaceStatus('loading');
-    setStabilityProgress(0);
-    stabilityStartRef.current = null;
-    let isClosed = false;
-
-    const STABILITY_MS = 3000;
-    const PROXIMITY_MIN = 0.15;
-    const PROXIMITY_MAX = 0.75;
-
-    // Dynamically load MediaPipe scripts from CDN (packages are IIFE/window globals — not ESM)
-    const CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe';
-    const loadScript = (src: string): Promise<void> =>
-      new Promise((resolve, reject) => {
-        if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-        const el = document.createElement('script');
-        el.src = src;
-        el.crossOrigin = 'anonymous';
-        el.onload = () => resolve();
-        el.onerror = () => reject(new Error(`Failed to load: ${src}`));
-        document.head.appendChild(el);
-      });
-
-    Promise.all([
-      loadScript(`${CDN}/camera_utils/camera_utils.js`),
-      loadScript(`${CDN}/face_detection/face_detection.js`),
-    ]).then(() => {
-      if (isClosed) return;
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const W = window as any;
-      if (!W.FaceDetection || !W.Camera) {
-        console.error('MediaPipe globals not found after script load');
-        return;
-      }
-
-      const onResults = (results: { detections: Array<{ boundingBox: { width: number; xCenter: number; yCenter: number } }> }) => {
-        if (isClosed) return;
-
-        if (results.detections.length === 0) {
-          setFaceStatus('no_face');
-          setStabilityProgress(0);
-          stabilityStartRef.current = null;
-          return;
-        }
-
-        const { width, xCenter, yCenter } = results.detections[0].boundingBox;
-
-        if (width < PROXIMITY_MIN) {
-          setFaceStatus('too_far');
-          setStabilityProgress(0); stabilityStartRef.current = null; return;
-        }
-        if (width > PROXIMITY_MAX) {
-          setFaceStatus('too_close');
-          setStabilityProgress(0); stabilityStartRef.current = null; return;
-        }
-        const centered = xCenter > 0.25 && xCenter < 0.75 && yCenter > 0.2 && yCenter < 0.8;
-        if (!centered) {
-          setFaceStatus('off_center');
-          setStabilityProgress(0); stabilityStartRef.current = null; return;
-        }
-
-        // Face is good — run stability timer
-        setFaceStatus('good');
-        if (!stabilityStartRef.current) stabilityStartRef.current = Date.now();
-        const elapsed = Date.now() - stabilityStartRef.current;
-        const pct = Math.min((elapsed / STABILITY_MS) * 100, 100);
-        setStabilityProgress(pct);
-
-        if (pct >= 100) {
-          isClosed = true;
-          const imageSrc = webcamRef.current?.getScreenshot();
-          if (imageSrc) {
-            cropAndSave(imageSrc);
-          }
-          mediaCameraRef.current?.stop();
-          stabilityStartRef.current = null;
-          setStabilityProgress(0);
-        }
-      };
-
-      const fd = new W.FaceDetection({
-        locateFile: (file: string) => `${CDN}/face_detection/${file}`,
-      });
-      fd.setOptions({ model: 'short', minDetectionConfidence: 0.5 });
-      fd.onResults(onResults);
-      faceDetectionRef.current = fd;
-
-      const video = webcamRef.current?.video;
-      if (!video) {
-        setFaceStatus('loading');
-        return;
-      }
-
-      const cam = new W.Camera(video, {
-        onFrame: async () => {
-          if (!isClosed && webcamRef.current?.video) {
-            try { await fd.send({ image: webcamRef.current.video }); } catch { /* ignore */ }
-          }
-        },
-        width: 640, height: 480,
-      });
-      cam.start().then(() => { if (!isClosed) setFaceStatus('no_face'); });
-      mediaCameraRef.current = cam;
-    }).catch((err) => {
-      console.error('MediaPipe load error:', err);
-      setFaceStatus('no_face');
-    });
-
-    return () => {
-      isClosed = true;
-      mediaCameraRef.current?.stop();
-      faceDetectionRef.current?.close();
-      faceDetectionRef.current = null;
-      mediaCameraRef.current = null;
-      stabilityStartRef.current = null;
-      setStabilityProgress(0);
-      setFaceStatus('loading');
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, selfieData, isCameraReady]);
 
   const generateAndUpload = async () => {
     if (!topic?.id) {
@@ -558,7 +375,7 @@ export default function CertificateClaim({
               {selfieData && (
                 <div className="flex gap-2 mb-5">
                   <button
-                    onClick={() => { setSelfieData(null); setIsCameraReady(false); setCameraSessionKey((k) => k + 1); setFaceStatus('loading'); setStabilityProgress(0); setError(null); }}
+                    onClick={() => { resetSelfie(); setError(null); }}
                     className="flex-1 py-3 bg-slate-800/90 text-white rounded-xl font-black text-[10px] tracking-widest border-2 border-white/25 flex items-center justify-center gap-1.5 hover:bg-slate-700/90 hover:border-white/50 transition-all"
                   >
                     <RefreshCw className="w-3.5 h-3.5" /> REPETIR
@@ -617,8 +434,7 @@ export default function CertificateClaim({
                       ref={webcamRef}
                       screenshotFormat="image/jpeg"
                       onUserMedia={() => {
-                        setIsCameraReady(true);
-                        setFaceStatus('no_face');
+                        onCameraReady();
                         setError(null);
                       }}
                       onUserMediaError={(mediaError) => {
@@ -674,19 +490,7 @@ export default function CertificateClaim({
 
                   {/* Retry / instructions */}
                   <button
-                    onClick={() => {
-                      mediaCameraRef.current?.stop();
-                      faceDetectionRef.current?.close();
-                      faceDetectionRef.current = null;
-                      mediaCameraRef.current = null;
-                      stabilityStartRef.current = null;
-                      setIsCameraReady(false);
-                      setCameraSessionKey((currentKey) => currentKey + 1);
-                      setStabilityProgress(0);
-                      setFaceStatus('loading');
-                      // Setting selfieData to null triggers useEffect re-run
-                      setSelfieData(null);
-                    }}
+                    onClick={restartCamera}
                     className="w-full py-3 bg-slate-800 text-slate-300 rounded-xl font-black text-[10px] tracking-widest border border-white/5 flex items-center justify-center gap-2 hover:bg-slate-700 transition-all"
                   >
                     <RefreshCw className="w-3.5 h-3.5" /> REINICIAR CÁMARA

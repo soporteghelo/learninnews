@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   BookOpen, CheckCircle, Award,
   ChevronRight, TrendingUp, Clock,
-  ExternalLink, MessageCircle
+  ExternalLink, MessageCircle, FileSignature
 } from 'lucide-react';
 import { APP_CONFIG, AUDIENCE_CONFIG } from '../config/app.config';
 import type { LearnTopic, DataChunk, QuizQuestion, UserProgress, AudienceType } from '../types';
@@ -34,6 +34,9 @@ interface DashboardProps {
   onChangeAudience: () => void;
   onOpenAdmin: () => void;
   onClaimCertificate: (topic: LearnTopic) => void;
+  onOpenActas?: () => void;
+  actasPendientes?: number;
+  actasAsignadas?: number;
   userSession: any;
   darkMode?: boolean;
 }
@@ -47,6 +50,9 @@ export default function Dashboard({
   onSelectTopic,
   onOpenAdmin,
   onClaimCertificate,
+  onOpenActas,
+  actasPendientes = 0,
+  actasAsignadas = 0,
   userSession,
   darkMode = true,
 }: DashboardProps) {
@@ -138,6 +144,40 @@ export default function Dashboard({
       </motion.header>
 
       <div className="max-w-6xl mx-auto px-4 py-6 sm:px-8 space-y-8">
+        {/* Actas y Compromisos — visible siempre que el usuario tenga documentos asignados,
+            sin importar su avance en los cursos. Se muestra al inicio para que no pase desapercibido. */}
+        {onOpenActas && actasAsignadas > 0 && (
+          <motion.button
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            whileTap={{ scale: 0.99 }}
+            onClick={onOpenActas}
+            className={`w-full glass-card rounded-2xl p-4 text-left border transition-all flex items-center gap-3 group ${
+              actasPendientes > 0 ? 'border-amber-500/30 hover:border-amber-500/50' : 'border-emerald-500/20 hover:border-emerald-500/40'
+            }`}
+          >
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 border ${
+              actasPendientes > 0 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-emerald-500/10 border-emerald-500/20'
+            }`}>
+              <FileSignature className={`w-5 h-5 ${actasPendientes > 0 ? 'text-amber-400' : 'text-emerald-400'}`} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-bold text-sm">Actas y Compromisos</p>
+              <p className="text-slate-400 text-xs">
+                {actasPendientes > 0
+                  ? `${actasPendientes} documento${actasPendientes > 1 ? 's' : ''} por firmar`
+                  : 'Todos tus documentos están firmados'}
+              </p>
+            </div>
+            {actasPendientes > 0 && (
+              <span className="flex-shrink-0 min-w-[26px] h-[26px] px-2 rounded-full bg-amber-500 text-slate-950 text-xs font-black flex items-center justify-center">
+                {actasPendientes}
+              </span>
+            )}
+            <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-white transition-colors flex-shrink-0" />
+          </motion.button>
+        )}
+
         {/* Stats */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -164,7 +204,6 @@ export default function Dashboard({
             <p className="text-[9px] text-slate-500 font-bold tracking-widest mt-0.5">{totalApproved}/{filteredTopics.length}</p>
           </div>
         </motion.div>
-
 
         {/* Section title */}
         <div>

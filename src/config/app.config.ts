@@ -12,7 +12,7 @@ const APPS_SCRIPT_URL = (import.meta as any).env?.VITE_APPS_SCRIPT_URL || '';
 // 2. SHEETS_CONFIG - Google Sheets como BD
 // =============================================
 export const SHEETS_CONFIG = {
-  sheetId: '1fXcrk-6YSA5NcgDbCBinu4WaPpyJMRK0og6miVE8ZZw',
+  sheetId: '1tKXR0sRb3jZYFrQ8WUVjB3hhIpx1_qbQYfAjJIPPgTA',
   sheets: {
     learn: 'LEARN',
     data: 'DATA',
@@ -22,6 +22,8 @@ export const SHEETS_CONFIG = {
     certificates: 'CERTIFICADOS',
     shortEvals: 'SHORT_EVALUACIONES',
     shortResults: 'SHORT_RESULTADOS',
+    actasDocs: 'ACTAS_DOCUMENTOS',
+    actasFirmas: 'ACTAS_FIRMAS',
   },
   useMockDataOnError: true,
 } as const;

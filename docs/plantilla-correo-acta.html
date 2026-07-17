@@ -1,0 +1,38 @@
+<!--
+  PLANTILLA HTML DEL CORREO DE ENTREGA DEL ACTA FIRMADA
+  =====================================================
+  Referencia visual de la plantilla que envía el backend (Apps Script) tras firmar.
+  La versión ejecutable vive en google-apps-script/Code.gs → buildActaEmailHtml(r).
+  El correo se envía con MailApp.sendEmail adjuntando:
+    - El ACTA firmada en PDF (generada en el cliente).
+    - El documento digital de Drive (DriveDocUrl), si el documento lo tiene.
+
+  Marcadores usados por buildActaEmailHtml:
+    {{nombre}}             Apellidos y nombres del firmante
+    {{documento_titulo}}   Título del documento/compromiso
+    {{dni}}                DNI del firmante
+    {{fecha}}              Fecha/hora de la firma
+    {{pdf_url}}            Enlace al PDF del acta en Drive
+-->
+<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;background:#f4f6f8;padding:24px;">
+  <div style="background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e1e3e4;">
+    <div style="background:linear-gradient(135deg,#00366b,#1b4d89);padding:28px 24px;text-align:center;">
+      <div style="font-size:13px;letter-spacing:2px;color:#9dc0e8;font-weight:bold;text-transform:uppercase;">Constancia de firma</div>
+      <div style="font-size:22px;color:#ffffff;font-weight:bold;margin-top:6px;">Acta de Entrega / Compromiso</div>
+    </div>
+    <div style="padding:28px 28px 8px 28px;color:#333;">
+      <p style="font-size:15px;margin:0 0 12px 0;">Estimado(a) <strong>{{nombre}}</strong>,</p>
+      <p style="font-size:14px;line-height:1.6;margin:0 0 16px 0;">Confirmamos que ha firmado correctamente el siguiente documento. Adjuntamos a este correo el acta firmada en formato PDF para tus registros.</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0 20px 0;">
+        <tr><td style="padding:8px 0;color:#737781;width:130px;">Documento</td><td style="padding:8px 0;color:#191c1d;font-weight:bold;">{{documento_titulo}}</td></tr>
+        <tr><td style="padding:8px 0;color:#737781;">DNI</td><td style="padding:8px 0;color:#191c1d;">{{dni}}</td></tr>
+        <tr><td style="padding:8px 0;color:#737781;">Fecha de firma</td><td style="padding:8px 0;color:#191c1d;">{{fecha}}</td></tr>
+      </table>
+      <div style="text-align:center;margin:8px 0 20px 0;">
+        <a href="{{pdf_url}}" style="display:inline-block;background:#1b4d89;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 26px;border-radius:10px;">Ver acta en línea</a>
+      </div>
+      <p style="font-size:12px;color:#9aa0a6;line-height:1.6;margin:16px 0 0 0;border-top:1px solid #eef0f2;padding-top:16px;">Este es un mensaje automático generado tras la firma con verificación facial. Si no reconoces esta actividad, comunícate con el área de Seguridad y Salud en el Trabajo.</p>
+    </div>
+    <div style="background:#f8f9fa;padding:16px 24px;text-align:center;font-size:11px;color:#9aa0a6;">Capacitaciones SST &middot; Plataforma de aprendizaje corporativo</div>
+  </div>
+</div>
