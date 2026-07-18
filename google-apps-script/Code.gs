@@ -43,6 +43,7 @@ const PROJECT_ROOT_FOLDER_ID = '1bi_81jpB1fEYVE8qnPjOT5wLxCH03zmy';
 // Nombres de las subcarpetas dentro de la raíz (no son IDs; se resuelven por nombre).
 const CERT_FOLDER_NAME  = 'CERTIFICADOS';
 const ACTAS_FOLDER_NAME = 'ACTAS';
+const USUARIOS_FOLDER_NAME = 'USUARIOS';
 
 /** Carpeta raíz del proyecto en Drive (único ID de carpeta del proyecto). */
 function getRootFolder_() {
@@ -55,6 +56,10 @@ function getCertFolder_() {
 /** Subcarpeta ACTAS dentro de la raíz (se detecta o se crea). */
 function getActasFolder_() {
   return getOrCreateSubFolder(getRootFolder_(), ACTAS_FOLDER_NAME);
+}
+/** Subcarpeta USUARIOS dentro de la raíz (firma+selfie de la autorización de onboarding, por DNI). */
+function getUsuariosFolder_() {
+  return getOrCreateSubFolder(getRootFolder_(), USUARIOS_FOLDER_NAME);
 }
 /** Devuelve una subcarpeta por nombre SIN crearla (null si no existe). */
 function findSubFolder_(parent, name) {
@@ -139,6 +144,10 @@ function ejecutarDiagnostico() {
         'Aún no existe; se crea sola al firmar la primera acta (o con "Crear carpetas y hojas").');
     }
 
+    var usuarios = findSubFolder_(root, USUARIOS_FOLDER_NAME);
+    add('usuarios_folder', 'Subcarpeta ' + USUARIOS_FOLDER_NAME, usuarios ? 'ok' : 'warn',
+      usuarios ? usuarios.getId() : 'Aún no existe; se crea sola al registrar la primera autorización de firma digital.');
+
     // 5) Permiso de escritura en Drive (crea y borra un archivo de prueba)
     try {
       var tmp = root.createFile('__diagnostico__' + Date.now() + '.txt', 'ok', MimeType.PLAIN_TEXT);
@@ -214,6 +223,8 @@ function doPost(e) {
       return updateIngreso(sheet, data.ingreso);
     } else if (data.action === 'updateUserProfile') {
       return updateUserProfile(ss, data);
+    } else if (data.action === 'updateConfig') {
+      return updateConfig(ss, data);
     } else if (data.action === 'saveCertificate') {
       return saveCertificate(ss, data);
     } else if (data.action === 'upsertTopic') {
@@ -240,6 +251,8 @@ function doPost(e) {
       return deleteActaDocumento(ss, data);
     } else if (data.action === 'saveActaFirma') {
       return saveActaFirma(ss, data);
+    } else if (data.action === 'saveOnboardingConsent') {
+      return saveOnboardingConsent(ss, data);
     } else if (data.action === 'resendActaCorreo') {
       return resendActaCorreo(ss, data);
     } else if (data.action === 'diagnostico') {
@@ -509,26 +522,36 @@ function deleteTopic(sheet, topicIds) {
   return createResponse({ status: 'ok', message: 'Temas eliminados correctamente' });
 }
 
+/**
+ * Busca la fila de un DNI/Id en INGRESOS sin leer la hoja completa: usa TextFinder
+ * acotado a la columna DNI (1 sola columna, no las ~28 de la hoja), que además se
+ * resuelve del lado del servicio de Sheets en vez de traer todo a memoria de Apps
+ * Script. Devuelve el número de fila (1-based) o -1 si no existe.
+ */
+function findIngresoRow_(sheet, colMap, searchKey) {
+  if (!searchKey || sheet.getLastRow() < 2) return -1;
+  var dniColIdx = colMap['DNI'] !== undefined ? colMap['DNI'] : colMap['Id'];
+  if (dniColIdx === undefined) return -1;
+  var range = sheet.getRange(2, dniColIdx + 1, sheet.getLastRow() - 1, 1);
+  var found = range.createTextFinder(String(searchKey)).matchEntireCell(true).findNext();
+  return found ? found.getRow() : -1;
+}
+
 function registerIngreso(sheet, ingreso) {
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var colMap = {};
   headers.forEach(function(h, i) { colMap[h] = i; });
 
-  var rowIndex = -1;
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][colMap['DNI']] || data[i][colMap['Id']] || '') === String(ingreso.DNI || ingreso.Id)) {
-      rowIndex = i + 1;
-      break;
-    }
-  }
+  var rowIndex = findIngresoRow_(sheet, colMap, ingreso.DNI || ingreso.Id);
+  var existingRow = rowIndex !== -1 ? sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0] : null;
 
   var rowData = [];
-  headers.forEach(function(h) {
-    if (rowIndex !== -1 && (h === 'ProgressJSON' || h === 'Avance' || h === 'Nota' || h === 'ModulosCompletados' || h === 'IntentosQuiz' || h === 'TiempoTotal')) {
-      rowData.push(data[rowIndex - 1][colMap[h]] || (ingreso[h] !== undefined ? ingreso[h] : ''));
+  headers.forEach(function(h, i) {
+    if (existingRow && (h === 'ProgressJSON' || h === 'Avance' || h === 'Nota' || h === 'ModulosCompletados' || h === 'IntentosQuiz' || h === 'TiempoTotal')) {
+      rowData.push(existingRow[i] || (ingreso[h] !== undefined ? ingreso[h] : ''));
     } else {
-      rowData.push(ingreso[h] !== undefined ? ingreso[h] : (rowIndex !== -1 ? data[rowIndex - 1][colMap[h]] || '' : ''));
+      rowData.push(ingreso[h] !== undefined ? ingreso[h] : (existingRow ? existingRow[i] || '' : ''));
     }
   });
 
@@ -542,23 +565,21 @@ function registerIngreso(sheet, ingreso) {
 }
 
 function updateIngreso(sheet, ingreso) {
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var colMap = {};
   headers.forEach(function(h, i) { colMap[h] = i; });
 
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][colMap['DNI']] || data[i][colMap['Id']] || '') === String(ingreso.DNI || ingreso.Id)) {
-      var fieldsToUpdate = ['Avance', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON'];
-      fieldsToUpdate.forEach(function(field) {
-        if (ingreso[field] !== undefined && ingreso[field] !== '' && colMap[field] !== undefined) {
-          sheet.getRange(i + 1, colMap[field] + 1).setValue(ingreso[field]);
-        }
-      });
-      return createResponse({ status: 'ok', message: 'Progreso actualizado' });
+  var rowIndex = findIngresoRow_(sheet, colMap, ingreso.DNI || ingreso.Id);
+  if (rowIndex === -1) return createResponse({ status: 'error', message: 'No se encontró el registro' });
+
+  var fieldsToUpdate = ['Avance', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON'];
+  fieldsToUpdate.forEach(function(field) {
+    if (ingreso[field] !== undefined && ingreso[field] !== '' && colMap[field] !== undefined) {
+      sheet.getRange(rowIndex, colMap[field] + 1).setValue(ingreso[field]);
     }
-  }
-  return createResponse({ status: 'error', message: 'No se encontró el registro' });
+  });
+  return createResponse({ status: 'ok', message: 'Progreso actualizado' });
 }
 
 /**
@@ -574,26 +595,26 @@ function updateUserProfile(ss, data) {
 
   var sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
   if (!sheet) return createResponse({ status: 'error', message: 'Hoja INGRESOS no encontrada' });
+  if (sheet.getLastRow() < 2) return createResponse({ status: 'error', message: 'No se encontró ningún usuario con el DNI ' + dni });
 
-  var sheetData = sheet.getDataRange().getValues();
-  var headers = sheetData[0];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var colMap = {};
   headers.forEach(function(h, i) { colMap[h] = i; });
   var dniCol = getHeaderIndex(headers, ['DNI', 'Id']);
   if (dniCol === -1) return createResponse({ status: 'error', message: 'Columna DNI no encontrada' });
 
-  var rowIndex = -1;
-  for (var i = 1; i < sheetData.length; i++) {
-    if (String(sheetData[i][dniCol] || '').trim() === dni) { rowIndex = i + 1; break; }
-  }
-  if (rowIndex === -1) return createResponse({ status: 'error', message: 'No se encontró ningún usuario con el DNI ' + dni });
+  // Búsqueda acotada a la columna DNI (no toda la hoja) vía TextFinder.
+  var dniRange = sheet.getRange(2, dniCol + 1, sheet.getLastRow() - 1, 1);
+  var found = dniRange.createTextFinder(dni).matchEntireCell(true).findNext();
+  if (!found) return createResponse({ status: 'error', message: 'No se encontró ningún usuario con el DNI ' + dni });
+  var rowIndex = found.getRow();
 
   var nuevoDni = data.nuevoDni ? String(data.nuevoDni).trim() : '';
   if (nuevoDni && nuevoDni !== dni) {
-    for (var j = 1; j < sheetData.length; j++) {
-      if (j + 1 !== rowIndex && String(sheetData[j][dniCol] || '').trim() === nuevoDni) {
-        return createResponse({ status: 'error', message: 'Ya existe otro usuario registrado con el DNI ' + nuevoDni });
-      }
+    var dupe = dniRange.createTextFinder(nuevoDni).matchEntireCell(true).findNext();
+    if (dupe && dupe.getRow() !== rowIndex) {
+      return createResponse({ status: 'error', message: 'Ya existe otro usuario registrado con el DNI ' + nuevoDni });
     }
   }
 
@@ -629,6 +650,34 @@ function migrateDniAcrossSheets_(ss, oldDni, newDni) {
       }
     }
   });
+}
+
+/**
+ * Actualiza la fila única de configuración dinámica de la app (hoja CONFIG).
+ * Solo escribe los campos presentes en `data`; crea columnas que falten
+ * (p.ej. si la hoja aún no tiene "Mensaje") sin tocar columnas ajenas como "Id".
+ */
+function updateConfig(ss, data) {
+  var sheet = ss.getSheetByName('CONFIG');
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja CONFIG no encontrada' });
+  if (sheet.getLastRow() < 2) sheet.appendRow(['']);
+
+  var fieldToHeader = {
+    title: 'Titulo', message: 'Mensaje', contact: 'Contacto', adminPass: 'PassAdmin',
+    status: 'Estatus', logoCertificado: 'LogoCertificado', firmaRepresentante: 'FirmaRepresentante',
+    nombreRepresentante: 'NombreRepresentante', cargoRepresentante: 'CargoRepresentante',
+    lugar: 'Lugar', contratista: 'Contratista', tutorialUrl: 'Tutorial', actasHabilitado: 'Actas'
+  };
+
+  Object.keys(fieldToHeader).forEach(function (field) {
+    if (data[field] === undefined) return;
+    var col = getOrCreateColumn(sheet, fieldToHeader[field]);
+    var value = field === 'actasHabilitado' ? (data[field] ? 'TRUE' : 'FALSE') : String(data[field]);
+    sheet.getRange(2, col + 1).setValue(value);
+  });
+
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Configuración actualizada correctamente' });
 }
 
 function saveCertificate(ss, data) {
@@ -959,7 +1008,7 @@ function deleteShortEvalResult(ss, data) {
 // =============================================
 
 var ACTAS_DOCS_HEADERS = ['Id', 'Titulo', 'Descripcion', 'Perfiles', 'DnisAsignados', 'CuerpoHtml', 'Items', 'DriveDocUrl', 'RequiereFirmaDibujada', 'Activo', 'FechaCreacion'];
-var ACTAS_FIRMAS_HEADERS = ['Id', 'DocumentoId', 'DocumentoTitulo', 'DNI', 'Apellidos', 'Nombres', 'Cargo', 'Area', 'Empresa', 'Correo', 'FechaFirma', 'ActaPdfUrl', 'SelfieUrl', 'FirmaUrl', 'CorreoEnviado', 'Dispositivo'];
+var ACTAS_FIRMAS_HEADERS = ['Id', 'DocumentoId', 'DocumentoTitulo', 'DNI', 'Apellidos', 'Nombres', 'Cargo', 'Area', 'Empresa', 'Correo', 'FechaFirma', 'ActaPdfUrl', 'SelfieUrl', 'FirmaUrl', 'FirmaAsistenciaUrl', 'CorreoEnviado', 'Dispositivo'];
 
 function upsertActaDocumento(ss, data) {
   var sheet = getOrCreateSheetWithHeaders(ss, ACTAS_DOCS_SHEET_NAME, ACTAS_DOCS_HEADERS);
@@ -1023,6 +1072,8 @@ function saveActaFirma(ss, data) {
     if (!data.documentoId) return createResponse({ status: 'error', message: 'Documento requerido' });
 
     var sheet = getOrCreateSheetWithHeaders(ss, ACTAS_FIRMAS_SHEET_NAME, ACTAS_FIRMAS_HEADERS);
+    // Asegura la columna en hojas creadas antes de esta versión
+    getOrCreateColumn(sheet, 'FirmaAsistenciaUrl');
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
     // Anti-duplicado por DocumentoId + DNI
@@ -1078,6 +1129,15 @@ function saveActaFirma(ss, data) {
       firmaFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       firmaUrl = firmaFile.getUrl();
     }
+    // Firma adicional solo si el acta incluye alguna capacitación (Lista de Asistencia)
+    var firmaAsistenciaUrl = '';
+    if (data.firmaAsistenciaBase64) {
+      var rawFirmaAsis = data.firmaAsistenciaBase64.includes(',') ? data.firmaAsistenciaBase64.split(',')[1] : data.firmaAsistenciaBase64;
+      var firmaAsisBlob = Utilities.newBlob(Utilities.base64Decode(rawFirmaAsis), 'image/png', dni + '_' + slug + '_FIRMA_ASISTENCIA_' + docId + '.png');
+      var firmaAsisFile = dniFolder.createFile(firmaAsisBlob);
+      firmaAsisFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      firmaAsistenciaUrl = firmaAsisFile.getUrl();
+    }
 
     // 3. Enviar correo con acta adjunta + documento digital de Drive (si existe)
     var correoEnviado = 'NO';
@@ -1123,12 +1183,110 @@ function saveActaFirma(ss, data) {
       ActaPdfUrl: pdfUrl,
       SelfieUrl: selfieUrl,
       FirmaUrl: firmaUrl,
+      FirmaAsistenciaUrl: firmaAsistenciaUrl,
       CorreoEnviado: correoEnviado,
       Dispositivo: String(data.dispositivo || '').trim()
     });
     sheet.appendRow(rowData);
     SpreadsheetApp.flush();
     return createResponse({ status: 'ok', url: pdfUrl, correoEnviado: correoEnviado });
+  } catch (err) {
+    return createResponse({ status: 'error', message: err.toString() });
+  }
+}
+
+/**
+ * Autorización de firma digital del onboarding (se pide una sola vez, luego de
+ * completar el perfil, antes de poder usar el resto de la app). Sube la firma
+ * dibujada, la selfie de verificación y la constancia en PDF a
+ * <RAÍZ>/USUARIOS/<DNI>/, y guarda los enlaces en INGRESOS: FOTOGRAFIA (firma)
+ * y SELFIE. Si la fila del trabajador todavía no existe (el onboarding aún no
+ * llega a 'registerIngreso'), la crea reusando registerIngreso().
+ */
+function saveOnboardingConsent(ss, data) {
+  try {
+    if (!data.dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+    var dni = String(data.dni).trim();
+    var now = new Date();
+
+    var sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
+    if (!sheet) return createResponse({ status: 'error', message: 'Hoja INGRESOS no encontrada' });
+
+    // Asegura que exista la fila del trabajador (mismo upsert que la acción 'registerIngreso';
+    // preserva Avance/Nota/ProgressJSON si la fila ya existía).
+    registerIngreso(sheet, {
+      Id: dni + '-' + now.getTime(),
+      Apellidos: data.apellidos || '',
+      Nombres: data.nombres || '',
+      DNI: dni,
+      Inicio: nowPeruString(),
+      Avance: '0%',
+      Publico: '',
+      Nota: '',
+      UltimoAcceso: nowPeruString(),
+      Dispositivo: '',
+      ModulosCompletados: '0',
+      IntentosQuiz: '0',
+      TiempoTotal: '0 min',
+      ProgressJSON: '[]',
+      EMPRESA: data.empresa || '',
+      AREA: data.area || '',
+      CARGO: data.cargo || '',
+      FECHA_INGRESO: data.fechaIngreso || '',
+      FECHA_NACIMIENTO: data.fechaNacimiento || '',
+      CORREO: data.correo || '',
+      CELULAR: data.celular || '',
+      NUMERO_CONTACTO_1: data.contacto1Numero || '',
+      PARENTESCO_CONTACTO_1: data.contacto1Parentesco || '',
+      NUMERO_CONTACTO_2: data.contacto2Numero || '',
+      PARENTESCO_CONTACTO_2: data.contacto2Parentesco || ''
+    });
+
+    var dniFolder = getOrCreateSubFolder(getUsuariosFolder_(), dni);
+
+    var firmaUrl = '';
+    if (data.signatureBase64) {
+      var rawFirma = data.signatureBase64.includes(',') ? data.signatureBase64.split(',')[1] : data.signatureBase64;
+      var firmaBlob = Utilities.newBlob(Utilities.base64Decode(rawFirma), 'image/png', dni + '_FIRMA_CONSENTIMIENTO_' + now.getTime() + '.png');
+      var firmaFile = dniFolder.createFile(firmaBlob);
+      firmaFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      firmaUrl = firmaFile.getUrl();
+    }
+
+    var selfieUrl = '';
+    if (data.selfieBase64) {
+      var rawSelfie = data.selfieBase64.includes(',') ? data.selfieBase64.split(',')[1] : data.selfieBase64;
+      var selfieBlob = Utilities.newBlob(Utilities.base64Decode(rawSelfie), 'image/jpeg', dni + '_SELFIE_CONSENTIMIENTO_' + now.getTime() + '.jpg');
+      var selfieFile = dniFolder.createFile(selfieBlob);
+      selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      selfieUrl = selfieFile.getUrl();
+    }
+
+    var pdfUrl = '';
+    if (data.pdfBase64) {
+      var rawPdf = data.pdfBase64.includes(',') ? data.pdfBase64.split(',')[1] : data.pdfBase64;
+      var pdfBlob = Utilities.newBlob(Utilities.base64Decode(rawPdf), 'application/pdf', dni + '_CONSTANCIA_FIRMA_' + now.getTime() + '.pdf');
+      var pdfFile = dniFolder.createFile(pdfBlob);
+      pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      pdfUrl = pdfFile.getUrl();
+    }
+
+    // Escribir enlaces en INGRESOS: FOTOGRAFIA (firma) y SELFIE
+    var ingData = sheet.getDataRange().getValues();
+    var headers = ingData[0];
+    var dniCol = headers.indexOf('DNI') !== -1 ? headers.indexOf('DNI') : headers.indexOf('Id');
+    var fotoCol = getOrCreateColumn(sheet, 'FOTOGRAFIA');
+    var selfieCol = getOrCreateColumn(sheet, 'SELFIE');
+    for (var i = 1; i < ingData.length; i++) {
+      if (String(ingData[i][dniCol] || '').trim() === dni) {
+        if (firmaUrl) sheet.getRange(i + 1, fotoCol + 1).setValue(firmaUrl);
+        if (selfieUrl) sheet.getRange(i + 1, selfieCol + 1).setValue(selfieUrl);
+        break;
+      }
+    }
+
+    SpreadsheetApp.flush();
+    return createResponse({ status: 'ok', firmaUrl: firmaUrl, selfieUrl: selfieUrl, pdfUrl: pdfUrl });
   } catch (err) {
     return createResponse({ status: 'error', message: err.toString() });
   }
@@ -1294,6 +1452,7 @@ function crearEstructuraProyecto() {
   var actasFolder = getOrCreateSubFolder(root, ACTAS_FOLDER_NAME);
   getOrCreateSubFolder(actasFolder, 'DOCUMENTOS');
   getOrCreateSubFolder(actasFolder, 'DOC_ENTREGAS');
+  var usuariosFolder = getOrCreateSubFolder(root, USUARIOS_FOLDER_NAME);
 
   // 3) Hojas: se crean con cabeceras solo si faltan; las ya existentes NO se tocan
   var defs = getSheetDefinitions();
@@ -1310,6 +1469,7 @@ function crearEstructuraProyecto() {
     'PROJECT_ROOT_FOLDER_ID': root.getId(),
     'CERT_FOLDER_ID': certFolder.getId(),
     'ACTAS_FOLDER_ID': actasFolder.getId(),
+    'USUARIOS_FOLDER_ID': usuariosFolder.getId(),
     'SPREADSHEET_ID': ss.getId()
   };
   writeSystemConfig_(ss, kv);
@@ -1341,7 +1501,7 @@ function getSheetDefinitions() {
     'LEARN': ['Id', 'Titulo', 'Publico', 'Detalles', 'Resumen', 'PuntosClave', 'Orden', 'Activo'],
     'DATA': ['Cod', 'IdMain', 'Tema', 'Contenido', 'Video_1', 'Video_2', 'Video_3', 'ComentarioVideo', 'PDF', 'Contexto', 'Orden'],
     'QUIZ': ['IdQuiz', 'IdMain', 'Pregunta', 'OpcionA', 'OpcionB', 'OpcionC', 'OpcionD', 'RespuestaCorrecta', 'Explicacion', 'Dificultad', 'Categoria_contenido'],
-    'INGRESOS': ['Id', 'Apellidos', 'Nombres', 'DNI', 'Inicio', 'Avance', 'Publico', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON', 'CertificadoUrl', 'EMPRESA', 'AREA', 'CARGO', 'FECHA_INGRESO', 'FECHA_NACIMIENTO', 'CORREO', 'CELULAR', 'NUMERO_CONTACTO_1', 'PARENTESCO_CONTACTO_1', 'NUMERO_CONTACTO_2', 'PARENTESCO_CONTACTO_2'],
+    'INGRESOS': ['Id', 'Apellidos', 'Nombres', 'DNI', 'Inicio', 'Avance', 'Publico', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON', 'CertificadoUrl', 'EMPRESA', 'AREA', 'CARGO', 'FOTOGRAFIA', 'SELFIE', 'FECHA_INGRESO', 'FECHA_NACIMIENTO', 'CORREO', 'CELULAR', 'NUMERO_CONTACTO_1', 'PARENTESCO_CONTACTO_1', 'NUMERO_CONTACTO_2', 'PARENTESCO_CONTACTO_2'],
     'CONFIG': ['Titulo', 'Mensaje', 'Contacto', 'PassAdmin', 'Estatus', 'LogoCertificado', 'FirmaRepresentante', 'NombreRepresentante', 'CargoRepresentante', 'Lugar', 'Contratista', 'Tutorial', 'Actas'],
     'CERTIFICADOS': ['Id', 'DNI', 'APELLIDOS', 'NOMBRES', 'CARGO', 'NOTA', 'CELULAR', 'FOTO', 'TITULO_CERTIFICADO', 'LinkCertificado', 'Fecha', 'FIRMA', 'TopicId'],
     'SHORT_EVALUACIONES': SHORT_EVALS_HEADERS,
@@ -1374,6 +1534,7 @@ function writeSystemConfig_(ss, kv) {
     'PROJECT_ROOT_FOLDER_ID': 'Carpeta raíz del proyecto en Drive',
     'CERT_FOLDER_ID': 'Carpeta de certificados emitidos',
     'ACTAS_FOLDER_ID': 'Carpeta de actas / entrega de documentos',
+    'USUARIOS_FOLDER_ID': 'Carpeta de firma+selfie de autorización (onboarding), por DNI',
     'SPREADSHEET_ID': 'ID de esta hoja de cálculo'
   };
   var data = sheet.getDataRange().getValues();

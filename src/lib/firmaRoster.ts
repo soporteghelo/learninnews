@@ -16,6 +16,7 @@ export interface FirmaRosterRow {
   area: string;
   empresa: string;
   correo: string;
+  inicio: string;
   firma?: ActaFirma;
 }
 
@@ -28,6 +29,7 @@ interface RosterIngreso {
   empresa?: string;
   correo?: string;
   publico?: string;
+  inicio?: string;
 }
 
 function buildRosterForAssignment(
@@ -53,6 +55,7 @@ function buildRosterForAssignment(
     roster.set(dni, {
       dni, nombre: `${r.apellidos} ${r.nombres}`.trim(), apellidos: r.apellidos, nombres: r.nombres,
       cargo: r.cargo || '', area: r.area || '', empresa: r.empresa || '', correo: r.correo || '',
+      inicio: r.inicio || '',
       firma: firmaByDni.get(dni),
     });
   };
@@ -73,13 +76,13 @@ function buildRosterForAssignment(
     const f = firmaByDni.get(d);
     roster.set(d, {
       dni: d, nombre: f ? `${f.apellidos} ${f.nombres}`.trim() : d, apellidos: f?.apellidos || '', nombres: f?.nombres || '',
-      cargo: f?.cargo || '', area: f?.area || '', empresa: f?.empresa || '', correo: f?.correo || '', firma: f,
+      cargo: f?.cargo || '', area: f?.area || '', empresa: f?.empresa || '', correo: f?.correo || '', inicio: '', firma: f,
     });
   });
   // Firmas de personas ya no asignadas (se conservan)
   firmasDoc.forEach(f => {
     const d = String(f.dni).trim();
-    if (!roster.has(d)) roster.set(d, { dni: d, nombre: `${f.apellidos} ${f.nombres}`.trim(), apellidos: f.apellidos, nombres: f.nombres, cargo: f.cargo, area: f.area, empresa: f.empresa, correo: f.correo, firma: f });
+    if (!roster.has(d)) roster.set(d, { dni: d, nombre: `${f.apellidos} ${f.nombres}`.trim(), apellidos: f.apellidos, nombres: f.nombres, cargo: f.cargo, area: f.area, empresa: f.empresa, correo: f.correo, inicio: '', firma: f });
   });
   return Array.from(roster.values());
 }

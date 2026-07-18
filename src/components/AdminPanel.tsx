@@ -10,7 +10,7 @@ import {
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
   Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
   ClipboardCheck, ClipboardList, ExternalLink, ToggleLeft, ToggleRight, Globe, ArrowUpDown, ArrowUp, ArrowDown,
-  FileSignature, Mail, Send, X, Menu, PanelLeftClose
+  FileSignature, Mail, Send, X, Menu, PanelLeftClose, GraduationCap
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG, getPublicBaseUrl } from '../config/app.config';
 import {
@@ -18,7 +18,7 @@ import {
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile,
+  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, updateAppDynamicConfig,
   fetchShortEvals, createShortEval, updateShortEvalStatus, deleteShortEval, fetchAllShortResults,
   deleteShortEvalResult,
   fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo,
@@ -36,6 +36,7 @@ import { BarChart, Donut, ProgressBar } from './AdminCharts';
 import html2pdf from 'html2pdf.js';
 import { fetchDriveImageAsBase64 } from '../lib/driveImage';
 import ActaDistribucionTemplate, { type DistribucionRow } from './ActaDistribucionTemplate';
+import ActaAsistenciaTemplate, { type AsistenciaRow } from './ActaAsistenciaTemplate';
 import { useQrDataUrl } from '../hooks/useQrDataUrl';
 import DiagnosticoPanel, { DiagnosticoButton } from './DiagnosticoPanel';
 
@@ -91,6 +92,7 @@ interface AdminPanelProps {
   onRefreshData: () => Promise<void> | void;
   adminPass?: string;
   appConfig?: AppDynamicConfig | null;
+  onConfigUpdate?: (config: AppDynamicConfig) => void;
 }
 
 export default function AdminPanel({
@@ -101,6 +103,7 @@ export default function AdminPanel({
   onRefreshData,
   adminPass,
   appConfig,
+  onConfigUpdate,
 }: AdminPanelProps) {
   // Auth
   const [isAuthenticated, setIsAuthenticated] = useState(() => sessionStorage.getItem(ADMIN_AUTH_KEY) === 'true');
@@ -123,6 +126,41 @@ export default function AdminPanel({
       setDraftTopics(topics.map(t => ({...t, _status: 'unchanged'})));
     }
   }, [topics]);
+
+  // Configuración dinámica (formulario de un solo registro, hoja CONFIG)
+  const [configDraft, setConfigDraft] = useState<AppDynamicConfig>(
+    appConfig ?? { title: '', message: '', contact: '', adminPass: '', status: 'Activo' }
+  );
+  const [configDirty, setConfigDirty] = useState(false);
+  const [showConfigPass, setShowConfigPass] = useState(false);
+
+  useEffect(() => {
+    if (!configDirty && appConfig) setConfigDraft(appConfig);
+  }, [appConfig, configDirty]);
+
+  const handleUpdateConfigDraft = (updates: Partial<AppDynamicConfig>) => {
+    setConfigDraft(prev => ({ ...prev, ...updates }));
+    setConfigDirty(true);
+  };
+
+  const handleSaveConfig = async () => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const result = await updateAppDynamicConfig(configDraft);
+      if (!result.success) {
+        setError(`Error al guardar configuración: ${result.message}`);
+        return;
+      }
+      showToast('✓ Configuración guardada correctamente');
+      setConfigDirty(false);
+      onConfigUpdate?.(configDraft);
+    } catch (err) {
+      setError(`Error al guardar configuración: ${err instanceof Error ? err.message : 'desconocido'}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Content management
   const [draftContent, setDraftContent] = useState<ContentDraft[]>([]);
@@ -346,19 +384,20 @@ export default function AdminPanel({
   // Cada documento es independiente: un ActaDocumento = un solo documento (items siempre length 1)
   const [actaForm, setActaForm] = useState<{
     titulo: string; descripcion: string; perfiles: string[]; dnis: string;
-    driveUrl: string; tipo: 'virtual' | 'fisico';
+    driveUrl: string; tipo: 'virtual' | 'fisico'; categoria: 'documento' | 'capacitacion';
     codigo: string; version: string; fechaVersion: string;
+    capacitador: string; horas: string;
     requiereFirmaDibujada: boolean;
-  }>({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', tipo: 'virtual', codigo: '', version: '', fechaVersion: '', requiereFirmaDibujada: true });
+  }>({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', tipo: 'virtual', categoria: 'documento', codigo: '', version: '', fechaVersion: '', capacitador: '', horas: '', requiereFirmaDibujada: true });
   // true si el documento en edición tenía más de un item (modelo anterior) — se avisa que se colapsará a uno solo al guardar
   const [editingHasExtraItems, setEditingHasExtraItems] = useState(false);
   const [showFirmasFor, setShowFirmasFor] = useState<string | null>(null);
   const [resendingFirma, setResendingFirma] = useState<string | null>(null);
   // Sort & filter for the firmas table (one visible at a time)
-  type FirmaSortKey = 'dni' | 'nombre' | 'estado' | 'fecha' | 'correo';
+  type FirmaSortKey = 'dni' | 'nombre' | 'cargo' | 'estado' | 'fecha' | 'correo';
   const [firmaSort, setFirmaSort] = useState<{ key: FirmaSortKey; dir: 'asc' | 'desc' }>({ key: 'nombre', dir: 'asc' });
-  const [firmaFilters, setFirmaFilters] = useState<{ dni: string; nombre: string; estado: string; fecha: string; correo: string }>(
-    { dni: '', nombre: '', estado: '', fecha: '', correo: '' }
+  const [firmaFilters, setFirmaFilters] = useState<{ dni: string; nombre: string; cargo: string; estado: string; fecha: string; correo: string }>(
+    { dni: '', nombre: '', cargo: '', estado: '', fecha: '', correo: '' }
   );
   const toggleFirmaSort = (key: FirmaSortKey) => {
     setFirmaSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
@@ -410,6 +449,49 @@ export default function AdminPanel({
       setDistribucionData({ item, documentoTitulo: doc.titulo, rows });
     } catch {
       showToast('Error al generar la lista de distribución', 'error');
+      setGeneratingPdfKey(null);
+    }
+  };
+
+  // Lista de asistencia (solo capacitaciones): usa la firma adicional pedida al firmar
+  const [asistenciaData, setAsistenciaData] = useState<{ doc: ActaDocumento; item: ActaItem; rows: AsistenciaRow[] } | null>(null);
+  const asistenciaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!asistenciaData) return;
+    const element = asistenciaRef.current;
+    if (!element) return;
+    const slug = (asistenciaData.item.nombre || 'capacitacion').toUpperCase().replace(/[^A-Z0-9]/gi, '_').replace(/_+/g, '_').slice(0, 40);
+    const opt = {
+      margin: 5,
+      filename: `LISTA_ASISTENCIA_${slug}_${new Date().toISOString().split('T')[0]}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
+    };
+    // @ts-ignore
+    html2pdf().from(element).set(opt).save().finally(() => {
+      setAsistenciaData(null);
+      setGeneratingPdfKey(null);
+    });
+  }, [asistenciaData]);
+
+  const handleGenerateAsistencia = async (doc: ActaDocumento, item: ActaItem, key: string) => {
+    setGeneratingPdfKey(key);
+    try {
+      const roster = buildItemRoster(doc, item, actaFirmas, ingresoRecords).filter(r => r.firma);
+      if (roster.length === 0) {
+        showToast('Nadie ha firmado esta capacitación todavía', 'error');
+        setGeneratingPdfKey(null);
+        return;
+      }
+      const rows: AsistenciaRow[] = await Promise.all(roster.map(async (r): Promise<AsistenciaRow> => {
+        const firmaBase64 = await fetchDriveImageAsBase64(r.firma?.firmaAsistenciaUrl);
+        return { ...r, firmaBase64: firmaBase64 || undefined };
+      }));
+      setAsistenciaData({ doc, item, rows });
+    } catch {
+      showToast('Error al generar la lista de asistencia', 'error');
       setGeneratingPdfKey(null);
     }
   };
@@ -483,7 +565,7 @@ export default function AdminPanel({
   };
 
   const resetActaForm = () => {
-    setActaForm({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', tipo: 'virtual', codigo: '', version: '', fechaVersion: '', requiereFirmaDibujada: true });
+    setActaForm({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', tipo: 'virtual', categoria: 'documento', codigo: '', version: '', fechaVersion: '', capacitador: '', horas: '', requiereFirmaDibujada: true });
     setEditingHasExtraItems(false);
     setEditingActaId(null);
     setShowNewActaForm(false);
@@ -496,7 +578,9 @@ export default function AdminPanel({
       dnis: d.dnisAsignados.join(', '),
       driveUrl: first?.driveUrl || d.driveDocUrl || '',
       tipo: first?.tipo || (first?.driveUrl ? 'virtual' : 'fisico'),
+      categoria: first?.categoria || 'documento',
       codigo: first?.codigo || '', version: first?.version || '', fechaVersion: first?.fechaVersion || '',
+      capacitador: first?.capacitador || '', horas: first?.horas || '',
       requiereFirmaDibujada: d.requiereFirmaDibujada,
     });
     setEditingHasExtraItems(d.items.length > 1);
@@ -521,10 +605,16 @@ export default function AdminPanel({
     const item: ActaItem = {
       nombre: actaForm.titulo.trim(),
       tipo,
+      categoria: actaForm.categoria,
       driveUrl: tipo === 'virtual' ? (actaForm.driveUrl.trim() || undefined) : undefined,
-      codigo: actaForm.codigo.trim() || undefined,
-      version: actaForm.version.trim() || undefined,
-      fechaVersion: actaForm.fechaVersion.trim() || undefined,
+      // El código de control documental no aplica a capacitaciones (es para la lista de distribución de documentos).
+      codigo: actaForm.categoria === 'documento' ? (actaForm.codigo.trim() || undefined) : undefined,
+      version: actaForm.categoria === 'documento' ? (actaForm.version.trim() || undefined) : undefined,
+      fechaVersion: actaForm.categoria === 'documento' ? (actaForm.fechaVersion.trim() || undefined) : undefined,
+      // El tema de la lista de asistencia es siempre el título del documento (son lo mismo para una capacitación).
+      tema: actaForm.categoria === 'capacitacion' ? actaForm.titulo.trim() : undefined,
+      capacitador: actaForm.categoria === 'capacitacion' ? (actaForm.capacitador.trim() || undefined) : undefined,
+      horas: actaForm.categoria === 'capacitacion' ? (actaForm.horas.trim() || undefined) : undefined,
     };
     const result = await saveActaDocumento({
       id,
@@ -1479,54 +1569,6 @@ ${text}`;
     });
   };
 
-  // ========== AUTH SCREEN ==========
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-[#f8f9fa]">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-md bg-white rounded-2xl p-10 border-2 border-[#e1e3e4] shadow-[0_8px_32px_rgba(0,27,60,0.08)]">
-          <div className="w-20 h-20 bg-[#1b4d89]/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <Lock className="w-10 h-10 text-[#1b4d89]" />
-          </div>
-          <h1 className="text-xl font-bold text-[#00366b] text-center mb-2">Admin Control Center</h1>
-          <p className="text-[#424750] text-sm text-center mb-8">Ingresa la contraseña para acceder al panel de gestión.</p>
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                autoFocus
-                placeholder="Contraseña de administrador"
-                className="w-full bg-[#f8f9fa] border-b-2 border-[#c3c6d1] focus:border-[#1b4d89] px-1 py-4 text-[#191c1d] text-base outline-none transition-all pr-12"
-              />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-[#737781] hover:text-[#1b4d89] rounded-lg transition-colors">
-                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
-            </div>
-            {error && <p className="text-[#ba1a1a] text-sm font-semibold text-center bg-[#ffdad6]/20 py-2 rounded-lg">{error}</p>}
-            <button type="submit" className="w-full bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-[#ffffff] py-4 rounded-xl text-base font-bold shadow-lg shadow-[#1b4d89]/20 hover:scale-[1.02] active:scale-[0.98] transition-all">Acceder al Panel</button>
-            <button type="button" onClick={onBack} className="w-full text-[#737781] text-sm font-semibold hover:text-[#00366b] transition-colors">Volver</button>
-          </form>
-        </motion.div>
-      </div>
-    );
-  }
-
-  const activeContentCount = draftContent.length;
-  const activeQuizCount = draftQuestions.length;
-  const contentChanges = draftContent.filter(c => c._status !== 'unchanged').length;
-  const quizChanges = draftQuestions.filter(q => q._status !== 'unchanged').length;
-
-  const filteredQuestions = draftQuestions.filter(q => {
-    if (quizCategoryFilter === '__SIN_CATEGORIA__') {
-      return !q.categoriaContenido || q.categoriaContenido.trim() === '';
-    }
-    if (quizCategoryFilter) {
-      return q.categoriaContenido === quizCategoryFilter;
-    }
-    return true;
-  });
-
   // ========== PROGRESS TAB COMPUTED VALUES ==========
   const parseUserProgress = (json: string): UserProgress[] => {
     try { return JSON.parse(json) || []; } catch { return []; }
@@ -1583,6 +1625,54 @@ ${text}`;
     const weeks = Array.from(weekMap.values()).sort((a, b) => a.key.localeCompare(b.key)).slice(-8);
     return { buckets, weeks, approved, notApproved: evaluated - approved, evaluated };
   }, [filteredIngresos]);
+
+  // ========== AUTH SCREEN ==========
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-[#f8f9fa]">
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-md bg-white rounded-2xl p-10 border-2 border-[#e1e3e4] shadow-[0_8px_32px_rgba(0,27,60,0.08)]">
+          <div className="w-20 h-20 bg-[#1b4d89]/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Lock className="w-10 h-10 text-[#1b4d89]" />
+          </div>
+          <h1 className="text-xl font-bold text-[#00366b] text-center mb-2">Admin Control Center</h1>
+          <p className="text-[#424750] text-sm text-center mb-8">Ingresa la contraseña para acceder al panel de gestión.</p>
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                autoFocus
+                placeholder="Contraseña de administrador"
+                className="w-full bg-[#f8f9fa] border-b-2 border-[#c3c6d1] focus:border-[#1b4d89] px-1 py-4 text-[#191c1d] text-base outline-none transition-all pr-12"
+              />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-[#737781] hover:text-[#1b4d89] rounded-lg transition-colors">
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
+            {error && <p className="text-[#ba1a1a] text-sm font-semibold text-center bg-[#ffdad6]/20 py-2 rounded-lg">{error}</p>}
+            <button type="submit" className="w-full bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-[#ffffff] py-4 rounded-xl text-base font-bold shadow-lg shadow-[#1b4d89]/20 hover:scale-[1.02] active:scale-[0.98] transition-all">Acceder al Panel</button>
+            <button type="button" onClick={onBack} className="w-full text-[#737781] text-sm font-semibold hover:text-[#00366b] transition-colors">Volver</button>
+          </form>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const activeContentCount = draftContent.length;
+  const activeQuizCount = draftQuestions.length;
+  const contentChanges = draftContent.filter(c => c._status !== 'unchanged').length;
+  const quizChanges = draftQuestions.filter(q => q._status !== 'unchanged').length;
+
+  const filteredQuestions = draftQuestions.filter(q => {
+    if (quizCategoryFilter === '__SIN_CATEGORIA__') {
+      return !q.categoriaContenido || q.categoriaContenido.trim() === '';
+    }
+    if (quizCategoryFilter) {
+      return q.categoriaContenido === quizCategoryFilter;
+    }
+    return true;
+  });
 
   const handleExportProgressExcel = () => {
     const rows = filteredIngresos.map(r => {
@@ -1645,33 +1735,80 @@ ${text}`;
   };
 
   // ========== SIDEBAR NAV ITEMS (módulos del panel) ==========
-  const sidebarTabItems = ([
-    { key: 'topics', label: 'Detalles', icon: BookOpen, badge: null },
+  // "Cursos" agrupa Detalles/Resumen/Contenido/Quizzes: son las únicas pestañas
+  // ligadas a un módulo seleccionado, por eso comparten un solo grupo desplegable.
+  const isCoursesGroupActive = activeTab === 'topics' || activeTab === 'overview' || activeTab === 'content' || activeTab === 'quiz';
+
+  const courseSubTabs = ([
     { key: 'overview', label: 'Resumen', icon: TrendingUp, badge: null },
     { key: 'content', label: 'Contenido', icon: FileText, badge: selectedTopicId ? activeContentCount : null },
     { key: 'quiz', label: 'Quizzes', icon: HelpCircle, badge: selectedTopicId ? activeQuizCount : null },
+  ] as { key: AdminTab; label: string; icon: typeof BookOpen; badge: number | null }[]);
+
+  const otherTabItems = ([
     { key: 'progress', label: 'Usuarios', icon: Users, badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
     { key: 'shortEvals', label: 'Evals', icon: ClipboardCheck, badge: shortEvals.length > 0 ? shortEvals.length : null },
     { key: 'actas', label: 'Documentos y Capacitaciones', icon: FileSignature, badge: actaDocs.length > 0 ? actaDocs.length : null },
+    { key: 'config', label: 'Configuración', icon: Settings, badge: null },
   ] as { key: AdminTab; label: string; icon: typeof BookOpen; badge: number | null }[]);
 
   const sidebarNav = (
     <nav className="flex-1 overflow-y-auto scrollbar-hide p-3 space-y-1">
-      {sidebarTabItems.map(tab => {
-        const alwaysEnabled = tab.key === 'topics' || tab.key === 'progress' || tab.key === 'shortEvals' || tab.key === 'actas';
-        const isDisabled = !alwaysEnabled && !selectedTopicId;
+      <button
+        onClick={() => { setActiveTab('topics'); if (window.innerWidth < 1024) setSidebarOpen(false); }}
+        className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
+          isCoursesGroupActive
+            ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-white shadow-md shadow-[#00366b]/25'
+            : 'text-[#57606f] hover:bg-[#f3f4f5] hover:text-[#00366b]'
+        }`}
+      >
+        <BookOpen className="w-4 h-4 flex-shrink-0" />
+        <span className="flex-1 text-left">Cursos</span>
+        {isCoursesGroupActive ? <ChevronUp className="w-4 h-4 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 flex-shrink-0" />}
+      </button>
+
+      {isCoursesGroupActive && (
+        <div className="pl-4 space-y-1">
+          {courseSubTabs.map(tab => {
+            const isDisabled = !selectedTopicId;
+            const isActive = activeTab === tab.key;
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.key}
+                disabled={isDisabled}
+                onClick={() => { setActiveTab(tab.key); if (window.innerWidth < 1024) setSidebarOpen(false); }}
+                className={`w-full flex items-center gap-3 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all border-l-2 ${
+                  isActive
+                    ? 'bg-[#1b4d89]/10 text-[#1b4d89] border-[#1b4d89]'
+                    : isDisabled
+                    ? 'text-[#c3c6d1] cursor-not-allowed opacity-70 border-transparent'
+                    : 'text-[#57606f] hover:bg-[#f3f4f5] hover:text-[#00366b] border-transparent'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="flex-1 text-left">{tab.label}</span>
+                {tab.badge !== null && (
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[16px] text-center leading-none ${
+                    isActive ? 'bg-[#1b4d89]/15 text-[#1b4d89]' : 'bg-[#eef1f6] text-[#424750]'
+                  }`}>{tab.badge}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {otherTabItems.map(tab => {
         const isActive = activeTab === tab.key;
         const Icon = tab.icon;
         return (
           <button
             key={tab.key}
-            disabled={isDisabled}
             onClick={() => { setActiveTab(tab.key); if (window.innerWidth < 1024) setSidebarOpen(false); }}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
               isActive
                 ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-white shadow-md shadow-[#00366b]/25'
-                : isDisabled
-                ? 'text-[#c3c6d1] cursor-not-allowed opacity-70'
                 : 'text-[#57606f] hover:bg-[#f3f4f5] hover:text-[#00366b]'
             }`}
           >
@@ -1832,9 +1969,9 @@ ${text}`;
           )}
         </AnimatePresence>
 
-        {/* Active Module Banner - persistent above all tabs */}
+        {/* Active Module Banner - solo en las pestañas del grupo "Cursos" */}
         <AnimatePresence>
-          {selectedTopicId && selectedTopic && (
+          {selectedTopicId && selectedTopic && isCoursesGroupActive && (
             <motion.div
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2781,7 +2918,7 @@ ${text}`;
           </>
         )}
 
-        {!selectedTopicId && activeTab !== 'progress' && activeTab !== 'shortEvals' && activeTab !== 'actas' && (
+        {!selectedTopicId && activeTab !== 'progress' && activeTab !== 'shortEvals' && activeTab !== 'actas' && activeTab !== 'config' && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-20 h-20 rounded-full bg-[#e1e3e4] flex items-center justify-center mb-4">
               <Search className="w-10 h-10 text-[#737781]" />
@@ -3523,15 +3660,39 @@ ${text}`;
             {showNewActaForm && (
               <div className="bg-white rounded-2xl border border-[#1b4d89]/20 p-5 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-black text-[#00366b]">{editingActaId ? 'Editar documento' : 'Nuevo documento'}</h3>
+                  <h3 className="text-sm font-black text-[#00366b]">
+                    {editingActaId
+                      ? (actaForm.categoria === 'capacitacion' ? 'Editar capacitación' : 'Editar documento')
+                      : (actaForm.categoria === 'capacitacion' ? 'Nueva capacitación' : 'Nuevo documento')}
+                  </h3>
                   <button onClick={resetActaForm} className="text-[#737781] hover:text-[#00366b]"><X className="w-4 h-4" /></button>
+                </div>
+
+                {/* Categoría: qué se está agregando */}
+                <div>
+                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">¿Qué vas a agregar? *</label>
+                  <div className="flex flex-wrap gap-2 mt-1.5">
+                    {([
+                      { id: 'documento', label: 'Documento', icon: FileSignature },
+                      { id: 'capacitacion', label: 'Capacitación', icon: GraduationCap },
+                    ] as const).map(opt => {
+                      const active = actaForm.categoria === opt.id;
+                      const Icon = opt.icon;
+                      return (
+                        <button key={opt.id} onClick={() => setActaForm(f => ({ ...f, categoria: opt.id }))}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${active ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-white text-[#424750] border-[#e1e3e4] hover:border-[#1b4d89]/40'}`}>
+                          <Icon className="w-3.5 h-3.5" /> {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Título *</label>
                     <input value={actaForm.titulo} onChange={e => setActaForm(f => ({ ...f, titulo: e.target.value }))}
-                      placeholder="Ej. Compromiso de Seguridad SST"
+                      placeholder={actaForm.categoria === 'capacitacion' ? 'Ej. Capacitación de Inducción SST' : 'Ej. Compromiso de Seguridad SST'}
                       className="w-full mt-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
                   </div>
                   <div>
@@ -3541,6 +3702,28 @@ ${text}`;
                       className="w-full mt-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
                   </div>
                 </div>
+
+                {/* Datos de la capacitación — solo si categoria === 'capacitacion' (van a la Lista de Asistencia) */}
+                {actaForm.categoria === 'capacitacion' && (
+                  <div className="p-3 bg-violet-50/60 border border-violet-200 rounded-xl space-y-3">
+                    <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wider flex items-center gap-1"><GraduationCap className="w-3 h-3" /> Datos para la lista de asistencia</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Nombre del capacitador</label>
+                        <input value={actaForm.capacitador} onChange={e => setActaForm(f => ({ ...f, capacitador: e.target.value }))}
+                          placeholder="Ej. Juan Pérez"
+                          className="w-full mt-1 px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">N° de horas</label>
+                        <input value={actaForm.horas} onChange={e => setActaForm(f => ({ ...f, horas: e.target.value }))}
+                          placeholder="Ej. 2"
+                          className="w-full mt-1 px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-violet-700/80 italic">Al firmar, el trabajador dibujará una firma adicional para esta lista de asistencia.</p>
+                  </div>
+                )}
 
                 {/* Perfiles */}
                 <div>
@@ -3598,21 +3781,23 @@ ${text}`;
                   )}
                 </div>
 
-                {/* Código de control documental (para la lista de distribución en PDF) */}
-                <div>
-                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Código de control documental (opcional, para la lista de distribución)</label>
-                  <div className="grid grid-cols-3 gap-1.5 mt-1">
-                    <input value={actaForm.codigo} onChange={e => setActaForm(f => ({ ...f, codigo: e.target.value }))}
-                      placeholder="Código (ej. FPG-CL-SIG-06-05)"
-                      className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                    <input value={actaForm.version} onChange={e => setActaForm(f => ({ ...f, version: e.target.value }))}
-                      placeholder="Versión"
-                      className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                    <input value={actaForm.fechaVersion} onChange={e => setActaForm(f => ({ ...f, fechaVersion: e.target.value }))}
-                      placeholder="Fecha de actualización"
-                      className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                {/* Código de control documental (para la lista de distribución en PDF) — no aplica a capacitaciones */}
+                {actaForm.categoria !== 'capacitacion' && (
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Código de control documental (opcional, para la lista de distribución)</label>
+                    <div className="grid grid-cols-3 gap-1.5 mt-1">
+                      <input value={actaForm.codigo} onChange={e => setActaForm(f => ({ ...f, codigo: e.target.value }))}
+                        placeholder="Código (ej. FPG-CL-SIG-06-05)"
+                        className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                      <input value={actaForm.version} onChange={e => setActaForm(f => ({ ...f, version: e.target.value }))}
+                        placeholder="Versión"
+                        className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                      <input value={actaForm.fechaVersion} onChange={e => setActaForm(f => ({ ...f, fechaVersion: e.target.value }))}
+                        placeholder="Fecha de actualización"
+                        className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Firma dibujada */}
                 <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -3643,20 +3828,26 @@ ${text}`;
               </div>
             ) : (
               <div className="space-y-3">
-                {actaDocs.map(doc => {
+                {/* El documento en edición ya se muestra en el formulario de arriba; ocultarlo aquí evita el efecto de duplicado. */}
+                {actaDocs.filter(doc => doc.id !== editingActaId).map(doc => {
                   const roster = rostersByDoc.get(doc.id) || [];
                   const firmados = roster.filter(r => r.firma).length;
                   const showFirmas = showFirmasFor === doc.id;
+                  const esCapacitacion = doc.items[0]?.categoria === 'capacitacion';
+                  const CategoriaIcon = esCapacitacion ? GraduationCap : FileSignature;
                   return (
                     <div key={doc.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
                       <div className="px-4 py-3.5 flex items-start gap-3">
                         <div className="w-9 h-9 rounded-xl bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0">
-                          <FileSignature className="w-5 h-5 text-[#1b4d89]" />
+                          <CategoriaIcon className="w-5 h-5 text-[#1b4d89]" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-bold text-[#00366b] text-sm">{doc.titulo}</p>
                           {doc.descripcion && <p className="text-xs text-[#737781] mt-0.5">{doc.descripcion}</p>}
                           <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${esCapacitacion ? 'bg-violet-50 text-violet-700' : 'bg-sky-50 text-sky-700'}`}>
+                              <CategoriaIcon className="w-2.5 h-2.5" /> {esCapacitacion ? 'Capacitación' : 'Documento'}
+                            </span>
                             {doc.perfiles.map(p => <span key={p} className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{p}</span>)}
                             {doc.dnisAsignados.length > 0 && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{doc.dnisAsignados.length} DNI(s)</span>}
                             {doc.items.length > 0 && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 flex items-center gap-1"><ClipboardList className="w-2.5 h-2.5" /> {doc.items.length} doc(s)</span>}
@@ -3674,7 +3865,7 @@ ${text}`;
                           </div>
                         )}
                         <div className="flex flex-col gap-1.5 flex-shrink-0">
-                          <button onClick={() => { setShowFirmasFor(showFirmas ? null : doc.id); setFirmaFilters({ dni: '', nombre: '', estado: '', fecha: '', correo: '' }); setFirmaSort({ key: 'nombre', dir: 'asc' }); setFirmaPage(1); }}
+                          <button onClick={() => { setShowFirmasFor(showFirmas ? null : doc.id); setFirmaFilters({ dni: '', nombre: '', cargo: '', estado: '', fecha: '', correo: '' }); setFirmaSort({ key: 'nombre', dir: 'asc' }); setFirmaPage(1); }}
                             title="Ver firmas" className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors"><TrendingUp className="w-4 h-4 text-[#1b4d89]" /></button>
                           <button onClick={() => handleEditActa(doc)} title="Editar" className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors"><Edit3 className="w-4 h-4 text-[#737781]" /></button>
                           <button onClick={() => handleDeleteActa(doc.id)} title="Eliminar" className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"><Trash2 className="w-4 h-4 text-red-400" /></button>
@@ -3687,8 +3878,9 @@ ${text}`;
                           const estado = r.firma ? 'firmado' : 'pendiente';
                           if (firmaFilters.dni && !r.dni.toLowerCase().includes(firmaFilters.dni.toLowerCase())) return false;
                           if (firmaFilters.nombre && !r.nombre.toLowerCase().includes(firmaFilters.nombre.toLowerCase())) return false;
+                          if (firmaFilters.cargo && !(r.cargo || '').toLowerCase().includes(firmaFilters.cargo.toLowerCase())) return false;
                           if (firmaFilters.estado && !estado.includes(firmaFilters.estado.toLowerCase())) return false;
-                          if (firmaFilters.fecha && !(r.firma?.fechaFirma || '').toLowerCase().includes(firmaFilters.fecha.toLowerCase())) return false;
+                          if (firmaFilters.fecha && !(r.inicio || '').toLowerCase().includes(firmaFilters.fecha.toLowerCase())) return false;
                           if (firmaFilters.correo && !(r.correo || '').toLowerCase().includes(firmaFilters.correo.toLowerCase())) return false;
                           return true;
                         }).sort((a, b) => {
@@ -3696,8 +3888,9 @@ ${text}`;
                           switch (firmaSort.key) {
                             case 'dni': return a.dni.localeCompare(b.dni, 'es', { numeric: true }) * dir;
                             case 'nombre': return a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }) * dir;
+                            case 'cargo': return (a.cargo || '').localeCompare(b.cargo || '', 'es', { sensitivity: 'base' }) * dir;
                             case 'estado': return ((a.firma ? 1 : 0) - (b.firma ? 1 : 0)) * dir;
-                            case 'fecha': return (a.firma?.fechaFirma || '').localeCompare(b.firma?.fechaFirma || '', 'es') * dir;
+                            case 'fecha': return ((parseInicio(a.inicio)?.getTime() ?? 0) - (parseInicio(b.inicio)?.getTime() ?? 0)) * dir;
                             case 'correo': return (a.correo || '').localeCompare(b.correo || '', 'es') * dir;
                             default: return 0;
                           }
@@ -3710,20 +3903,24 @@ ${text}`;
                         const pageFirmas = filtered.slice((fPage - 1) * TABLE_PAGE_SIZE, fPage * TABLE_PAGE_SIZE);
                         return (
                           <div className="border-t border-[#f3f4f5] px-4 py-3 bg-[#f8f9fa]">
-                            {/* Lista de distribución por documento (item) */}
+                            {/* Lista de distribución (documentos) / lista de asistencia (capacitaciones), por item */}
                             {doc.items.length > 0 && (
                               <div className="mb-3 space-y-1.5">
-                                <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider">Lista de distribución por documento</p>
+                                <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider">
+                                  {doc.items[0]?.categoria === 'capacitacion' ? 'Lista de asistencia' : 'Lista de distribución por documento'}
+                                </p>
                                 {doc.items.map((it, idx) => {
                                   const itemRoster = buildItemRoster(doc, it, actaFirmas, ingresoRecords);
                                   const itemFirmados = itemRoster.filter(r => r.firma).length;
                                   const key = `${doc.id}:${idx}`;
+                                  const esCapacitacionItem = it.categoria === 'capacitacion';
                                   return (
                                     <div key={idx} className="flex items-center justify-between gap-2 bg-white border border-[#e1e3e4] rounded-lg px-3 py-1.5">
                                       <span className="text-xs font-semibold text-[#424750] truncate">{it.nombre}</span>
                                       <span className="text-[10px] text-[#737781] flex-shrink-0">{itemFirmados}/{itemRoster.length} firmado(s)</span>
-                                      <button onClick={() => handleGenerateDistribucion(doc, it, key)} disabled={itemFirmados === 0 || generatingPdfKey === key}
-                                        title="Generar lista de distribución en PDF"
+                                      <button onClick={() => esCapacitacionItem ? handleGenerateAsistencia(doc, it, key) : handleGenerateDistribucion(doc, it, key)}
+                                        disabled={itemFirmados === 0 || generatingPdfKey === key}
+                                        title={esCapacitacionItem ? 'Generar lista de asistencia en PDF' : 'Generar lista de distribución en PDF'}
                                         className="flex items-center gap-1 px-2 py-1 bg-[#1b4d89]/10 text-[#1b4d89] rounded-md text-[10px] font-bold hover:bg-[#1b4d89]/20 transition-all disabled:opacity-40 flex-shrink-0">
                                         {generatingPdfKey === key ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />} PDF
                                       </button>
@@ -3748,14 +3945,16 @@ ${text}`;
                                     <tr className="text-[9px] text-[#737781] uppercase">
                                       <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('dni')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">DNI <FSortIcon col="dni" /></button></th>
                                       <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('nombre')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Apellidos y Nombres <FSortIcon col="nombre" /></button></th>
+                                      <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('cargo')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Cargo <FSortIcon col="cargo" /></button></th>
                                       <th className="text-center pb-1 pr-3"><button onClick={() => toggleFirmaSort('estado')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Estado <FSortIcon col="estado" /></button></th>
-                                      <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('fecha')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Fecha <FSortIcon col="fecha" /></button></th>
+                                      <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('fecha')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Fecha Inicio <FSortIcon col="fecha" /></button></th>
                                       <th className="text-left pb-1 pr-3"><button onClick={() => toggleFirmaSort('correo')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Correo <FSortIcon col="correo" /></button></th>
                                       <th className="pb-1"></th>
                                     </tr>
                                     <tr className="align-top">
                                       <th className="pb-2 pr-3"><input value={firmaFilters.dni} onChange={e => setFirmaFilters(f => ({ ...f, dni: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
                                       <th className="pb-2 pr-3"><input value={firmaFilters.nombre} onChange={e => setFirmaFilters(f => ({ ...f, nombre: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                      <th className="pb-2 pr-3"><input value={firmaFilters.cargo} onChange={e => setFirmaFilters(f => ({ ...f, cargo: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
                                       <th className="pb-2 pr-3"><input value={firmaFilters.estado} onChange={e => setFirmaFilters(f => ({ ...f, estado: e.target.value }))} placeholder="firmado…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-center focus:outline-none focus:border-[#1b4d89]" /></th>
                                       <th className="pb-2 pr-3"><input value={firmaFilters.fecha} onChange={e => setFirmaFilters(f => ({ ...f, fecha: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
                                       <th className="pb-2 pr-3"><input value={firmaFilters.correo} onChange={e => setFirmaFilters(f => ({ ...f, correo: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] focus:outline-none focus:border-[#1b4d89]" /></th>
@@ -3764,17 +3963,18 @@ ${text}`;
                                   </thead>
                                   <tbody className="divide-y divide-[#f3f4f5]">
                                     {filtered.length === 0 ? (
-                                      <tr><td colSpan={6} className="py-3 text-center text-[#737781] italic text-[11px]">Sin resultados para los filtros aplicados</td></tr>
+                                      <tr><td colSpan={7} className="py-3 text-center text-[#737781] italic text-[11px]">Sin resultados para los filtros aplicados</td></tr>
                                     ) : pageFirmas.map(r => (
                                       <tr key={r.dni}>
                                         <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
                                         <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.nombre}</td>
+                                        <td className="py-1.5 pr-3 text-[#737781]">{r.cargo || '—'}</td>
                                         <td className="py-1.5 pr-3 text-center">
                                           {r.firma
                                             ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 font-bold text-[10px]"><CheckCircle2 className="w-3 h-3" /> Firmado</span>
                                             : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-600 font-bold text-[10px]">Pendiente</span>}
                                         </td>
-                                        <td className="py-1.5 pr-3 text-[#737781] whitespace-nowrap">{r.firma?.fechaFirma || '—'}</td>
+                                        <td className="py-1.5 pr-3 text-[#737781] whitespace-nowrap">{r.inicio || '—'}</td>
                                         <td className="py-1.5 pr-3 text-[#737781]">
                                           <span className="inline-flex items-center gap-1">
                                             {r.correo || '—'}
@@ -3811,6 +4011,106 @@ ${text}`;
             )}
           </div>
         )}
+
+        {/* ====== TAB: CONFIGURACIÓN ====== */}
+        {activeTab === 'config' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-[#e1e3e4] p-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Título</label>
+                  <input type="text" value={configDraft.title} onChange={e => handleUpdateConfigDraft({ title: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Contacto de soporte</label>
+                  <input type="text" value={configDraft.contact} onChange={e => handleUpdateConfigDraft({ contact: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Mensaje de bienvenida (pantalla de login)</label>
+                  <textarea value={configDraft.message} onChange={e => handleUpdateConfigDraft({ message: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none resize-none" rows={2} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Contraseña de administrador</label>
+                  <div className="relative">
+                    <input
+                      type={showConfigPass ? 'text' : 'password'}
+                      value={configDraft.adminPass}
+                      onChange={e => handleUpdateConfigDraft({ adminPass: e.target.value })}
+                      className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 pr-11 text-sm focus:border-[#1b4d89] outline-none"
+                    />
+                    <button type="button" onClick={() => setShowConfigPass(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#737781] hover:text-[#1b4d89]">
+                      {showConfigPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Estatus de la app</label>
+                  <select value={configDraft.status} onChange={e => handleUpdateConfigDraft({ status: e.target.value as 'Activo' | 'Inactivo' })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none">
+                    <option value="Activo">Activo</option>
+                    <option value="Inactivo">Inactivo</option>
+                  </select>
+                  {configDraft.status === 'Inactivo' && (
+                    <p className="text-[10px] font-semibold text-[#ba1a1a] mt-1.5">⚠ "Inactivo" bloquea el acceso a toda la app para los usuarios.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Logo del certificado (URL)</label>
+                  <input type="text" value={configDraft.logoCertificado || ''} onChange={e => handleUpdateConfigDraft({ logoCertificado: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Firma del representante (URL)</label>
+                  <input type="text" value={configDraft.firmaRepresentante || ''} onChange={e => handleUpdateConfigDraft({ firmaRepresentante: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Nombre del representante</label>
+                  <input type="text" value={configDraft.nombreRepresentante || ''} onChange={e => handleUpdateConfigDraft({ nombreRepresentante: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Cargo del representante</label>
+                  <input type="text" value={configDraft.cargoRepresentante || ''} onChange={e => handleUpdateConfigDraft({ cargoRepresentante: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Lugar / proyecto minero</label>
+                  <input type="text" value={configDraft.lugar || ''} onChange={e => handleUpdateConfigDraft({ lugar: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Contratista</label>
+                  <input type="text" value={configDraft.contratista || ''} onChange={e => handleUpdateConfigDraft({ contratista: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Video tutorial (URL)</label>
+                  <input type="text" value={configDraft.tutorialUrl || ''} onChange={e => handleUpdateConfigDraft({ tutorialUrl: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Módulo de Actas</label>
+                  <div className="flex items-center gap-2 mt-3">
+                    <input type="checkbox" checked={configDraft.actasHabilitado ?? true} onChange={e => handleUpdateConfigDraft({ actasHabilitado: e.target.checked })} className="w-5 h-5 accent-[#1b4d89] rounded" />
+                    <span className="text-sm font-semibold">{(configDraft.actasHabilitado ?? true) ? 'Visible para los usuarios' : 'Oculto'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {configDirty && (
+              <div className="sticky bottom-8 flex flex-col sm:flex-row gap-3 z-40 bg-white p-4 rounded-xl border-2 border-[#e1e3e4] shadow-[0_8px_32px_rgba(0,27,60,0.08)]">
+                <button
+                  onClick={() => { if (appConfig) setConfigDraft(appConfig); setConfigDirty(false); }}
+                  className="flex items-center justify-center gap-2 px-4 py-3 bg-[#ffdad6]/30 rounded-xl text-[#ba1a1a] font-semibold text-sm hover:bg-[#ffdad6]/60 transition-all"
+                >
+                  <Undo2 className="w-4 h-4" /> Deshacer
+                </button>
+                <button
+                  disabled={isSaving}
+                  onClick={handleSaveConfig}
+                  className="flex-[2] py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-white shadow-lg shadow-[#1b4d89]/20 hover:shadow-xl flex items-center justify-center gap-2"
+                >
+                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                  Guardar Configuración
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Floating Action Button (FAB) */}
@@ -3841,6 +4141,19 @@ ${text}`;
             item={distribucionData.item}
             documentoTitulo={distribucionData.documentoTitulo}
             rows={distribucionData.rows}
+            appConfig={appConfig ?? null}
+          />
+        </div>
+      )}
+
+      {/* Plantilla de lista de asistencia (capacitaciones) — fuera de pantalla, solo para capturar con html2canvas/html2pdf */}
+      {asistenciaData && (
+        <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+          <ActaAsistenciaTemplate
+            ref={asistenciaRef}
+            doc={asistenciaData.doc}
+            item={asistenciaData.item}
+            rows={asistenciaData.rows}
             appConfig={appConfig ?? null}
           />
         </div>

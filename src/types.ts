@@ -41,6 +41,9 @@ export interface UserSession {
   contacto2Numero?: string;
   contacto2Parentesco?: string;
   profileComplete?: boolean;    // true once ProfileForm was submitted
+  // Autorización de firma digital (onboarding), capturada una sola vez por trabajador
+  consentFirmaUrl?: string;     // firma dibujada — columna INGRESOS.FOTOGRAFIA
+  consentSelfieUrl?: string;    // selfie de verificación — columna INGRESOS.SELFIE
 }
 
 export interface LearnTopic {
@@ -96,11 +99,15 @@ export interface UserProgress {
 /** Nivel de confianza autoreportado antes de revelar el feedback (metacognición) */
 export type Confidence = 'alta' | 'media' | 'baja';
 
+/** Origen de una distracción detectada durante la evaluación calificada. */
+export type DistractionReason = 'camera' | 'visibility';
+
 export interface QuizSavedProgress {
   shuffledIds: string[];
   answeredMap: Record<string, { selected: string; correct: boolean; confidence?: Confidence }>;
   currentIdx: number;
   score: number;
+  distractionCount?: number;
 }
 
 export interface Message {
@@ -139,11 +146,12 @@ export interface ConnectionTestResult {
   geminiApi: { ok: boolean; error?: string };
 }
 
-export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'shortEvals' | 'actas';
+export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'shortEvals' | 'actas' | 'config';
 
 export type AppView =
   | 'login'
   | 'profileForm'
+  | 'consent'
   | 'onboarding'
   | 'dashboard'
   | 'courseDetail'
@@ -182,6 +190,7 @@ export interface ActaItem {
   nombre: string;              // nombre del documento recepcionado
   driveUrl?: string;           // enlace de Drive del documento (opcional, genera QR por fila)
   tipo?: 'virtual' | 'fisico'; // tipo de entrega: virtual (marca "Digital") o físico
+  categoria?: 'documento' | 'capacitacion'; // qué se está entregando/firmando: un documento o una capacitación
   // Asignación propia del documento (override); vacío/undefined = hereda la del acta padre
   perfiles?: string[];
   dnisAsignados?: string[];
@@ -189,6 +198,10 @@ export interface ActaItem {
   codigo?: string;
   version?: string;
   fechaVersion?: string;        // "fecha de actualización" del documento (texto libre)
+  // Solo para categoria === 'capacitacion': datos de la "Lista de Asistencia" (RG-CL-SSMA-1-F62)
+  tema?: string;
+  capacitador?: string;
+  horas?: string;
 }
 
 /** Documento/compromiso configurable por el admin, firmable por el usuario. */
@@ -222,6 +235,9 @@ export interface ActaFirma {
   actaPdfUrl: string;
   selfieUrl: string;
   firmaUrl: string;
+  // Firma adicional pedida solo cuando el acta incluye alguna capacitación; llena
+  // la columna "Firma" de la Lista de Asistencia (independiente de firmaUrl).
+  firmaAsistenciaUrl: string;
   correoEnviado: string;   // 'SI' | 'NO'
   dispositivo: string;
 }

@@ -5,7 +5,11 @@ import { enqueueWrite, flushQueue } from '../lib/offlineQueue';
 
 /** Reintenta las escrituras encoladas offline (progreso/eval) usando el proxy de Apps Script. */
 export async function flushOfflineQueue(): Promise<number> {
-  return flushQueue((payload) => postToAppsScript(payload as object));
+  const sent = await flushQueue((payload) => postToAppsScript(payload as object));
+  // La mayoría de escrituras encoladas son progreso de INGRESOS — invalida el caché
+  // compartido para que la próxima lectura (login, panel admin) no muestre datos viejos.
+  if (sent > 0) clearSheetCache('ingresos');
+  return sent;
 }
 
 // =============================================
@@ -41,7 +45,7 @@ function setSheetCache<T>(key: string, data: T): void {
   } catch { /* cuota llena */ }
 }
 
-export function clearSheetCache(key: 'topics' | 'chunks' | 'quiz' | 'all'): void {
+export function clearSheetCache(key: 'topics' | 'chunks' | 'quiz' | 'ingresos' | 'all'): void {
   if (key === 'all') {
     ['topics', 'chunks', 'quiz'].forEach(k => localStorage.removeItem(`ldc_cache_${k}`));
   } else {
@@ -700,6 +704,16 @@ export async function fetchAppDynamicConfig(): Promise<AppDynamicConfig> {
   }
 }
 
+export async function updateAppDynamicConfig(config: AppDynamicConfig): Promise<{ success: boolean; message: string }> {
+  try {
+    const payload = { action: 'updateConfig', ...config };
+    const result = await postToAppsScript(payload);
+    return { success: result.status === 'ok', message: result.message || 'Configuración actualizada correctamente' };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+}
+
 // =============================================
 // INGRESOS - Registro de sesión y progreso
 // =============================================
@@ -728,7 +742,7 @@ function getPeruTimeFormatted(): string {
     const s = parts.find(p => p.type === 'second')?.value;
 
     return `${d}/${m}/${y} - (${h}:${min}:${s})`;
-  } catch (e) {
+  } catch {
     return new Date().toISOString();
   }
 }
@@ -761,6 +775,9 @@ export interface IngresoRecord {
   contacto1Parentesco?: string;
   contacto2Numero?: string;
   contacto2Parentesco?: string;
+  // Autorización de firma digital (onboarding)
+  fotografiaUrl?: string;  // firma dibujada — columna FOTOGRAFIA
+  selfieUrl?: string;      // selfie de verificación — columna SELFIE
 }
 
 export async function fetchCertificateLinkByDni(dni: string): Promise<Record<string, string>> {
@@ -825,75 +842,52 @@ export async function fetchAllCertificates(): Promise<Record<string, Record<stri
   }
 }
 
-/** Fetch user record from INGRESOS sheet by DNI (read-only via CSV) */
-export async function fetchIngresoByDni(dni: string): Promise<IngresoRecord | null> {
-  const url = getSheetUrl(SHEETS_CONFIG.sheets.ingresos);
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const csvText = await response.text();
-
-    return new Promise((resolve) => {
-      Papa.parse(csvText, {
-        header: true,
-        complete: (results) => {
-          // Collect ALL rows matching this DNI
-          const matches = (results.data as any[]).filter(
-            (r: any) => String(r.DNI || r.Id || '').trim() === String(dni).trim()
-          );
-          if (!matches.length) { resolve(null); return; }
-
-          // Pick the best row: prefer the one with ProgressJSON, then most recent UltimoAcceso
-          const best = matches.reduce((prev: any, curr: any) => {
-            const prevHasProgress = !!(prev.ProgressJSON || '').trim();
-            const currHasProgress = !!(curr.ProgressJSON || '').trim();
-            if (currHasProgress && !prevHasProgress) return curr;
-            if (prevHasProgress && !currHasProgress) return prev;
-            // Both have (or both lack) progress — prefer most recent UltimoAcceso
-            return (curr.UltimoAcceso || '') > (prev.UltimoAcceso || '') ? curr : prev;
-          });
-
-          const row = best;
-          resolve({
-            id: row.Id || '',
-            apellidos: row.Apellidos || '',
-            nombres: row.Nombres || '',
-            dni: row.DNI || row.Id || '',
-            inicio: row.Inicio || '',
-            avance: row.Avance || '',
-            publico: row.Publico || '',
-            nota: row.Nota || '',
-            ultimoAcceso: row.UltimoAcceso || '',
-            dispositivo: row.Dispositivo || '',
-            modulosCompletados: row.ModulosCompletados || '',
-            intentosQuiz: row.IntentosQuiz || '',
-            tiempoTotal: row.TiempoTotal || '',
-            progressJson: row.ProgressJSON || '',
-            certificadoUrl: row.CertificadoUrl || '',
-            // Extended profile fields
-            empresa: row.EMPRESA || '',
-            area: row.AREA || '',
-            cargo: row.CARGO || row.Cargo || '',
-            fechaIngreso: row.FECHA_INGRESO || '',
-            fechaNacimiento: row.FECHA_NACIMIENTO || '',
-            correo: row.CORREO || '',
-            celular: row.CELULAR || '',
-            contacto1Numero: row.NUMERO_CONTACTO_1 || '',
-            contacto1Parentesco: row.PARENTESCO_CONTACTO_1 || '',
-            contacto2Numero: row.NUMERO_CONTACTO_2 || '',
-            contacto2Parentesco: row.PARENTESCO_CONTACTO_2 || '',
-          });
-        },
-        error: () => resolve(null),
-      });
-    });
-  } catch {
-    return null;
-  }
+function mapIngresoRow(row: any): IngresoRecord {
+  return {
+    id: row.Id || '',
+    apellidos: row.Apellidos || '',
+    nombres: row.Nombres || '',
+    dni: row.DNI || row.Id || '',
+    inicio: row.Inicio || '',
+    avance: row.Avance || '',
+    publico: row.Publico || '',
+    nota: row.Nota || '',
+    ultimoAcceso: row.UltimoAcceso || '',
+    dispositivo: row.Dispositivo || '',
+    modulosCompletados: row.ModulosCompletados || '',
+    intentosQuiz: row.IntentosQuiz || '',
+    tiempoTotal: row.TiempoTotal || '',
+    progressJson: row.ProgressJSON || '',
+    certificadoUrl: row.CertificadoUrl || '',
+    empresa: row.EMPRESA || '',
+    area: row.AREA || '',
+    cargo: row.CARGO || row.Cargo || '',
+    fechaIngreso: row.FECHA_INGRESO || '',
+    fechaNacimiento: row.FECHA_NACIMIENTO || '',
+    correo: row.CORREO || '',
+    celular: row.CELULAR || '',
+    contacto1Numero: row.NUMERO_CONTACTO_1 || '',
+    contacto1Parentesco: row.PARENTESCO_CONTACTO_1 || '',
+    contacto2Numero: row.NUMERO_CONTACTO_2 || '',
+    contacto2Parentesco: row.PARENTESCO_CONTACTO_2 || '',
+    fotografiaUrl: row.FOTOGRAFIA || '',
+    selfieUrl: row.SELFIE || '',
+  };
 }
 
-/** Fetch ALL rows from INGRESOS sheet, one best record per DNI */
-export async function fetchAllIngresos(): Promise<IngresoRecord[]> {
+/**
+ * Fetch + parse the full INGRESOS sheet once, deduped to one best record per DNI,
+ * and cache it (same 30s-fresh pattern as topics/chunks/quiz). `fetchIngresoByDni`
+ * and `fetchAllIngresos` both read from this single cached dataset instead of each
+ * re-downloading and re-parsing the whole sheet — a worker's login (which calls
+ * `fetchGlobalKnownUsers` on mount and `fetchIngresoByDni` on submit) and an admin
+ * flipping between the Usuarios/Actas tabs no longer pay for the full CSV twice.
+ */
+async function getIngresosDataset(force = false): Promise<IngresoRecord[]> {
+  if (!force) {
+    const cached = getSheetCache<IngresoRecord[]>('ingresos');
+    if (cached) return cached;
+  }
   const url = getSheetUrl(SHEETS_CONFIG.sheets.ingresos);
   try {
     const response = await fetch(url, { cache: 'no-store' });
@@ -914,34 +908,9 @@ export async function fetchAllIngresos(): Promise<IngresoRecord[]> {
             if (currHas && !prevHas) byDni.set(dni, row);
             else if (prevHas === currHas && (row.UltimoAcceso || '') > (existing.UltimoAcceso || '')) byDni.set(dni, row);
           }
-          resolve(Array.from(byDni.values()).map((row: any): IngresoRecord => ({
-            id: row.Id || '',
-            apellidos: row.Apellidos || '',
-            nombres: row.Nombres || '',
-            dni: row.DNI || row.Id || '',
-            inicio: row.Inicio || '',
-            avance: row.Avance || '',
-            publico: row.Publico || '',
-            nota: row.Nota || '',
-            ultimoAcceso: row.UltimoAcceso || '',
-            dispositivo: row.Dispositivo || '',
-            modulosCompletados: row.ModulosCompletados || '',
-            intentosQuiz: row.IntentosQuiz || '',
-            tiempoTotal: row.TiempoTotal || '',
-            progressJson: row.ProgressJSON || '',
-            certificadoUrl: row.CertificadoUrl || '',
-            empresa: row.EMPRESA || '',
-            area: row.AREA || '',
-            cargo: row.CARGO || row.Cargo || '',
-            fechaIngreso: row.FECHA_INGRESO || '',
-            fechaNacimiento: row.FECHA_NACIMIENTO || '',
-            correo: row.CORREO || '',
-            celular: row.CELULAR || '',
-            contacto1Numero: row.NUMERO_CONTACTO_1 || '',
-            contacto1Parentesco: row.PARENTESCO_CONTACTO_1 || '',
-            contacto2Numero: row.NUMERO_CONTACTO_2 || '',
-            contacto2Parentesco: row.PARENTESCO_CONTACTO_2 || '',
-          })));
+          const records = Array.from(byDni.values()).map(mapIngresoRow);
+          setSheetCache('ingresos', records);
+          resolve(records);
         },
         error: () => resolve([]),
       });
@@ -949,6 +918,18 @@ export async function fetchAllIngresos(): Promise<IngresoRecord[]> {
   } catch {
     return [];
   }
+}
+
+/** Fetch user record from INGRESOS sheet by DNI (uses the shared cached dataset). */
+export async function fetchIngresoByDni(dni: string, force = false): Promise<IngresoRecord | null> {
+  const records = await getIngresosDataset(force);
+  const target = String(dni).trim();
+  return records.find((r) => String(r.dni).trim() === target) || null;
+}
+
+/** Fetch ALL rows from INGRESOS sheet, one best record per DNI (uses the shared cached dataset). */
+export async function fetchAllIngresos(force = false): Promise<IngresoRecord[]> {
+  return getIngresosDataset(force);
 }
 
 function getDeviceInfo(): string {
@@ -1010,6 +991,7 @@ export async function registerIngreso(data: {
         ...(data.contacto2Parentesco !== undefined && { PARENTESCO_CONTACTO_2: data.contacto2Parentesco }),
       },
     });
+    if (result.status === 'ok') clearSheetCache('ingresos');
     return {
       success: result.status === 'ok',
       message: result.message || 'Registro exitoso',
@@ -1043,6 +1025,7 @@ export async function updateIngresoProgress(data: {
   };
   try {
     const result = await postToAppsScript(payload);
+    if (result.status === 'ok') clearSheetCache('ingresos');
     return {
       success: result.status === 'ok',
       message: result.message || 'Progreso actualizado',
@@ -1064,6 +1047,7 @@ export async function updateUserProfile(data: {
 }): Promise<{ success: boolean; message: string; dni?: string }> {
   try {
     const result = await postToAppsScript({ action: 'updateUserProfile', ...data }) as any;
+    if (result.status === 'ok') clearSheetCache('ingresos');
     return {
       success: result.status === 'ok',
       message: result.message || 'Perfil actualizado correctamente',
@@ -1334,11 +1318,15 @@ function parseActaItems(raw: unknown): ActaItem[] {
         nombre: String(it?.nombre || '').trim(),
         driveUrl: String(it?.driveUrl || '').trim() || undefined,
         tipo: it?.tipo === 'fisico' ? 'fisico' : (it?.tipo === 'virtual' ? 'virtual' : undefined),
+        categoria: it?.categoria === 'capacitacion' ? 'capacitacion' : (it?.categoria === 'documento' ? 'documento' : undefined),
         perfiles: Array.isArray(it?.perfiles) ? it.perfiles.filter(Boolean) : undefined,
         dnisAsignados: Array.isArray(it?.dnisAsignados) ? it.dnisAsignados.filter(Boolean) : undefined,
         codigo: String(it?.codigo || '').trim() || undefined,
         version: String(it?.version || '').trim() || undefined,
         fechaVersion: String(it?.fechaVersion || '').trim() || undefined,
+        tema: String(it?.tema || '').trim() || undefined,
+        capacitador: String(it?.capacitador || '').trim() || undefined,
+        horas: String(it?.horas || '').trim() || undefined,
       }))
       .filter(it => it.nombre);
   } catch {
@@ -1401,6 +1389,7 @@ export async function fetchActaFirmas(): Promise<ActaFirma[]> {
             actaPdfUrl: String(r.ActaPdfUrl || '').trim(),
             selfieUrl: String(r.SelfieUrl || '').trim(),
             firmaUrl: String(r.FirmaUrl || '').trim(),
+            firmaAsistenciaUrl: String(r.FirmaAsistenciaUrl || '').trim(),
             correoEnviado: String(r.CorreoEnviado || '').trim(),
             dispositivo: String(r.Dispositivo || '').trim(),
           })));
@@ -1449,6 +1438,8 @@ export async function saveActaFirma(data: {
   pdfBase64: string;
   signatureBase64?: string;
   selfieBase64?: string;
+  // Firma adicional pedida solo si el acta incluye alguna capacitación (Lista de Asistencia)
+  firmaAsistenciaBase64?: string;
   dispositivo?: string;
 }): Promise<{ success: boolean; url?: string; correoEnviado?: string; duplicate?: boolean; message?: string }> {
   try {
@@ -1471,6 +1462,42 @@ export async function resendActaCorreo(id: string, correo?: string): Promise<{ s
   try {
     const result = await postToAppsScript({ action: 'resendActaCorreo', id, correo });
     return result.status === 'ok' ? { success: true } : { success: false, message: result.message };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+}
+
+// =============================================
+// AUTORIZACIÓN DE FIRMA DIGITAL (onboarding) — se pide una sola vez, luego de
+// completar el perfil. Sube firma+selfie+constancia a Drive (carpeta USUARIOS/<DNI>)
+// y guarda los enlaces en INGRESOS, columnas FOTOGRAFIA (firma) y SELFIE.
+// =============================================
+
+export async function saveOnboardingConsent(data: {
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  empresa?: string;
+  area?: string;
+  cargo?: string;
+  fechaIngreso?: string;
+  fechaNacimiento?: string;
+  correo?: string;
+  celular?: string;
+  contacto1Numero?: string;
+  contacto1Parentesco?: string;
+  contacto2Numero?: string;
+  contacto2Parentesco?: string;
+  pdfBase64: string;
+  signatureBase64?: string;
+  selfieBase64?: string;
+}): Promise<{ success: boolean; firmaUrl?: string; selfieUrl?: string; pdfUrl?: string; message?: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'saveOnboardingConsent', ...data }) as any;
+    if (result.status === 'ok') {
+      return { success: true, firmaUrl: result.firmaUrl, selfieUrl: result.selfieUrl, pdfUrl: result.pdfUrl };
+    }
+    return { success: false, message: result.message || 'Error al guardar la autorización' };
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
   }

@@ -54,6 +54,24 @@ function fillTemplate(tpl: string, map: Record<string, string>): string {
   return out;
 }
 
+/** Reduce el user-agent completo a "Navegador / Sistema operativo" para que el pie de página quepa en una sola línea. */
+function simplifyDevice(ua: string): string {
+  if (!ua) return '';
+  let browser = 'Navegador';
+  if (/Edg\//i.test(ua)) browser = 'Edge';
+  else if (/OPR\//i.test(ua)) browser = 'Opera';
+  else if (/Chrome\//i.test(ua)) browser = 'Chrome';
+  else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+  else if (/Safari\//i.test(ua)) browser = 'Safari';
+  let os = '';
+  if (/Windows/i.test(ua)) os = 'Windows';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS';
+  else if (/Mac OS/i.test(ua)) os = 'Mac';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+  return [browser, os].filter(Boolean).join(' / ');
+}
+
 /** Valor escapado, o una línea en blanco subrayada si está vacío. */
 function blank(val: string | undefined, minWidth = '45px'): string {
   const v = String(val || '').trim();
@@ -127,7 +145,7 @@ const ActaTemplate = React.forwardRef<HTMLDivElement, ActaTemplateProps>((props,
       acta_folio: escapeHtml(folio || `AC-${signer.dni}`),
       geo_info: geo ? ` · Ubicación: ${escapeHtml(geo)}` : '',
       correo_info: escapeHtml(correo || 'no registrado'),
-      device_info: dispositivo ? `Dispositivo: ${escapeHtml(dispositivo.slice(0, 90))}` : 'Registro almacenado en el sistema de gestión SST',
+      device_info: dispositivo ? `Dispositivo: ${escapeHtml(simplifyDevice(dispositivo))}` : 'Registro almacenado en el sistema de gestión SST',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signer, documentos, signatureData, selfieData, timestamp, dispositivo, appConfig, logoSrc, representanteFirmaSrc, numero, folio, geo, correo]);

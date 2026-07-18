@@ -39,6 +39,7 @@ import Onboarding from './components/Onboarding';
 import Dashboard from './components/Dashboard';
 import CourseDetail from './components/CourseDetail';
 import DriveVideoPlayer from './components/DriveVideoPlayer';
+import InstallAppButton from './components/InstallAppButton';
 
 // Lazy loaded components for code splitting
 const LearningMode = lazy(() => import('./components/LearningMode'));
@@ -47,6 +48,7 @@ const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const CertificateClaim = lazy(() => import('./components/CertificateClaim'));
 const ShortEvalPage = lazy(() => import('./components/ShortEvalPage'));
 const ActasScreen = lazy(() => import('./components/ActasScreen'));
+const ConsentSigning = lazy(() => import('./components/ConsentSigning'));
 
 // Loading Fallback Component
 const ViewLoader = () => (
@@ -56,7 +58,7 @@ const ViewLoader = () => (
   </div>
 );
 
-function driveEmbedUrl(url: string, _type: 'video' | 'pdf'): string {
+function driveEmbedUrl(url: string): string {
   if (!url) return '';
   const trimmedUrl = url.trim();
   
@@ -203,8 +205,19 @@ export default function App() {
             localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(session));
           }
           setUserSession(session);
-          setAudience(migratedAudience.length > 0 ? migratedAudience : null);
-          setView('dashboard');
+          // Restaura la misma vista que corresponde según cuánto avanzó (perfil → autorización
+          // de firma → audiencia → dashboard), no siempre 'dashboard' — si no, recargar la
+          // página a mitad del onboarding dejaba una pantalla en blanco (audience vacío).
+          if (!session.profileComplete) {
+            setView('profileForm');
+          } else if (!session.consentFirmaUrl || !session.consentSelfieUrl) {
+            setView('consent');
+          } else if (migratedAudience.length > 0) {
+            setAudience(migratedAudience);
+            setView('dashboard');
+          } else {
+            setView('onboarding');
+          }
           fetchCertificateLinkByDni(session.dni).then(liveUrls => {
             if (Object.keys(liveUrls).length > 0) {
               const merged = { ...session.certificadoUrls, ...liveUrls };
@@ -377,6 +390,8 @@ export default function App() {
           contacto2Numero: existingRecord.contacto2Numero || undefined,
           contacto2Parentesco: existingRecord.contacto2Parentesco || undefined,
           profileComplete: !!(existingRecord.area),
+          consentFirmaUrl: existingRecord.fotografiaUrl || undefined,
+          consentSelfieUrl: existingRecord.selfieUrl || undefined,
         };
         setUserSession(session);
         localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(session));
@@ -414,9 +429,14 @@ export default function App() {
           }
         } catch { /* ignore parse errors */ }
 
-        // If profile not yet filled, show ProfileForm first
+        // If profile not yet filled, show ProfileForm first.
+        // If profile is complete but the digital-signature authorization is still
+        // missing (new column, or user dropped off mid-flow), require it before
+        // letting them into the rest of the app.
         if (!existingRecord.area) {
           setView('profileForm');
+        } else if (!existingRecord.fotografiaUrl || !existingRecord.selfieUrl) {
+          setView('consent');
         } else if (restoredAudience.length > 0) {
           setAudience(restoredAudience);
           setView('dashboard');
@@ -473,8 +493,26 @@ export default function App() {
     };
     setUserSession(updatedSession);
     localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(updatedSession));
-    // No registramos en Sheets todavía — se guarda cuando confirme su perfil de audiencia
-    setView('onboarding');
+    // No registramos en Sheets todavía — se guarda cuando confirme su perfil de audiencia.
+    // Antes de poder usar el resto de la app, debe autorizar el uso de su firma digital.
+    setView('consent');
+  };
+
+  const handleConsentComplete = (data: { firmaUrl?: string; selfieUrl?: string }) => {
+    if (!userSession) return;
+    const updatedSession: UserSession = {
+      ...userSession,
+      consentFirmaUrl: data.firmaUrl || userSession.consentFirmaUrl,
+      consentSelfieUrl: data.selfieUrl || userSession.consentSelfieUrl,
+    };
+    setUserSession(updatedSession);
+    localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(updatedSession));
+    if (updatedSession.audience.length > 0) {
+      setAudience(updatedSession.audience);
+      setView('dashboard');
+    } else {
+      setView('onboarding');
+    }
   };
 
   const handleSelectAudience = async (types: AudienceType[]) => {
@@ -546,7 +584,12 @@ export default function App() {
       // Sync progress snapshot to sheet periodically (every 3 chunks)
       if (userSession && chunkIndex % 3 === 0) {
         const completedCount = newProg.filter(p => p.completed).length;
-        const totalTopics = topics.filter(t => t.active !== false).length;
+        const userAudiences = (audience || []).map(a => a.toLowerCase());
+        const totalTopics = topics.filter(t => {
+          if (t.active === false) return false;
+          const topicAuds = t.audience.split(',').map(a => a.trim().toLowerCase());
+          return userAudiences.length === 0 || userAudiences.some(ua => topicAuds.includes(ua));
+        }).length;
         const avancePct = totalTopics > 0 ? Math.round((completedCount / totalTopics) * 100) : 0;
         updateIngresoProgress({
           dni: userSession.dni,
@@ -559,7 +602,7 @@ export default function App() {
 
       return newProg;
     });
-  }, [userSession, topics]);
+  }, [userSession, topics, audience]);
 
   const handleFinishModule = useCallback((topicId: string) => {
     setProgress(prev => {
@@ -576,7 +619,12 @@ export default function App() {
       // Sync completed status to Sheets so other devices see it
       if (userSession) {
         const completedCount = newProg.filter(p => p.completed).length;
-        const totalTopics = topics.filter(t => t.active !== false).length;
+        const userAudiences = (audience || []).map(a => a.toLowerCase());
+        const totalTopics = topics.filter(t => {
+          if (t.active === false) return false;
+          const topicAuds = t.audience.split(',').map(a => a.trim().toLowerCase());
+          return userAudiences.length === 0 || userAudiences.some(ua => topicAuds.includes(ua));
+        }).length;
         const avancePct = totalTopics > 0 ? Math.round((completedCount / totalTopics) * 100) : 0;
         const quizScores = newProg.filter(p => p.quizScore !== undefined).map(p => p.quizScore!);
         const avgNotaOutOf20 = quizScores.length > 0 ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : 0;
@@ -593,7 +641,7 @@ export default function App() {
       return newProg;
     });
     setView('courseDetail');
-  }, [userSession, topics]);
+  }, [userSession, topics, audience]);
 
   const handleQuizComplete = useCallback((topicId: string, score: number) => {
     setProgress(prev => {
@@ -716,8 +764,9 @@ export default function App() {
   return (
     <div className={`min-h-screen text-slate-200 selection:bg-blue-500/30 selection:text-blue-200 ${darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
       {/* Top-right floating buttons — hidden in views that have their own header */}
-      {view !== 'admin' && view !== 'learning' && view !== 'quiz' && view !== 'certificateClaim' && view !== 'actas' && (
+      {view !== 'admin' && view !== 'learning' && view !== 'quiz' && view !== 'certificateClaim' && view !== 'actas' && view !== 'consent' && (
         <div className="fixed top-4 right-4 z-[200] flex items-center gap-2">
+          <InstallAppButton darkMode={darkMode} />
           {userSession && (view === 'dashboard' || view === 'courseDetail') && (
             <button
                onClick={handleLogout}
@@ -772,6 +821,19 @@ export default function App() {
               userSession={userSession}
               onComplete={handleProfileComplete}
             />
+          </motion.div>
+        )}
+
+        {view === 'consent' && userSession && (
+          <motion.div key="consent" className="fixed inset-0 z-50">
+            <Suspense fallback={<ViewLoader />}>
+              <ConsentSigning
+                userSession={userSession}
+                appConfig={appConfig}
+                onSuccess={handleConsentComplete}
+                onLogout={handleLogout}
+              />
+            </Suspense>
           </motion.div>
         )}
 
@@ -913,6 +975,7 @@ export default function App() {
                 onRefreshData={handleRefreshData}
                 adminPass={appConfig?.adminPass}
                 appConfig={appConfig}
+                onConfigUpdate={setAppConfig}
               />
             </Suspense>
           </motion.div>
@@ -922,7 +985,7 @@ export default function App() {
       {/* Media Overlay — Dramatic 'Lights Out' Effect */}
       <AnimatePresence>
         {mediaOverlay && (() => {
-          const embedUrl = driveEmbedUrl(mediaOverlay.url, mediaOverlay.type);
+          const embedUrl = driveEmbedUrl(mediaOverlay.url);
           // Build a direct Drive view URL from the original link (always opens correctly)
           const rawUrl = mediaOverlay.url.trim();
           let driveFileId = '';

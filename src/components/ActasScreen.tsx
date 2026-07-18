@@ -55,7 +55,7 @@ export default function ActasScreen({ userSession, appConfig, documentos, firmas
     <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2.5">
       <span className="text-[10px] font-black text-blue-400 w-4 flex-shrink-0">{i + 1}</span>
       <div className="flex-1 min-w-0">
-        <p className="text-slate-100 text-[13px] leading-snug truncate">{it.nombre}</p>
+        <p className="text-slate-100 text-[13px] leading-snug">{it.nombre}</p>
         <span className={`inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest mt-0.5 ${it.tipo === 'virtual' ? 'text-emerald-400' : 'text-amber-400'}`}>
           {it.tipo === 'virtual' ? <Monitor className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
           {tipoLabel(it.tipo)}

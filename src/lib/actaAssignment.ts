@@ -69,6 +69,7 @@ export interface GeneralActaDoc {
   nombre: string;
   tipo: 'virtual' | 'fisico';  // marca la casilla "Digital" (virtual) o "Físico" en el acta
   driveUrl?: string;
+  categoria?: 'documento' | 'capacitacion';
 }
 
 /**
@@ -86,7 +87,7 @@ export function getGeneralActaDocuments(assigned: ActaDocumento[], user: Assigna
       for (const it of d.items) {
         if (!isItemAssignedToUser(d, it, user)) continue;
         const tipo: 'virtual' | 'fisico' = it.tipo || (it.driveUrl ? 'virtual' : 'fisico');
-        out.push({ nombre: it.nombre, tipo, driveUrl: it.driveUrl });
+        out.push({ nombre: it.nombre, tipo, driveUrl: it.driveUrl, categoria: it.categoria });
       }
     } else {
       out.push({ nombre: d.titulo, tipo: d.driveDocUrl ? 'virtual' : 'fisico', driveUrl: d.driveDocUrl || undefined });

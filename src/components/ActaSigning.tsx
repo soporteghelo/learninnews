@@ -23,7 +23,7 @@ interface ActaSigningProps {
   onSuccess: (pdfUrl: string) => void;
 }
 
-type Step = 'confirm' | 'signature' | 'selfie' | 'generating' | 'success';
+type Step = 'confirm' | 'signature' | 'signatureAsistencia' | 'selfie' | 'generating' | 'success';
 
 export default function ActaSigning({ documentos, userSession, appConfig, onBack, onSuccess }: ActaSigningProps) {
   const [step, setStep] = useState<Step>('confirm');
@@ -34,6 +34,8 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
 
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [hasDrawn, setHasDrawn] = useState(false);
+  const [signatureAsistenciaData, setSignatureAsistenciaData] = useState<string | null>(null);
+  const [hasDrawnAsistencia, setHasDrawnAsistencia] = useState(false);
   const [logoSrc, setLogoSrc] = useState('');
   const [firmaRepSrc, setFirmaRepSrc] = useState('');
   const [correo, setCorreo] = useState(userSession.correo || '');
@@ -55,6 +57,10 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
     return next;
   });
 
+  // Si alguno de los documentos marcados es una capacitación, se pide una firma
+  // adicional (distinta de la del acta) para la Lista de Asistencia.
+  const requiereFirmaAsistencia = selectedDocs.some(d => d.categoria === 'capacitacion');
+
   // Captura facial (MediaPipe) encapsulada en un hook compartido
   const {
     faceStatus, stabilityProgress, selfieData, setIsCameraReady,
@@ -63,6 +69,8 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
 
   const sigCanvas = useRef<SignatureCanvas>(null);
   const sigContainerRef = useRef<HTMLDivElement>(null);
+  const sigCanvasAsistencia = useRef<SignatureCanvas>(null);
+  const sigContainerRefAsistencia = useRef<HTMLDivElement>(null);
   const actaRef = useRef<HTMLDivElement>(null);
 
   const signer: ActaSignerData & { fechaIngreso?: string } = {
@@ -77,14 +85,21 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
   const dispositivo = typeof navigator !== 'undefined' ? (navigator.userAgent || '').slice(0, 120) : '';
 
   // El acta general siempre lleva la firma dibujada del trabajador
-  const steps: Step[] = ['confirm', 'signature', 'selfie', 'success'];
+  const steps: Step[] = requiereFirmaAsistencia
+    ? ['confirm', 'signature', 'signatureAsistencia', 'selfie', 'success']
+    : ['confirm', 'signature', 'selfie', 'success'];
 
-  // Resize signature canvas to container
+  // Resize signature canvas(es) to container
   useLayoutEffect(() => {
     if (step === 'signature' && sigContainerRef.current && sigCanvas.current) {
       const canvas = sigCanvas.current.getCanvas();
       canvas.width = sigContainerRef.current.offsetWidth;
       canvas.height = sigContainerRef.current.offsetHeight;
+    }
+    if (step === 'signatureAsistencia' && sigContainerRefAsistencia.current && sigCanvasAsistencia.current) {
+      const canvas = sigCanvasAsistencia.current.getCanvas();
+      canvas.width = sigContainerRefAsistencia.current.offsetWidth;
+      canvas.height = sigContainerRefAsistencia.current.offsetHeight;
     }
   }, [step]);
 
@@ -122,6 +137,12 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
       if (!hasDrawn) { setError('Por favor, firma antes de continuar'); return; }
       const finalSig = sigCanvas.current?.getCanvas().toDataURL('image/png') ?? signatureData;
       setSignatureData(finalSig);
+      setError(null);
+      setStep(requiereFirmaAsistencia ? 'signatureAsistencia' : 'selfie');
+    } else if (step === 'signatureAsistencia') {
+      if (!hasDrawnAsistencia) { setError('Por favor, firma la lista de asistencia antes de continuar'); return; }
+      const finalSigAsis = sigCanvasAsistencia.current?.getCanvas().toDataURL('image/png') ?? signatureAsistenciaData;
+      setSignatureAsistenciaData(finalSigAsis);
       setStep('selfie');
       setError(null);
     }
@@ -131,6 +152,12 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
   const saveSig = () => {
     const data = sigCanvas.current?.getTrimmedCanvas().toDataURL('image/png');
     if (data) { setSignatureData(data); setHasDrawn(true); }
+  };
+
+  const clearSignatureAsistencia = () => { sigCanvasAsistencia.current?.clear(); setSignatureAsistenciaData(null); setHasDrawnAsistencia(false); };
+  const saveSigAsistencia = () => {
+    const data = sigCanvasAsistencia.current?.getTrimmedCanvas().toDataURL('image/png');
+    if (data) { setSignatureAsistenciaData(data); setHasDrawnAsistencia(true); }
   };
 
   const generateAndUpload = async () => {
@@ -165,6 +192,7 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
         pdfBase64,
         signatureBase64: signatureData || undefined,
         selfieBase64: selfieData || undefined,
+        firmaAsistenciaBase64: signatureAsistenciaData || undefined,
         dispositivo,
       });
 
@@ -216,24 +244,27 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 safe-area-top safe-area-bottom overflow-y-auto">
+    <div className="h-screen bg-slate-950 p-4 safe-area-top safe-area-bottom overflow-y-auto">
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-600/10 blur-[120px] rounded-full" />
       </div>
 
-      <div className="w-full max-w-xl relative">
-        <div className="flex items-center justify-between mb-8">
-          <div className="min-w-0">
-            <h2 className="text-2xl font-black text-white uppercase tracking-tighter truncate">Firma de Acta</h2>
-            <p className="text-slate-500 text-xs font-bold tracking-widest">VERIFICACIÓN FACIAL</p>
+      <div className="w-full max-w-xl mx-auto relative">
+        {/* Encabezado + progreso: fijo arriba mientras el contenido del paso hace scroll debajo. */}
+        <div className="sticky top-0 z-20 glass-strong rounded-2xl px-4 pt-3 pb-1 mb-4 -mx-4 sm:mx-0">
+          <div className="flex items-center justify-between mb-6">
+            <div className="min-w-0">
+              <h2 className="text-2xl font-black text-white uppercase tracking-tighter truncate">Firma de Acta</h2>
+              <p className="text-slate-500 text-xs font-bold tracking-widest">VERIFICACIÓN FACIAL</p>
+            </div>
+            <button onClick={onBack} className="w-10 h-10 rounded-full bg-slate-900 border border-white/5 flex items-center justify-center hover:bg-slate-800 transition-colors flex-shrink-0">
+              <X className="w-5 h-5 text-slate-400" />
+            </button>
           </div>
-          <button onClick={onBack} className="w-10 h-10 rounded-full bg-slate-900 border border-white/5 flex items-center justify-center hover:bg-slate-800 transition-colors flex-shrink-0">
-            <X className="w-5 h-5 text-slate-400" />
-          </button>
-        </div>
 
-        {step !== 'success' && step !== 'generating' && <StepIndicator />}
+          {step !== 'success' && step !== 'generating' && <StepIndicator />}
+        </div>
 
         <AnimatePresence mode="wait">
           {step === 'confirm' && (
@@ -330,6 +361,33 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
                 <SignatureCanvas ref={sigCanvas} penColor="#000"
                   canvasProps={{ style: { width: '100%', height: '100%', cursor: 'crosshair', display: 'block' } }}
                   onBegin={() => { setHasDrawn(true); setError(null); }} onEnd={saveSig} />
+              </div>
+              {error && <p className="text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {error}</p>}
+            </motion.div>
+          )}
+
+          {step === 'signatureAsistencia' && (
+            <motion.div key="signatureAsistencia" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+              className="glass-card rounded-3xl p-6 border-white/5">
+              <div className="flex gap-3 mb-6">
+                <button onClick={clearSignatureAsistencia} className="flex-1 py-4 bg-slate-900 text-slate-400 rounded-xl font-black text-[10px] tracking-widest border-2 border-white/25 hover:text-white hover:border-white/50 transition-all">
+                  LIMPIAR
+                </button>
+                <button onClick={handleNext} className="flex-[2] py-4 bg-blue-600 text-white rounded-xl font-black text-[10px] tracking-widest hover:bg-blue-500 transition-all flex items-center justify-center gap-2 overflow-hidden border-2 border-white/25">
+                  {signatureAsistenciaData ? 'CONFIRMAR FIRMA' : 'DIBUJA TU FIRMA'} <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex items-center gap-3 mb-2">
+                <PenTool className="w-5 h-5 text-blue-400" />
+                <h3 className="text-lg font-bold text-white">Firma para Lista de Asistencia</h3>
+              </div>
+              <p className="text-slate-500 text-[11px] mb-4">
+                Al menos una capacitación forma parte de tu acta. Firma una vez más para el registro de asistencia (independiente de tu firma anterior).
+              </p>
+              <div ref={sigContainerRefAsistencia} className="bg-white rounded-2xl overflow-hidden mb-4 border-2 border-slate-800" style={{ height: '200px' }}>
+                <SignatureCanvas ref={sigCanvasAsistencia} penColor="#000"
+                  canvasProps={{ style: { width: '100%', height: '100%', cursor: 'crosshair', display: 'block' } }}
+                  onBegin={() => { setHasDrawnAsistencia(true); setError(null); }} onEnd={saveSigAsistencia} />
               </div>
               {error && <p className="text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {error}</p>}
             </motion.div>

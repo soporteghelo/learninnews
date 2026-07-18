@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type Webcam from 'react-webcam';
+import { releaseVideoStream, loadScript } from '../lib/utils';
 
 /**
  * Hook de captura facial reutilizable (MediaPipe FaceDetection + react-webcam).
@@ -20,18 +21,6 @@ const STABILITY_MS = 3000;
 const PROXIMITY_MIN = 0.15;
 const PROXIMITY_MAX = 0.75;
 const CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe';
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-    const el = document.createElement('script');
-    el.src = src;
-    el.crossOrigin = 'anonymous';
-    el.onload = () => resolve();
-    el.onerror = () => reject(new Error(`Failed to load: ${src}`));
-    document.head.appendChild(el);
-  });
-}
 
 export function useFaceCapture(enabled: boolean) {
   const [faceStatus, setFaceStatus] = useState<FaceStatus>('loading');
@@ -79,6 +68,9 @@ export function useFaceCapture(enabled: boolean) {
     /* eslint-enable react-hooks/set-state-in-effect */
     stabilityStartRef.current = null;
     let isClosed = false;
+    // Se captura una vez por instancia de efecto: el cleanup no debe releer webcamRef.current,
+    // que puede haber cambiado (o ser null) para cuando se ejecuta.
+    const videoEl = webcamRef.current?.video ?? null;
 
     Promise.all([
       loadScript(`${CDN}/camera_utils/camera_utils.js`),
@@ -110,6 +102,7 @@ export function useFaceCapture(enabled: boolean) {
           const imageSrc = webcamRef.current?.getScreenshot();
           if (imageSrc) cropAndSave(imageSrc);
           mediaCameraRef.current?.stop();
+          releaseVideoStream(videoEl);
           stabilityStartRef.current = null;
           setStabilityProgress(0);
         }
@@ -120,10 +113,9 @@ export function useFaceCapture(enabled: boolean) {
       fd.onResults(onResults);
       faceDetectionRef.current = fd;
 
-      const video = webcamRef.current?.video;
-      if (!video) { setFaceStatus('loading'); return; }
+      if (!videoEl) { setFaceStatus('loading'); return; }
 
-      const cam = new W.Camera(video, {
+      const cam = new W.Camera(videoEl, {
         onFrame: async () => {
           if (!isClosed && webcamRef.current?.video) {
             try { await fd.send({ image: webcamRef.current.video }); } catch { /* ignore */ }
@@ -138,6 +130,7 @@ export function useFaceCapture(enabled: boolean) {
     return () => {
       isClosed = true;
       mediaCameraRef.current?.stop();
+      releaseVideoStream(videoEl);
       faceDetectionRef.current?.close();
       faceDetectionRef.current = null;
       mediaCameraRef.current = null;
@@ -159,6 +152,7 @@ export function useFaceCapture(enabled: boolean) {
   /** Reinicia por completo la cámara (botón "Reiniciar cámara"). */
   const restartCamera = () => {
     mediaCameraRef.current?.stop();
+    releaseVideoStream(webcamRef.current?.video);
     faceDetectionRef.current?.close();
     faceDetectionRef.current = null;
     mediaCameraRef.current = null;

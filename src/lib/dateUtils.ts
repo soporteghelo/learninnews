@@ -18,10 +18,17 @@ export function getISOWeek(d: Date): number {
   return Math.ceil((((tmp.getTime() - y.getTime()) / 86400000) + 1) / 7);
 }
 
+/** Año de semana ISO 8601 (puede diferir del año calendario en los bordes de diciembre/enero). */
+function getISOWeekYear(d: Date): number {
+  const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
+  return tmp.getUTCFullYear();
+}
+
 /** Etiqueta de semana: "Semana 28 · 06 jul. – 12 jul., 2026" (rango lunes–domingo). */
 export function isoWeekLabel(date: Date): string {
   const week = getISOWeek(date);
-  const year = date.getFullYear();
+  const year = getISOWeekYear(date);
   const dow = date.getDay() || 7;
   const mon = new Date(date); mon.setDate(date.getDate() - dow + 1);
   const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
@@ -32,5 +39,5 @@ export function isoWeekLabel(date: Date): string {
 /** Clave ordenable "YYYY-Wnn" para agrupar por semana (o '0000-W00' sin fecha). */
 export function isoWeekKey(date: Date | null): string {
   if (!date) return '0000-W00';
-  return `${date.getFullYear()}-W${String(getISOWeek(date)).padStart(2, '0')}`;
+  return `${getISOWeekYear(date)}-W${String(getISOWeek(date)).padStart(2, '0')}`;
 }

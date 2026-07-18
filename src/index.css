@@ -705,6 +705,10 @@ html.light-mode .video-comment-text { color: #0f172a !important; }
 html.light-mode .pdf-button-primary-text { color: #582a00 !important; }
 html.light-mode .pdf-button-secondary-text { color: #7c4a00 !important; }
 
+/* Aviso de "mirando fuera de pantalla" del quiz — texto claro pensado para fondo
+   oscuro; en modo claro pasa a negro para que se lea sobre el fondo ámbar/verde claro. */
+html.light-mode .distraction-hint-text { color: #000000 !important; }
+
 /* Quiz category badge — inverted in each mode */
 .quiz-category-badge {
   background: #ffffff;

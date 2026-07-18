@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, ShieldCheck, CheckCircle2, AlertTriangle, XCircle,
-  Loader2, RefreshCw, Stethoscope,
+  Loader2, RefreshCw, Stethoscope, ChevronDown,
 } from 'lucide-react';
 import { runSystemDiagnostics, type DiagnosticReport, type DiagnosticLevel } from '../services/sheetsService';
 
@@ -26,10 +26,21 @@ export default function DiagnosticoPanel({ open, onClose }: DiagnosticoPanelProp
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<DiagnosticReport | null>(null);
   const [fatalError, setFatalError] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const runDiagnostics = useCallback(async () => {
     setLoading(true);
     setFatalError(null);
+    setExpandedIds(new Set());
     try {
       const result = await runSystemDiagnostics();
       setReport(result);
@@ -130,18 +141,45 @@ export default function DiagnosticoPanel({ open, onClose }: DiagnosticoPanelProp
                   {report.checks.map((c) => {
                     const s = LEVEL_STYLES[c.level];
                     const Icon = s.icon;
+                    const hasDetail = !!c.detail;
+                    const isExpanded = expandedIds.has(c.id);
                     return (
                       <div
                         key={c.id}
-                        className={`flex items-start gap-3 p-3 rounded-xl border ${s.ring} ${c.level === 'ok' ? 'bg-white' : s.bg}`}
+                        className={`rounded-xl border ${s.ring} ${c.level === 'ok' ? 'bg-white' : s.bg} overflow-hidden`}
                       >
-                        <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${s.color}`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-[#191c1d]">{c.label}</p>
-                          {c.detail && (
-                            <p className="text-[11px] text-[#737781] mt-0.5 break-words leading-relaxed">{c.detail}</p>
+                        <button
+                          type="button"
+                          onClick={() => hasDetail && toggleExpanded(c.id)}
+                          disabled={!hasDetail}
+                          aria-expanded={hasDetail ? isExpanded : undefined}
+                          className={`w-full flex items-start gap-3 p-3 text-left ${hasDetail ? 'cursor-pointer active:bg-black/5' : 'cursor-default'}`}
+                        >
+                          <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${s.color}`} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-[#191c1d]">{c.label}</p>
+                            {hasDetail && !isExpanded && (
+                              <p className="text-[11px] text-[#737781] mt-0.5 truncate leading-relaxed">{c.detail}</p>
+                            )}
+                          </div>
+                          {hasDetail && (
+                            <ChevronDown
+                              className={`w-4 h-4 flex-shrink-0 mt-0.5 text-[#9aa0a6] transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                            />
                           )}
-                        </div>
+                        </button>
+                        <AnimatePresence>
+                          {hasDetail && isExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <p className="text-[11px] text-[#737781] px-3 pb-3 -mt-1 break-words leading-relaxed">{c.detail}</p>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     );
                   })}

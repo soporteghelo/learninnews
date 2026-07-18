@@ -30,12 +30,16 @@ export function pendingWriteCount(): number {
 export async function flushQueue(poster: (payload: object) => Promise<unknown>): Promise<number> {
   const items = read();
   if (!items.length) return 0;
-  const remaining: QueuedItem[] = [];
-  let sent = 0;
+  // Se marca por id lo enviado en vez de escribir un snapshot al final: mientras esperamos
+  // cada `poster`, otro código puede encolar un nuevo item (enqueueWrite) — si sobrescribiéramos
+  // el storage con el snapshot inicial, ese item nuevo se perdería silenciosamente.
+  const sentIds = new Set<string>();
   for (const it of items) {
-    try { await poster(it.payload); sent++; }
-    catch { remaining.push(it); }
+    try { await poster(it.payload); sentIds.add(it.id); }
+    catch { /* se mantiene en cola para el próximo intento */ }
   }
-  write(remaining);
-  return sent;
+  if (sentIds.size > 0) {
+    write(read().filter(it => !sentIds.has(it.id)));
+  }
+  return sentIds.size;
 }

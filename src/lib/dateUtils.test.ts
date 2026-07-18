@@ -41,6 +41,10 @@ describe('isoWeekKey', () => {
   it('devuelve la clave centinela para null', () => {
     expect(isoWeekKey(null)).toBe('0000-W00');
   });
+  it('usa el año de semana ISO (no el año calendario) en los bordes de año', () => {
+    // 1 ene 2023 es domingo → pertenece a la semana 52 del año ISO 2022
+    expect(isoWeekKey(new Date(2023, 0, 1))).toBe('2022-W52');
+  });
 });
 
 describe('isoWeekLabel', () => {
