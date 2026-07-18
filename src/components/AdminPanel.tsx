@@ -2781,7 +2781,7 @@ ${text}`;
           </>
         )}
 
-        {!selectedTopicId && activeTab !== 'progress' && activeTab !== 'shortEvals' && (
+        {!selectedTopicId && activeTab !== 'progress' && activeTab !== 'shortEvals' && activeTab !== 'actas' && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-20 h-20 rounded-full bg-[#e1e3e4] flex items-center justify-center mb-4">
               <Search className="w-10 h-10 text-[#737781]" />
