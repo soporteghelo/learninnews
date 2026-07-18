@@ -1652,7 +1652,7 @@ ${text}`;
     { key: 'quiz', label: 'Quizzes', icon: HelpCircle, badge: selectedTopicId ? activeQuizCount : null },
     { key: 'progress', label: 'Usuarios', icon: Users, badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
     { key: 'shortEvals', label: 'Evals', icon: ClipboardCheck, badge: shortEvals.length > 0 ? shortEvals.length : null },
-    { key: 'actas', label: 'Actas', icon: FileSignature, badge: actaDocs.length > 0 ? actaDocs.length : null },
+    { key: 'actas', label: 'Documentos y Capacitaciones', icon: FileSignature, badge: actaDocs.length > 0 ? actaDocs.length : null },
   ] as { key: AdminTab; label: string; icon: typeof BookOpen; badge: number | null }[]);
 
   const sidebarNav = (
@@ -1693,7 +1693,7 @@ ${text}`;
     <div className="min-h-screen bg-[#f8f9fa] safe-area-top safe-area-bottom pb-24">
       {/* Header */}
       <header className="w-full top-0 sticky bg-white/90 backdrop-blur-md border-b border-[#e1e3e4] z-50 shadow-[0_1px_0_rgba(0,27,60,0.04)]">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+        <div className="px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Ocultar módulos' : 'Mostrar módulos'}
               className="p-2 rounded-xl bg-[#f3f4f5] hover:bg-[#e7e8e9] transition-colors active:scale-95 duration-150 flex-shrink-0">
