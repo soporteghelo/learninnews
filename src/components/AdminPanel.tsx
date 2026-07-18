@@ -343,12 +343,15 @@ export default function AdminPanel({
   const [showNewActaForm, setShowNewActaForm] = useState(false);
   const [editingActaId, setEditingActaId] = useState<string | null>(null);
   const [actaSaving, setActaSaving] = useState(false);
-  type ActaItemForm = Omit<ActaItem, 'perfiles' | 'dnisAsignados'> & { perfiles: string[]; dnisText: string };
-  const [actaForm, setActaForm] = useState<{ titulo: string; descripcion: string; perfiles: string[]; dnis: string; items: ActaItemForm[]; requiereFirmaDibujada: boolean }>(
-    { titulo: '', descripcion: '', perfiles: [], dnis: '', items: [], requiereFirmaDibujada: true }
-  );
-  // Filas de items con la sección de asignación/código propia expandida (colapsada por defecto)
-  const [expandedItemAdvanced, setExpandedItemAdvanced] = useState<Set<number>>(new Set());
+  // Cada documento es independiente: un ActaDocumento = un solo documento (items siempre length 1)
+  const [actaForm, setActaForm] = useState<{
+    titulo: string; descripcion: string; perfiles: string[]; dnis: string;
+    driveUrl: string; tipo: 'virtual' | 'fisico';
+    codigo: string; version: string; fechaVersion: string;
+    requiereFirmaDibujada: boolean;
+  }>({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', tipo: 'virtual', codigo: '', version: '', fechaVersion: '', requiereFirmaDibujada: true });
+  // true si el documento en edición tenía más de un item (modelo anterior) — se avisa que se colapsará a uno solo al guardar
+  const [editingHasExtraItems, setEditingHasExtraItems] = useState(false);
   const [showFirmasFor, setShowFirmasFor] = useState<string | null>(null);
   const [resendingFirma, setResendingFirma] = useState<string | null>(null);
   // Sort & filter for the firmas table (one visible at a time)
@@ -480,61 +483,30 @@ export default function AdminPanel({
   };
 
   const resetActaForm = () => {
-    setActaForm({ titulo: '', descripcion: '', perfiles: [], dnis: '', items: [], requiereFirmaDibujada: true });
-    setExpandedItemAdvanced(new Set());
+    setActaForm({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', tipo: 'virtual', codigo: '', version: '', fechaVersion: '', requiereFirmaDibujada: true });
+    setEditingHasExtraItems(false);
     setEditingActaId(null);
     setShowNewActaForm(false);
   };
 
   const handleEditActa = (d: ActaDocumento) => {
+    const first = d.items[0];
     setActaForm({
       titulo: d.titulo, descripcion: d.descripcion, perfiles: d.perfiles,
       dnis: d.dnisAsignados.join(', '),
-      items: d.items.map(it => ({
-        nombre: it.nombre, driveUrl: it.driveUrl || '', tipo: it.tipo || (it.driveUrl ? 'virtual' : 'fisico'),
-        perfiles: it.perfiles || [], dnisText: (it.dnisAsignados || []).join(', '),
-        codigo: it.codigo || '', version: it.version || '', fechaVersion: it.fechaVersion || '',
-      })),
+      driveUrl: first?.driveUrl || d.driveDocUrl || '',
+      tipo: first?.tipo || (first?.driveUrl ? 'virtual' : 'fisico'),
+      codigo: first?.codigo || '', version: first?.version || '', fechaVersion: first?.fechaVersion || '',
       requiereFirmaDibujada: d.requiereFirmaDibujada,
     });
-    setExpandedItemAdvanced(new Set());
+    setEditingHasExtraItems(d.items.length > 1);
     setEditingActaId(d.id);
     setShowNewActaForm(true);
   };
 
-  // Ítems (documentos que recibe el trabajador) del formulario de acta
-  const addActaItem = () => setActaForm(f => ({ ...f, items: [...f.items, { nombre: '', driveUrl: '', tipo: 'virtual', perfiles: [], dnisText: '', codigo: '', version: '', fechaVersion: '' }] }));
-  const updateActaItem = (i: number, patch: Partial<ActaItemForm>) =>
-    setActaForm(f => ({ ...f, items: f.items.map((it, idx) => idx === i ? { ...it, ...patch } : it) }));
-  const removeActaItem = (i: number) => setActaForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) }));
-  const toggleItemAdvanced = (i: number) => setExpandedItemAdvanced(prev => {
-    const next = new Set(prev);
-    if (next.has(i)) next.delete(i); else next.add(i);
-    return next;
-  });
-
   const handleSaveActa = async () => {
-    // Ítems limpios: fila con nombre no vacío
-    const cleanItems: ActaItem[] = actaForm.items
-      .map(it => {
-        const tipo: 'virtual' | 'fisico' = it.tipo === 'fisico' ? 'fisico' : 'virtual';
-        const dnisAsignados = it.dnisText.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
-        return {
-          nombre: it.nombre.trim(), tipo, driveUrl: tipo === 'virtual' ? ((it.driveUrl || '').trim() || undefined) : undefined,
-          perfiles: it.perfiles.length > 0 ? it.perfiles : undefined,
-          dnisAsignados: dnisAsignados.length > 0 ? dnisAsignados : undefined,
-          codigo: it.codigo?.trim() || undefined,
-          version: it.version?.trim() || undefined,
-          fechaVersion: it.fechaVersion?.trim() || undefined,
-        };
-      })
-      .filter(it => it.nombre);
     if (!actaForm.titulo.trim()) {
       showToast('El título del documento es obligatorio', 'error');
-      return;
-    }
-    if (cleanItems.length === 0) {
-      showToast('Agrega al menos un documento en "Documentos que recibe el trabajador"', 'error');
       return;
     }
     if (actaForm.perfiles.length === 0 && !actaForm.dnis.trim()) {
@@ -544,6 +516,16 @@ export default function AdminPanel({
     setActaSaving(true);
     const id = editingActaId || `acta_${Date.now()}`;
     const dnisAsignados = actaForm.dnis.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+    const tipo: 'virtual' | 'fisico' = actaForm.tipo === 'fisico' ? 'fisico' : 'virtual';
+    // Cada documento es independiente: siempre exactamente un item, igual al propio documento
+    const item: ActaItem = {
+      nombre: actaForm.titulo.trim(),
+      tipo,
+      driveUrl: tipo === 'virtual' ? (actaForm.driveUrl.trim() || undefined) : undefined,
+      codigo: actaForm.codigo.trim() || undefined,
+      version: actaForm.version.trim() || undefined,
+      fechaVersion: actaForm.fechaVersion.trim() || undefined,
+    };
     const result = await saveActaDocumento({
       id,
       titulo: actaForm.titulo.trim(),
@@ -551,7 +533,7 @@ export default function AdminPanel({
       perfiles: actaForm.perfiles,
       dnisAsignados,
       cuerpoHtml: '',
-      items: cleanItems,
+      items: [item],
       driveDocUrl: '',
       requiereFirmaDibujada: actaForm.requiereFirmaDibujada,
       activo: true,
@@ -3566,9 +3548,11 @@ ${text}`;
                   <div className="flex flex-wrap gap-2 mt-1.5">
                     {AUDIENCE_CONFIG.profiles.map(p => {
                       const active = actaForm.perfiles.includes(p.id);
+                      const disabled = !active && actaForm.dnis.trim().length > 0;
                       return (
-                        <button key={p.id} onClick={() => setActaForm(f => ({ ...f, perfiles: active ? f.perfiles.filter(x => x !== p.id) : [...f.perfiles, p.id] }))}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${active ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-white text-[#424750] border-[#e1e3e4] hover:border-[#1b4d89]/40'}`}>
+                        <button key={p.id} disabled={disabled}
+                          onClick={() => setActaForm(f => ({ ...f, perfiles: active ? f.perfiles.filter(x => x !== p.id) : [...f.perfiles, p.id] }))}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${active ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-white text-[#424750] border-[#e1e3e4] hover:border-[#1b4d89]/40'} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-[#e1e3e4]`}>
                           {p.label}
                         </button>
                       );
@@ -3580,93 +3564,53 @@ ${text}`;
                 <div>
                   <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">…o asignar a DNIs específicos (separados por coma)</label>
                   <input value={actaForm.dnis} onChange={e => setActaForm(f => ({ ...f, dnis: e.target.value }))}
-                    placeholder="Ej. 70115721, 46879832"
-                    className="w-full mt-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                    disabled={actaForm.perfiles.length > 0}
+                    placeholder={actaForm.perfiles.length > 0 ? 'Quita los perfiles asignados para usar DNIs específicos' : 'Ej. 70115721, 46879832'}
+                    className="w-full mt-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none disabled:opacity-40 disabled:cursor-not-allowed" />
                 </div>
 
-                {/* Documentos que recibe el trabajador (fila a fila) */}
-                <div>
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Documentos que recibe el trabajador</label>
-                    <button onClick={addActaItem}
-                      className="text-[10px] font-bold text-[#1b4d89] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Agregar documento</button>
+                {editingHasExtraItems && (
+                  <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800">
+                    Este documento tenía varios documentos internos (modelo anterior). Al guardar quedará como un solo documento independiente; si necesitas los demás, créalos por separado con "Nuevo".
                   </div>
-                  <p className="text-[10px] text-[#737781] mt-0.5">Cada fila se lista en la pantalla de recepción y en el PDF del acta. El enlace de Drive genera un QR por documento.</p>
-                  <div className="space-y-2 mt-2">
-                    {actaForm.items.length === 0 && (
-                      <p className="text-[11px] text-[#9aa0a6] italic px-1">Sin documentos aún. Usa "Agregar documento" para listar lo que se recepciona.</p>
-                    )}
-                    {actaForm.items.map((it, i) => {
-                      const tipo = it.tipo || 'virtual';
-                      return (
-                      <div key={i} className="flex items-start gap-2 p-2.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg">
-                        <span className="mt-2 text-[11px] font-black text-[#1b4d89] w-5 text-center flex-shrink-0">{i + 1}</span>
-                        <div className="flex-1 min-w-0 space-y-2">
-                          <input value={it.nombre} onChange={e => updateActaItem(i, { nombre: e.target.value })}
-                            placeholder="Nombre del documento (ej. Reglamento Interno SST)"
-                            className="w-full px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                          {tipo === 'virtual' ? (
-                            <input value={it.driveUrl || ''} onChange={e => updateActaItem(i, { driveUrl: e.target.value })}
-                              placeholder="Enlace de Drive (para ver y QR)"
-                              className="w-full px-3 py-2 bg-white border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                          ) : (
-                            <p className="text-[10px] text-[#9aa0a6] italic px-1">Entrega física — sin enlace de Drive.</p>
-                          )}
-                          {/* Tipo de documento */}
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-bold text-[#737781] uppercase tracking-wider mr-1">Tipo:</span>
-                            {(['virtual', 'fisico'] as const).map(t => (
-                              <button key={t} onClick={() => updateActaItem(i, { tipo: t })}
-                                className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors ${
-                                  tipo === t ? 'bg-[#1b4d89] text-white' : 'bg-white border border-[#e1e3e4] text-[#737781] hover:border-[#1b4d89]/40'
-                                }`}>{t === 'virtual' ? 'Virtual' : 'Físico'}</button>
-                            ))}
-                          </div>
+                )}
 
-                          {/* Asignación y código propios del item (opcional, colapsado por defecto) */}
-                          <button type="button" onClick={() => toggleItemAdvanced(i)}
-                            className="text-[10px] font-bold text-[#1b4d89] hover:underline flex items-center gap-1">
-                            {expandedItemAdvanced.has(i) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                            Asignación y código propios (opcional)
-                          </button>
-                          {expandedItemAdvanced.has(i) && (
-                            <div className="p-2 bg-white border border-[#e1e3e4] rounded-lg space-y-2">
-                              <p className="text-[9px] text-[#9aa0a6]">Si no defines nada aquí, este documento hereda la asignación general del acta.</p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {AUDIENCE_CONFIG.profiles.map(p => {
-                                  const active = it.perfiles.includes(p.id);
-                                  return (
-                                    <button key={p.id} type="button"
-                                      onClick={() => updateActaItem(i, { perfiles: active ? it.perfiles.filter(x => x !== p.id) : [...it.perfiles, p.id] })}
-                                      className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-all ${active ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-white text-[#424750] border-[#e1e3e4] hover:border-[#1b4d89]/40'}`}>
-                                      {p.label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              <input value={it.dnisText} onChange={e => updateActaItem(i, { dnisText: e.target.value })}
-                                placeholder="…o DNIs específicos de este documento (separados por coma)"
-                                className="w-full px-3 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-xs text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                              <div className="grid grid-cols-3 gap-1.5">
-                                <input value={it.codigo || ''} onChange={e => updateActaItem(i, { codigo: e.target.value })}
-                                  placeholder="Código (ej. FPG-CL-SIG-06-05)"
-                                  className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                                <input value={it.version || ''} onChange={e => updateActaItem(i, { version: e.target.value })}
-                                  placeholder="Versión"
-                                  className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                                <input value={it.fechaVersion || ''} onChange={e => updateActaItem(i, { fechaVersion: e.target.value })}
-                                  placeholder="Fecha de actualización"
-                                  className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        {tipo === 'virtual' && (it.driveUrl || '').trim() && <div className="flex-shrink-0"><QrPreview url={(it.driveUrl || '').trim()} size={48} /></div>}
-                        <button onClick={() => removeActaItem(i)} title="Quitar documento"
-                          className="mt-1 p-1.5 rounded-lg hover:bg-red-50 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4 text-red-400" /></button>
-                      </div>
-                      );
-                    })}
+                {/* Tipo + enlace de Drive (el documento en sí, ya no anidado) */}
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span className="text-[10px] font-bold text-[#737781] uppercase tracking-wider mr-1">Tipo:</span>
+                    {(['virtual', 'fisico'] as const).map(t => (
+                      <button key={t} onClick={() => setActaForm(f => ({ ...f, tipo: t }))}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                          actaForm.tipo === t ? 'bg-[#1b4d89] text-white' : 'bg-white border border-[#e1e3e4] text-[#737781] hover:border-[#1b4d89]/40'
+                        }`}>{t === 'virtual' ? 'Virtual' : 'Físico'}</button>
+                    ))}
+                  </div>
+                  {actaForm.tipo === 'virtual' ? (
+                    <div className="flex items-center gap-2">
+                      <input value={actaForm.driveUrl} onChange={e => setActaForm(f => ({ ...f, driveUrl: e.target.value }))}
+                        placeholder="Enlace de Drive (para ver y QR)"
+                        className="flex-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                      {actaForm.driveUrl.trim() && <QrPreview url={actaForm.driveUrl.trim()} size={48} />}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-[#9aa0a6] italic px-1">Entrega física — sin enlace de Drive.</p>
+                  )}
+                </div>
+
+                {/* Código de control documental (para la lista de distribución en PDF) */}
+                <div>
+                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wider">Código de control documental (opcional, para la lista de distribución)</label>
+                  <div className="grid grid-cols-3 gap-1.5 mt-1">
+                    <input value={actaForm.codigo} onChange={e => setActaForm(f => ({ ...f, codigo: e.target.value }))}
+                      placeholder="Código (ej. FPG-CL-SIG-06-05)"
+                      className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                    <input value={actaForm.version} onChange={e => setActaForm(f => ({ ...f, version: e.target.value }))}
+                      placeholder="Versión"
+                      className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                    <input value={actaForm.fechaVersion} onChange={e => setActaForm(f => ({ ...f, fechaVersion: e.target.value }))}
+                      placeholder="Fecha de actualización"
+                      className="px-2 py-1.5 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-[11px] text-[#191c1d] focus:border-[#1b4d89] outline-none" />
                   </div>
                 </div>
 
