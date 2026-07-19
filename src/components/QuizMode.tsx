@@ -423,9 +423,13 @@ export default function QuizMode({
         </div>
       </main>
 
-      {/* Botón de acción fijo: siempre visible sin necesidad de hacer scroll */}
+      {/* Botón de acción fijo: siempre visible sin necesidad de hacer scroll.
+          Si el aviso de "mirando fuera de pantalla" está activo, se reserva espacio
+          extra abajo para que ese aviso (fixed, más arriba en el DOM) no lo tape. */}
       {(selectedOption || showFeedback) && (
-        <div className="flex-shrink-0 px-6 py-4 glass-strong border-t border-white/10 z-20">
+        <div className={`flex-shrink-0 px-6 pt-4 glass-strong border-t border-white/10 z-20 transition-[padding] duration-200 ${
+          distraction.isLookingAway && !distraction.isWarningVisible ? 'pb-24' : 'pb-4'
+        }`}>
           <div className="max-w-3xl mx-auto w-full">
             {!showFeedback ? (
               <button
