@@ -202,6 +202,16 @@ export default function ConsentSigning({ userSession, appConfig, onSuccess, onLo
           </div>
 
           {step !== 'success' && step !== 'generating' && <StepIndicator />}
+
+          {step === 'intro' && (
+            <div className="pb-3">
+              {error && <p className="text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 mb-2"><AlertCircle className="w-3 h-3" /> {error}</p>}
+              <button onClick={handleNext} disabled={!accepted}
+                className="w-full py-4 bg-blue-600 text-white rounded-xl font-black text-xs tracking-widest hover:bg-blue-500 active:scale-[0.98] transition-all flex items-center justify-center gap-2 border-2 border-white/25 disabled:opacity-40 disabled:cursor-not-allowed">
+                ACEPTAR Y CONTINUAR <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
 
         <AnimatePresence mode="wait">
@@ -228,13 +238,6 @@ export default function ConsentSigning({ userSession, appConfig, onSuccess, onLo
                   {accepted && <Check className="w-3.5 h-3.5 text-white" />}
                 </div>
                 <p className="text-slate-200 text-[12px] font-semibold leading-snug">{CONSENT_CHECKBOX_LABEL}</p>
-              </button>
-
-              {error && <p className="text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 mb-3"><AlertCircle className="w-3 h-3" /> {error}</p>}
-
-              <button onClick={handleNext} disabled={!accepted}
-                className="w-full py-4 bg-blue-600 text-white rounded-xl font-black text-xs tracking-widest hover:bg-blue-500 active:scale-[0.98] transition-all flex items-center justify-center gap-2 border-2 border-white/25 disabled:opacity-40 disabled:cursor-not-allowed">
-                ACEPTAR Y CONTINUAR <ArrowRight className="w-4 h-4" />
               </button>
             </motion.div>
           )}
