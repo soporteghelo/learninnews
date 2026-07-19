@@ -178,7 +178,7 @@ export default function ConsentSigning({ userSession, appConfig, onSuccess, onLo
   );
 
   return (
-    <div className="h-screen bg-slate-950 p-4 safe-area-top safe-area-bottom overflow-y-auto">
+    <div className="min-h-screen bg-slate-950 p-4 safe-area-top safe-area-bottom">
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-600/10 blur-[120px] rounded-full" />
