@@ -70,7 +70,7 @@ export default function LearningMode({
 
   if (chunks.length === 0) {
     return (
-      <div className="h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+      <div className="h-dvh bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
         <div className="glass-card p-10 rounded-2xl max-w-sm">
           <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
             <ChevronDown className="w-8 h-8 text-amber-400" />
@@ -147,7 +147,7 @@ export default function LearningMode({
   }
 
   return (
-    <div className="h-screen bg-slate-950 flex flex-col lg:flex-row safe-area-top safe-area-bottom overflow-hidden">
+    <div className="h-dvh bg-slate-950 flex flex-col lg:flex-row safe-area-top safe-area-bottom overflow-hidden">
       {/* Sidebar - Desktop Only */}
       <aside className="hidden lg:flex w-80 flex-shrink-0 flex-col bg-slate-900 border-r border-white/5 z-40 overflow-hidden">
         <div className="p-6 border-b border-white/5">
@@ -396,7 +396,7 @@ export default function LearningMode({
         </main>
 
 
-        <footer className="flex-shrink-0 px-6 py-5 glass border-t border-white/5 flex gap-4 z-20">
+        <footer className="flex-shrink-0 px-6 pt-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] glass border-t border-white/5 flex gap-4 z-20">
           <button
             onClick={prevSlide}
             disabled={currentIndex === 0}

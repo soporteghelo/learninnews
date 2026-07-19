@@ -413,7 +413,8 @@ export default function Dashboard({
           whileTap={{ scale: 0.92 }}
           onClick={onPlayTutorial}
           title="Ver tutorial"
-          className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 shadow-lg shadow-blue-600/40 border border-white/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform safe-area-bottom"
+          className="fixed right-6 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 shadow-lg shadow-blue-600/40 border border-white/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
+          style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
         >
           <Play className="w-6 h-6 text-white fill-white ml-0.5" />
         </motion.button>

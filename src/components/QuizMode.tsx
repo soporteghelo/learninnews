@@ -313,7 +313,7 @@ export default function QuizMode({
 
   // ── QUIZ SCREEN ──
   return (
-    <div className="h-screen flex flex-col safe-area-top safe-area-bottom overflow-hidden">
+    <div className="h-dvh flex flex-col safe-area-top safe-area-bottom overflow-hidden">
       {/* Header */}
       <header className="flex-shrink-0 px-6 py-4 glass-strong flex items-center justify-between z-20">
         <button onClick={handleBack} className="p-2 -ml-2 text-slate-400">
@@ -428,7 +428,9 @@ export default function QuizMode({
           extra abajo para que ese aviso (fixed, más arriba en el DOM) no lo tape. */}
       {(selectedOption || showFeedback) && (
         <div className={`flex-shrink-0 px-6 pt-4 glass-strong border-t border-white/10 z-20 transition-[padding] duration-200 ${
-          distraction.isLookingAway && !distraction.isWarningVisible ? 'pb-24' : 'pb-4'
+          distraction.isLookingAway && !distraction.isWarningVisible
+            ? 'pb-[calc(env(safe-area-inset-bottom)+6rem)]'
+            : 'pb-[calc(env(safe-area-inset-bottom)+1rem)]'
         }`}>
           <div className="max-w-3xl mx-auto w-full">
             {!showFeedback ? (
