@@ -5,7 +5,7 @@ import type { ActaDocumento, ActaFirma } from '../types';
 function doc(p: Partial<ActaDocumento>): ActaDocumento {
   return {
     id: 'd1', titulo: 'Doc', descripcion: '', perfiles: [], dnisAsignados: [],
-    cuerpoHtml: '', items: [], driveDocUrl: '', requiereFirmaDibujada: true, activo: true, fechaCreacion: '', ...p,
+    cuerpoHtml: '', items: [], driveDocUrl: '', linkDrive: '', requiereFirmaDibujada: true, activo: true, fechaCreacion: '', ...p,
   };
 }
 function firma(p: Partial<ActaFirma>): ActaFirma {

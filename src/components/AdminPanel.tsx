@@ -10,7 +10,7 @@ import {
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
   Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
   ClipboardCheck, ClipboardList, ExternalLink, ToggleLeft, ToggleRight, Globe, ArrowUpDown, ArrowUp, ArrowDown,
-  FileSignature, Mail, Send, X, Menu, PanelLeftClose, GraduationCap
+  FileSignature, Mail, Send, X, Menu, PanelLeftClose, GraduationCap, Upload
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG, getPublicBaseUrl } from '../config/app.config';
 import {
@@ -18,10 +18,10 @@ import {
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, updateAppDynamicConfig,
+  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, deleteUsuario, updateAppDynamicConfig,
   fetchShortEvals, createShortEval, updateShortEvalStatus, deleteShortEval, fetchAllShortResults,
   deleteShortEvalResult,
-  fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo,
+  fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo, uploadActaArchivo,
 } from '../services/sheetsService';
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
@@ -81,6 +81,14 @@ function QrPreview({ url, size = 96, caption }: { url: string; size?: number; ca
       {caption && <span className="text-[9px] text-[#737781] text-center leading-tight max-w-[110px]">{caption}</span>}
     </div>
   );
+}
+
+/** Convierte un enlace de Drive en su URL de vista previa incrustable (iframe). */
+function drivePreviewUrl(url?: string): string {
+  if (!url) return '';
+  const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  const id = m ? m[1] : '';
+  return id ? `https://drive.google.com/file/d/${id}/preview` : url;
 }
 
 // Variables disponibles para interpolar en el cuerpo del acta
@@ -347,8 +355,18 @@ export default function AdminPanel({
   const [progressPublicoFilter, setProgressPublicoFilter] = useState('');
   const [progressExpandedDni, setProgressExpandedDni] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<IngresoRecord | null>(null);
-  const [editForm, setEditForm] = useState<{ dni: string; publico: string[]; correo: string }>({ dni: '', publico: [], correo: '' });
+  const [editForm, setEditForm] = useState<{
+    dni: string; publico: string[]; correo: string; nombres: string; apellidos: string;
+    empresa: string; area: string; cargo: string; fechaIngreso: string; fechaNacimiento: string;
+    celular: string; contacto1Numero: string; contacto1Parentesco: string;
+    contacto2Numero: string; contacto2Parentesco: string;
+  }>({
+    dni: '', publico: [], correo: '', nombres: '', apellidos: '',
+    empresa: '', area: '', cargo: '', fechaIngreso: '', fechaNacimiento: '',
+    celular: '', contacto1Numero: '', contacto1Parentesco: '', contacto2Numero: '', contacto2Parentesco: '',
+  });
   const [savingProfile, setSavingProfile] = useState(false);
+  const [deletingUser, setDeletingUser] = useState(false);
 
   // Short Evaluaciones state
   const [shortEvals, setShortEvals] = useState<ShortEval[]>([]);
@@ -384,11 +402,14 @@ export default function AdminPanel({
   // Cada documento es independiente: un ActaDocumento = un solo documento (items siempre length 1)
   const [actaForm, setActaForm] = useState<{
     titulo: string; descripcion: string; perfiles: string[]; dnis: string;
-    driveUrl: string; tipo: 'virtual' | 'fisico'; categoria: 'documento' | 'capacitacion';
+    driveUrl: string; linkDrive: string; tipo: 'virtual' | 'fisico'; categoria: 'documento' | 'capacitacion';
     codigo: string; version: string; fechaVersion: string;
     capacitador: string; horas: string;
     requiereFirmaDibujada: boolean;
-  }>({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', tipo: 'virtual', categoria: 'documento', codigo: '', version: '', fechaVersion: '', capacitador: '', horas: '', requiereFirmaDibujada: true });
+  }>({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', linkDrive: '', tipo: 'virtual', categoria: 'documento', codigo: '', version: '', fechaVersion: '', capacitador: '', horas: '', requiereFirmaDibujada: true });
+  const [actaUploading, setActaUploading] = useState(false);
+  const actaFileInputRef = useRef<HTMLInputElement>(null);
+  const [viewingActaDocUrl, setViewingActaDocUrl] = useState<string | null>(null);
   // true si el documento en edición tenía más de un item (modelo anterior) — se avisa que se colapsará a uno solo al guardar
   const [editingHasExtraItems, setEditingHasExtraItems] = useState(false);
   const [showFirmasFor, setShowFirmasFor] = useState<string | null>(null);
@@ -565,7 +586,7 @@ export default function AdminPanel({
   };
 
   const resetActaForm = () => {
-    setActaForm({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', tipo: 'virtual', categoria: 'documento', codigo: '', version: '', fechaVersion: '', capacitador: '', horas: '', requiereFirmaDibujada: true });
+    setActaForm({ titulo: '', descripcion: '', perfiles: [], dnis: '', driveUrl: '', linkDrive: '', tipo: 'virtual', categoria: 'documento', codigo: '', version: '', fechaVersion: '', capacitador: '', horas: '', requiereFirmaDibujada: true });
     setEditingHasExtraItems(false);
     setEditingActaId(null);
     setShowNewActaForm(false);
@@ -577,6 +598,7 @@ export default function AdminPanel({
       titulo: d.titulo, descripcion: d.descripcion, perfiles: d.perfiles,
       dnis: d.dnisAsignados.join(', '),
       driveUrl: first?.driveUrl || d.driveDocUrl || '',
+      linkDrive: d.linkDrive || '',
       tipo: first?.tipo || (first?.driveUrl ? 'virtual' : 'fisico'),
       categoria: first?.categoria || 'documento',
       codigo: first?.codigo || '', version: first?.version || '', fechaVersion: first?.fechaVersion || '',
@@ -625,6 +647,7 @@ export default function AdminPanel({
       cuerpoHtml: '',
       items: [item],
       driveDocUrl: '',
+      linkDrive: tipo === 'virtual' ? actaForm.linkDrive.trim() : '',
       requiereFirmaDibujada: actaForm.requiereFirmaDibujada,
       activo: true,
     });
@@ -638,10 +661,43 @@ export default function AdminPanel({
     }
   };
 
-  const handleDeleteActa = async (id: string) => {
-    if (!window.confirm('¿Eliminar este documento? Las firmas ya registradas se conservan.')) return;
-    setActaDocs(prev => prev.filter(d => d.id !== id));
-    try { await deleteActaDocumento(id); showToast('Documento eliminado'); }
+  const handleActaFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite volver a elegir el mismo archivo si hay que reintentar
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) {
+      showToast('El archivo supera los 15 MB. Sube un archivo más liviano o pega el enlace de Drive.', 'error');
+      return;
+    }
+    setActaUploading(true);
+    try {
+      const fileBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const result = await uploadActaArchivo({ fileBase64, fileName: file.name, mimeType: file.type || 'application/octet-stream' });
+      if (result.success && result.url) {
+        setActaForm(f => ({ ...f, driveUrl: result.url!, linkDrive: result.url! }));
+        showToast('Archivo subido a ACTAS/DOCUMENTOS');
+      } else {
+        showToast(result.message || 'Error al subir el archivo', 'error');
+      }
+    } catch {
+      showToast('Error al leer el archivo', 'error');
+    } finally {
+      setActaUploading(false);
+    }
+  };
+
+  const handleDeleteActa = async (doc: ActaDocumento) => {
+    const msg = doc.linkDrive
+      ? '¿Eliminar este documento? Las firmas ya registradas se conservan, pero el archivo subido a Drive (ACTAS/DOCUMENTOS) se eliminará junto con el documento.'
+      : '¿Eliminar este documento? Las firmas ya registradas se conservan.';
+    if (!window.confirm(msg)) return;
+    setActaDocs(prev => prev.filter(d => d.id !== doc.id));
+    try { await deleteActaDocumento(doc.id); showToast('Documento eliminado'); }
     catch { showToast('Error al eliminar', 'error'); handleRefreshActas(); }
   };
 
@@ -762,6 +818,18 @@ export default function AdminPanel({
       dni: record.dni,
       publico: (record.publico || '').split(',').map(p => p.trim()).filter(Boolean),
       correo: record.correo || '',
+      nombres: record.nombres || '',
+      apellidos: record.apellidos || '',
+      empresa: record.empresa || '',
+      area: record.area || '',
+      cargo: record.cargo || '',
+      fechaIngreso: record.fechaIngreso || '',
+      fechaNacimiento: record.fechaNacimiento || '',
+      celular: record.celular || '',
+      contacto1Numero: record.contacto1Numero || '',
+      contacto1Parentesco: record.contacto1Parentesco || '',
+      contacto2Numero: record.contacto2Numero || '',
+      contacto2Parentesco: record.contacto2Parentesco || '',
     });
   };
 
@@ -777,11 +845,31 @@ export default function AdminPanel({
         nuevoDni: nuevoDni !== editingUser.dni ? nuevoDni : undefined,
         publico: editForm.publico.join(', '),
         correo: editForm.correo.trim(),
+        nombres: editForm.nombres.trim(),
+        apellidos: editForm.apellidos.trim(),
+        empresa: editForm.empresa.trim(),
+        area: editForm.area.trim(),
+        cargo: editForm.cargo.trim(),
+        fechaIngreso: editForm.fechaIngreso.trim(),
+        fechaNacimiento: editForm.fechaNacimiento.trim(),
+        celular: editForm.celular.trim(),
+        contacto1Numero: editForm.contacto1Numero.trim(),
+        contacto1Parentesco: editForm.contacto1Parentesco.trim(),
+        contacto2Numero: editForm.contacto2Numero.trim(),
+        contacto2Parentesco: editForm.contacto2Parentesco.trim(),
       });
       if (result.success) {
         const finalDni = result.dni || nuevoDni;
         setIngresoRecords(prev => prev.map(r => r.dni === editingUser.dni
-          ? { ...r, dni: finalDni, publico: editForm.publico.join(', '), correo: editForm.correo.trim() }
+          ? {
+              ...r, dni: finalDni, publico: editForm.publico.join(', '), correo: editForm.correo.trim(),
+              nombres: editForm.nombres.trim(), apellidos: editForm.apellidos.trim(),
+              empresa: editForm.empresa.trim(), area: editForm.area.trim(), cargo: editForm.cargo.trim(),
+              fechaIngreso: editForm.fechaIngreso.trim(), fechaNacimiento: editForm.fechaNacimiento.trim(),
+              celular: editForm.celular.trim(),
+              contacto1Numero: editForm.contacto1Numero.trim(), contacto1Parentesco: editForm.contacto1Parentesco.trim(),
+              contacto2Numero: editForm.contacto2Numero.trim(), contacto2Parentesco: editForm.contacto2Parentesco.trim(),
+            }
           : r));
         if (progressExpandedDni === editingUser.dni) setProgressExpandedDni(finalDni);
         showToast('Perfil actualizado correctamente');
@@ -793,6 +881,26 @@ export default function AdminPanel({
       showToast('Error al actualizar el perfil', 'error');
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleDeleteUsuario = async (record: IngresoRecord) => {
+    if (!window.confirm(`¿Eliminar a ${record.nombres} ${record.apellidos} (DNI ${record.dni})? Se borrará su registro de avance. Los certificados, actas firmadas y evaluaciones que ya generó se conservan.`)) return;
+    setDeletingUser(true);
+    try {
+      const result = await deleteUsuario(record.dni);
+      if (result.success) {
+        setIngresoRecords(prev => prev.filter(r => r.dni !== record.dni));
+        if (progressExpandedDni === record.dni) setProgressExpandedDni(null);
+        if (editingUser?.dni === record.dni) setEditingUser(null);
+        showToast('Usuario eliminado');
+      } else {
+        showToast(result.message || 'No se pudo eliminar el usuario', 'error');
+      }
+    } catch {
+      showToast('Error al eliminar el usuario', 'error');
+    } finally {
+      setDeletingUser(false);
     }
   };
 
@@ -3157,13 +3265,23 @@ ${text}`;
                                       </div>
                                     ))}
                                   </div>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleOpenEditUser(record); }}
-                                    title="Editar perfil, correo o DNI"
-                                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#1b4d89] hover:bg-blue-50 hover:border-[#1b4d89]/30 transition-all"
-                                  >
-                                    <Edit3 className="w-3 h-3" /> Editar
-                                  </button>
+                                  <div className="flex-shrink-0 flex items-center gap-1.5">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleOpenEditUser(record); }}
+                                      title="Editar todos los datos del usuario"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#1b4d89] hover:bg-blue-50 hover:border-[#1b4d89]/30 transition-all"
+                                    >
+                                      <Edit3 className="w-3 h-3" /> Editar
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleDeleteUsuario(record); }}
+                                      disabled={deletingUser}
+                                      title="Eliminar usuario"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e1e3e4] text-[10px] font-bold text-red-500 hover:bg-red-50 hover:border-red-300 transition-all disabled:opacity-50"
+                                    >
+                                      <Trash2 className="w-3 h-3" /> Eliminar
+                                    </button>
+                                  </div>
                                 </div>
 
                                 {/* Per-topic progress */}
@@ -3770,10 +3888,31 @@ ${text}`;
                     ))}
                   </div>
                   {actaForm.tipo === 'virtual' ? (
-                    <div className="flex items-center gap-2">
-                      <input value={actaForm.driveUrl} onChange={e => setActaForm(f => ({ ...f, driveUrl: e.target.value }))}
-                        placeholder="Enlace de Drive (para ver y QR)"
-                        className="flex-1 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex-1 min-w-[180px] flex items-center gap-2 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-lg text-sm">
+                        {actaForm.driveUrl.trim() ? (
+                          <>
+                            <FileText className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                            <span className="text-[#191c1d] font-semibold truncate">Archivo cargado</span>
+                          </>
+                        ) : (
+                          <span className="text-[#9aa0a6] italic">Sin archivo — sube uno para generar el enlace</span>
+                        )}
+                      </div>
+                      {actaForm.driveUrl.trim() && (
+                        <button type="button" onClick={() => setViewingActaDocUrl(actaForm.driveUrl.trim())}
+                          title="Ver documento en esta página"
+                          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white border border-[#e1e3e4] text-[#1b4d89] hover:border-[#1b4d89]/40 transition-colors">
+                          <Eye className="w-3.5 h-3.5" /> Ver
+                        </button>
+                      )}
+                      <input ref={actaFileInputRef} type="file" onChange={handleActaFileSelected} className="hidden" />
+                      <button type="button" onClick={() => actaFileInputRef.current?.click()} disabled={actaUploading}
+                        title="Subir archivo a Drive (carpeta ACTAS/DOCUMENTOS)"
+                        className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white border border-[#e1e3e4] text-[#1b4d89] hover:border-[#1b4d89]/40 disabled:opacity-50 transition-colors">
+                        {actaUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                        {actaUploading ? 'Subiendo…' : actaForm.driveUrl.trim() ? 'Reemplazar archivo' : 'Subir archivo'}
+                      </button>
                       {actaForm.driveUrl.trim() && <QrPreview url={actaForm.driveUrl.trim()} size={48} />}
                     </div>
                   ) : (
@@ -3868,7 +4007,7 @@ ${text}`;
                           <button onClick={() => { setShowFirmasFor(showFirmas ? null : doc.id); setFirmaFilters({ dni: '', nombre: '', cargo: '', estado: '', fecha: '', correo: '' }); setFirmaSort({ key: 'nombre', dir: 'asc' }); setFirmaPage(1); }}
                             title="Ver firmas" className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors"><TrendingUp className="w-4 h-4 text-[#1b4d89]" /></button>
                           <button onClick={() => handleEditActa(doc)} title="Editar" className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors"><Edit3 className="w-4 h-4 text-[#737781]" /></button>
-                          <button onClick={() => handleDeleteActa(doc.id)} title="Eliminar" className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"><Trash2 className="w-4 h-4 text-red-400" /></button>
+                          <button onClick={() => handleDeleteActa(doc)} title="Eliminar" className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"><Trash2 className="w-4 h-4 text-red-400" /></button>
                         </div>
                       </div>
 
@@ -4174,9 +4313,9 @@ ${text}`;
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               onClick={e => e.stopPropagation()}
-              className="bg-white rounded-2xl max-w-md w-full p-6 shadow-[0_16px_48px_rgba(0,0,0,0.15)]"
+              className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col shadow-[0_16px_48px_rgba(0,0,0,0.15)]"
             >
-              <div className="flex items-center gap-3 mb-5">
+              <div className="flex items-center gap-3 p-6 pb-5 flex-shrink-0">
                 <div className="w-12 h-12 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0">
                   <Edit3 className="w-5 h-5 text-[#1b4d89]" />
                 </div>
@@ -4186,7 +4325,7 @@ ${text}`;
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-4 px-6 overflow-y-auto">
                 <div>
                   <p className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-2">Perfil (público)</p>
                   <div className="flex flex-wrap gap-2">
@@ -4210,6 +4349,19 @@ ${text}`;
                         </button>
                       );
                     })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Nombres</label>
+                    <input value={editForm.nombres} onChange={e => setEditForm(prev => ({ ...prev, nombres: e.target.value }))}
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Apellidos</label>
+                    <input value={editForm.apellidos} onChange={e => setEditForm(prev => ({ ...prev, apellidos: e.target.value }))}
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
                   </div>
                 </div>
 
@@ -4240,9 +4392,73 @@ ${text}`;
                     </p>
                   )}
                 </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Empresa</label>
+                    <input value={editForm.empresa} onChange={e => setEditForm(prev => ({ ...prev, empresa: e.target.value }))}
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Área</label>
+                    <input value={editForm.area} onChange={e => setEditForm(prev => ({ ...prev, area: e.target.value }))}
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Cargo</label>
+                  <input value={editForm.cargo} onChange={e => setEditForm(prev => ({ ...prev, cargo: e.target.value }))}
+                    className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Fecha de ingreso</label>
+                    <input value={editForm.fechaIngreso} onChange={e => setEditForm(prev => ({ ...prev, fechaIngreso: e.target.value }))}
+                      placeholder="dd/mm/aaaa"
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Fecha de nacimiento</label>
+                    <input value={editForm.fechaNacimiento} onChange={e => setEditForm(prev => ({ ...prev, fechaNacimiento: e.target.value }))}
+                      placeholder="dd/mm/aaaa"
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5 block">Celular</label>
+                  <input value={editForm.celular} onChange={e => setEditForm(prev => ({ ...prev, celular: e.target.value }))}
+                    className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5">Contacto de emergencia 1</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input value={editForm.contacto1Numero} onChange={e => setEditForm(prev => ({ ...prev, contacto1Numero: e.target.value }))}
+                      placeholder="Número"
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                    <input value={editForm.contacto1Parentesco} onChange={e => setEditForm(prev => ({ ...prev, contacto1Parentesco: e.target.value }))}
+                      placeholder="Parentesco"
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1.5">Contacto de emergencia 2</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input value={editForm.contacto2Numero} onChange={e => setEditForm(prev => ({ ...prev, contacto2Numero: e.target.value }))}
+                      placeholder="Número"
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                    <input value={editForm.contacto2Parentesco} onChange={e => setEditForm(prev => ({ ...prev, contacto2Parentesco: e.target.value }))}
+                      placeholder="Parentesco"
+                      className="w-full px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none" />
+                  </div>
+                </div>
               </div>
 
-              <div className="flex gap-3 mt-6">
+              <div className="flex gap-3 p-6 pt-4 flex-shrink-0">
                 <button
                   onClick={() => setEditingUser(null)}
                   disabled={savingProfile}
@@ -4269,6 +4485,43 @@ ${text}`;
                 </button>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Visor del documento de Acta (mismo enlace usado en el QR) — abre en la propia página */}
+      <AnimatePresence>
+        {viewingActaDocUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-[110] flex flex-col"
+            onClick={() => setViewingActaDocUrl(null)}
+          >
+            <div className="flex items-center gap-3 px-4 py-3 bg-[#0f2d6b]" onClick={e => e.stopPropagation()}>
+              <button onClick={() => setViewingActaDocUrl(null)} title="Retroceder"
+                className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors flex-shrink-0">
+                <ChevronLeft className="w-5 h-5 text-white" />
+              </button>
+              <FileText className="w-5 h-5 text-white flex-shrink-0" />
+              <p className="text-white font-bold text-sm flex-1 truncate">Vista previa del documento</p>
+              <a href={viewingActaDocUrl} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 text-white text-[11px] font-bold hover:bg-white/20 transition-colors">
+                <ExternalLink className="w-3.5 h-3.5" /> Abrir en Drive
+              </a>
+              <button onClick={() => setViewingActaDocUrl(null)} title="Cerrar"
+                className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+            <iframe
+              title="Vista previa del documento"
+              src={drivePreviewUrl(viewingActaDocUrl)}
+              className="flex-1 w-full bg-white"
+              onClick={e => e.stopPropagation()}
+              allow="autoplay"
+            />
           </motion.div>
         )}
       </AnimatePresence>

@@ -1044,6 +1044,18 @@ export async function updateUserProfile(data: {
   nuevoDni?: string;
   publico?: string;
   correo?: string;
+  nombres?: string;
+  apellidos?: string;
+  empresa?: string;
+  area?: string;
+  cargo?: string;
+  fechaIngreso?: string;
+  fechaNacimiento?: string;
+  celular?: string;
+  contacto1Numero?: string;
+  contacto1Parentesco?: string;
+  contacto2Numero?: string;
+  contacto2Parentesco?: string;
 }): Promise<{ success: boolean; message: string; dni?: string }> {
   try {
     const result = await postToAppsScript({ action: 'updateUserProfile', ...data }) as any;
@@ -1053,6 +1065,16 @@ export async function updateUserProfile(data: {
       message: result.message || 'Perfil actualizado correctamente',
       dni: result.dni,
     };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+}
+
+export async function deleteUsuario(dni: string): Promise<{ success: boolean; message?: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'deleteUsuario', dni });
+    if (result.status === 'ok') clearSheetCache('ingresos');
+    return result.status === 'ok' ? { success: true } : { success: false, message: result.message };
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
   }
@@ -1353,6 +1375,7 @@ export async function fetchActaDocumentos(): Promise<ActaDocumento[]> {
             cuerpoHtml: String(r.CuerpoHtml || ''),
             items: parseActaItems(r.Items),
             driveDocUrl: String(r.DriveDocUrl || '').trim(),
+            linkDrive: String(r.LinkDrive || '').trim(),
             requiereFirmaDibujada: String(r.RequiereFirmaDibujada || '').toLowerCase() !== 'false',
             activo: String(r.Activo || '').toLowerCase() === 'true' || String(r.Activo || '') === '1',
             fechaCreacion: String(r.FechaCreacion || '').trim(),
@@ -1409,6 +1432,7 @@ export async function saveActaDocumento(data: {
   cuerpoHtml: string;
   items: ActaItem[];
   driveDocUrl: string;
+  linkDrive?: string;
   requiereFirmaDibujada: boolean;
   activo: boolean;
 }): Promise<{ success: boolean; message?: string }> {
@@ -1422,6 +1446,20 @@ export async function saveActaDocumento(data: {
 
 export async function deleteActaDocumento(id: string): Promise<void> {
   await postToAppsScript({ action: 'deleteActaDocumento', id });
+}
+
+/** Sube un archivo (PDF, imagen, etc.) a Drive en la carpeta ACTAS/DOCUMENTOS y devuelve su enlace. */
+export async function uploadActaArchivo(data: {
+  fileBase64: string;
+  fileName: string;
+  mimeType: string;
+}): Promise<{ success: boolean; url?: string; message?: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'uploadActaArchivo', ...data }) as any;
+    return result.status === 'ok' ? { success: true, url: result.url } : { success: false, message: result.message };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
 }
 
 export async function saveActaFirma(data: {

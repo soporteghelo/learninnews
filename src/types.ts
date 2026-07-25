@@ -214,6 +214,7 @@ export interface ActaDocumento {
   cuerpoHtml: string;          // plantilla HTML con variables {nombres} {dni} {cargo} ...
   items: ActaItem[];           // documentos que recibe el trabajador (se listan fila a fila)
   driveDocUrl: string;         // documento digital adjunto (opcional) guardado en Drive
+  linkDrive: string;           // enlace del archivo subido desde la app (carpeta ACTAS/DOCUMENTOS)
   requiereFirmaDibujada: boolean;
   activo: boolean;
   fechaCreacion: string;

@@ -223,6 +223,8 @@ function doPost(e) {
       return updateIngreso(sheet, data.ingreso);
     } else if (data.action === 'updateUserProfile') {
       return updateUserProfile(ss, data);
+    } else if (data.action === 'deleteUsuario') {
+      return deleteUsuario(ss, data);
     } else if (data.action === 'updateConfig') {
       return updateConfig(ss, data);
     } else if (data.action === 'saveCertificate') {
@@ -245,6 +247,8 @@ function doPost(e) {
       return saveShortEvalResult(ss, data);
     } else if (data.action === 'deleteShortEvalResult') {
       return deleteShortEvalResult(ss, data);
+    } else if (data.action === 'uploadActaArchivo') {
+      return uploadActaArchivo(data);
     } else if (data.action === 'upsertActaDocumento') {
       return upsertActaDocumento(ss, data);
     } else if (data.action === 'deleteActaDocumento') {
@@ -618,12 +622,21 @@ function updateUserProfile(ss, data) {
     }
   }
 
-  if (data.publico !== undefined && colMap['Publico'] !== undefined) {
-    sheet.getRange(rowIndex, colMap['Publico'] + 1).setValue(data.publico);
-  }
-  if (data.correo !== undefined && colMap['CORREO'] !== undefined) {
-    sheet.getRange(rowIndex, colMap['CORREO'] + 1).setValue(data.correo);
-  }
+  // Campos editables del perfil: se actualiza cada uno solo si vino en la petición
+  // (undefined = no tocar esa columna) y si la columna existe en la hoja.
+  var fieldToColumn = {
+    publico: 'Publico', correo: 'CORREO', nombres: 'Nombres', apellidos: 'Apellidos',
+    empresa: 'EMPRESA', area: 'AREA', cargo: 'CARGO',
+    fechaIngreso: 'FECHA_INGRESO', fechaNacimiento: 'FECHA_NACIMIENTO', celular: 'CELULAR',
+    contacto1Numero: 'NUMERO_CONTACTO_1', contacto1Parentesco: 'PARENTESCO_CONTACTO_1',
+    contacto2Numero: 'NUMERO_CONTACTO_2', contacto2Parentesco: 'PARENTESCO_CONTACTO_2'
+  };
+  Object.keys(fieldToColumn).forEach(function (field) {
+    var col = fieldToColumn[field];
+    if (data[field] !== undefined && colMap[col] !== undefined) {
+      sheet.getRange(rowIndex, colMap[col] + 1).setValue(data[field]);
+    }
+  });
   if (nuevoDni && nuevoDni !== dni) {
     sheet.getRange(rowIndex, dniCol + 1).setValue(nuevoDni);
     migrateDniAcrossSheets_(ss, dni, nuevoDni);
@@ -631,6 +644,32 @@ function updateUserProfile(ss, data) {
 
   SpreadsheetApp.flush();
   return createResponse({ status: 'ok', message: 'Perfil actualizado correctamente', dni: nuevoDni || dni });
+}
+
+/**
+ * Elimina el registro de un usuario en INGRESOS (por DNI). No borra certificados,
+ * firmas de actas ni resultados de evaluaciones cortas ya generados: esos
+ * registros históricos se conservan aunque el usuario deje de existir en INGRESOS.
+ */
+function deleteUsuario(ss, data) {
+  var dni = String(data.dni || '').trim();
+  if (!dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+
+  var sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja INGRESOS no encontrada' });
+  if (sheet.getLastRow() < 2) return createResponse({ status: 'error', message: 'No se encontró ningún usuario con el DNI ' + dni });
+
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var dniCol = getHeaderIndex(headers, ['DNI', 'Id']);
+  if (dniCol === -1) return createResponse({ status: 'error', message: 'Columna DNI no encontrada' });
+
+  var dniRange = sheet.getRange(2, dniCol + 1, sheet.getLastRow() - 1, 1);
+  var found = dniRange.createTextFinder(dni).matchEntireCell(true).findNext();
+  if (!found) return createResponse({ status: 'error', message: 'No se encontró ningún usuario con el DNI ' + dni });
+
+  sheet.deleteRow(found.getRow());
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Usuario eliminado' });
 }
 
 /** Reemplaza el DNI antiguo por el nuevo en las hojas que lo usan como llave
@@ -1007,13 +1046,31 @@ function deleteShortEvalResult(ss, data) {
 // ACTAS DE ENTREGA / COMPROMISOS
 // =============================================
 
-var ACTAS_DOCS_HEADERS = ['Id', 'Titulo', 'Descripcion', 'Perfiles', 'DnisAsignados', 'CuerpoHtml', 'Items', 'DriveDocUrl', 'RequiereFirmaDibujada', 'Activo', 'FechaCreacion'];
+var ACTAS_DOCS_HEADERS = ['Id', 'Titulo', 'Descripcion', 'Perfiles', 'LinkDrive', 'DnisAsignados', 'CuerpoHtml', 'Items', 'DriveDocUrl', 'RequiereFirmaDibujada', 'Activo', 'FechaCreacion'];
 var ACTAS_FIRMAS_HEADERS = ['Id', 'DocumentoId', 'DocumentoTitulo', 'DNI', 'Apellidos', 'Nombres', 'Cargo', 'Area', 'Empresa', 'Correo', 'FechaFirma', 'ActaPdfUrl', 'SelfieUrl', 'FirmaUrl', 'FirmaAsistenciaUrl', 'CorreoEnviado', 'Dispositivo'];
+
+/**
+ * Sube un archivo (PDF, imagen, etc.) elegido por el admin en el formulario de
+ * Actas y Compromisos a <RAÍZ>/ACTAS/DOCUMENTOS y devuelve su URL para usarla
+ * como enlace del documento virtual. No toca la hoja de cálculo.
+ */
+function uploadActaArchivo(data) {
+  if (!data.fileBase64) return createResponse({ status: 'error', message: 'Archivo requerido' });
+  var fileName = String(data.fileName || 'documento').trim() || 'documento';
+  var mimeType = String(data.mimeType || 'application/octet-stream');
+  var raw = data.fileBase64.indexOf(',') !== -1 ? data.fileBase64.split(',')[1] : data.fileBase64;
+  var blob = Utilities.newBlob(Utilities.base64Decode(raw), mimeType, fileName);
+  var folder = getOrCreateSubFolder(getActasFolder_(), 'DOCUMENTOS');
+  var file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return createResponse({ status: 'ok', url: file.getUrl() });
+}
 
 function upsertActaDocumento(ss, data) {
   var sheet = getOrCreateSheetWithHeaders(ss, ACTAS_DOCS_SHEET_NAME, ACTAS_DOCS_HEADERS);
-  // Asegura la columna Items en hojas creadas antes de esta versión
+  // Asegura columnas en hojas creadas antes de esta versión
   getOrCreateColumn(sheet, 'Items');
+  getOrCreateColumn(sheet, 'LinkDrive');
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var idIdx = headers.indexOf('Id');
   var perfiles = Array.isArray(data.perfiles) ? data.perfiles.join('|') : String(data.perfiles || '');
@@ -1025,6 +1082,7 @@ function upsertActaDocumento(ss, data) {
     Titulo: String(data.titulo || '').trim(),
     Descripcion: String(data.descripcion || '').trim(),
     Perfiles: perfiles,
+    LinkDrive: String(data.linkDrive || '').trim(),
     DnisAsignados: dnis,
     CuerpoHtml: String(data.cuerpoHtml || ''),
     Items: itemsJson,
@@ -1056,9 +1114,22 @@ function deleteActaDocumento(ss, data) {
   if (!sheet) return createResponse({ status: 'error', message: 'Hoja ACTAS_DOCUMENTOS no encontrada' });
   var values = sheet.getDataRange().getValues();
   var idIdx = values[0].indexOf('Id');
+  var linkDriveIdx = values[0].indexOf('LinkDrive');
   if (idIdx === -1) return createResponse({ status: 'error', message: 'Columna Id no encontrada' });
   for (var i = values.length - 1; i >= 1; i--) {
     if (String(values[i][idIdx]).trim() === String(data.id).trim()) {
+      // Si el archivo se subió mediante la app (columna LinkDrive), lo enviamos a la
+      // papelera de Drive al borrar el documento. Los enlaces pegados manualmente
+      // (DriveDocUrl / item.driveUrl) pueden apuntar a archivos ajenos y no se tocan.
+      if (linkDriveIdx !== -1) {
+        var linkDrive = String(values[i][linkDriveIdx] || '').trim();
+        if (linkDrive) {
+          var fileId = extractDriveId(linkDrive);
+          if (fileId) {
+            try { DriveApp.getFileById(fileId).setTrashed(true); } catch (eFile) { /* archivo ya no existe o inaccesible */ }
+          }
+        }
+      }
       sheet.deleteRow(i + 1);
     }
   }
