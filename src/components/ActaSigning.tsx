@@ -41,8 +41,17 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
   const [correo, setCorreo] = useState(userSession.correo || '');
   const [geo, setGeo] = useState('');
 
+  // Se "congela" la lista de documentos con la que se firma al momento de abrir esta
+  // pantalla: ActasScreen la recalcula (pendientes) cada vez que refrescan las firmas
+  // del padre (p.ej. el onSigned() de una firma anterior que termina de refetchear en
+  // segundo plano mientras el trabajador ya inició una firma nueva). Si se leyera la
+  // prop en vivo, ese cambio de longitud/orden a mitad del flujo desincroniza
+  // `selectedIdx` (basado en posiciones) del array real, produciendo un acta con la
+  // tabla de documentos vacía o incorrecta.
+  const [frozenDocumentos] = useState(documentos);
+
   // Lista aplanada de documentos que van en el acta general
-  const docs = useMemo(() => getGeneralActaDocuments(documentos, userSession), [documentos, userSession]);
+  const docs = useMemo(() => getGeneralActaDocuments(frozenDocumentos, userSession), [frozenDocumentos, userSession]);
 
   // Folio de verificación único, estable durante esta firma
   const folio = useMemo(() => 'AC-' + userSession.dni + '-' + Date.now().toString(36).toUpperCase(), [userSession.dni]);
