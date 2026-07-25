@@ -40,7 +40,8 @@ export default function ActasScreen({ userSession, appConfig, documentos, firmas
     [docs, firmas, userSession.dni]
   );
   const pendingDocs = useMemo(() => docs.filter(d => !docSigned.get(d.id)), [docs, docSigned]);
-  const signedCount = docs.length - pendingDocs.length;
+  const signedDocs = useMemo(() => docs.filter(d => docSigned.get(d.id)), [docs, docSigned]);
+  const signedCount = signedDocs.length;
 
   // Documentos (ActaDocumento) a firmar: solo los que tienen algún renglón pendiente.
   const pendingAssigned = useMemo(() => {
@@ -161,9 +162,28 @@ export default function ActasScreen({ userSession, appConfig, documentos, firmas
                 )}
               </div>
 
-              {/* Lista de documentos, cada uno con su propio estado (firmado/pendiente) */}
-              <div className="space-y-1.5 max-h-[52vh] overflow-y-auto pr-1">
-                {docs.map((it, i) => <DocRow key={it.id} it={it} i={i} firmado={!!docSigned.get(it.id)} />)}
+              {/* Lista de documentos: pendientes primero, firmados después, cada grupo separado */}
+              <div className="max-h-[52vh] overflow-y-auto pr-1">
+                {pendingDocs.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest mb-1.5">
+                      Pendientes ({pendingDocs.length})
+                    </p>
+                    <div className="space-y-1.5">
+                      {pendingDocs.map((it, i) => <DocRow key={it.id} it={it} i={i} firmado={false} />)}
+                    </div>
+                  </div>
+                )}
+                {signedDocs.length > 0 && (
+                  <div>
+                    <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1.5">
+                      Firmados ({signedDocs.length})
+                    </p>
+                    <div className="space-y-1.5">
+                      {signedDocs.map((it, i) => <DocRow key={it.id} it={it} i={i} firmado={true} />)}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
