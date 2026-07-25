@@ -220,7 +220,12 @@ export interface ActaDocumento {
   fechaCreacion: string;
 }
 
-/** Registro de una firma: una persona firmó un documento (una fila por documento+DNI). */
+/**
+ * Registro de una firma: una persona firmó un documento. Para el acta general
+ * (documentoId === GENERAL_ACTA_ID) puede haber más de una fila por DNI —una por
+ * cada vez que firmó un lote de documentos nuevos—; `documentos` guarda los ids
+ * de los renglones (ver GeneralActaDoc) cubiertos por esa firma en particular.
+ */
 export interface ActaFirma {
   id: string;
   documentoId: string;
@@ -241,4 +246,8 @@ export interface ActaFirma {
   firmaAsistenciaUrl: string;
   correoEnviado: string;   // 'SI' | 'NO'
   dispositivo: string;
+  // Ids de los renglones (GeneralActaDoc.id) cubiertos por esta firma. Vacío en
+  // firmas creadas antes de este campo: se tratan como si cubrieran todo lo que
+  // el trabajador tenía asignado al momento de firmar (comportamiento previo).
+  documentos: string[];
 }

@@ -12,7 +12,7 @@ function firma(p: Partial<ActaFirma>): ActaFirma {
   return {
     id: 'f', documentoId: 'd1', documentoTitulo: 'Doc', dni: '', apellidos: '', nombres: '',
     cargo: '', area: '', empresa: '', correo: '', fechaFirma: '', actaPdfUrl: '', selfieUrl: '',
-    firmaUrl: '', firmaAsistenciaUrl: '', correoEnviado: 'NO', dispositivo: '', ...p,
+    firmaUrl: '', firmaAsistenciaUrl: '', correoEnviado: 'NO', dispositivo: '', documentos: [], ...p,
   };
 }
 const ingresos = [

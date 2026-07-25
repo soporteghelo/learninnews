@@ -17,7 +17,7 @@ import {
   flushOfflineQueue,
 } from './services/sheetsService';
 import { getStorageKey, APP_CONFIG } from './config/app.config';
-import { getAssignedDocs, getGeneralActaDocuments, hasSignedGeneralActa } from './lib/actaAssignment';
+import { getAssignedDocs, getGeneralActaDocuments, isGeneralRowSigned } from './lib/actaAssignment';
 import type {
   LearnTopic,
   DataChunk,
@@ -152,7 +152,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('learn-theme');
-    return saved !== 'light';
+    return saved === 'dark';
   });
   const [mediaOverlay, setMediaOverlay] = useState<{ url: string; type: 'video' | 'pdf' } | null>(null);
   const [globalKnownUsers, setGlobalKnownUsers] = useState<Record<string, { apellidos: string, nombres: string }>>({});
@@ -753,12 +753,12 @@ export default function App() {
   // Documentos de actas asignados al usuario (total y pendientes de firma)
   const assignedActas = userSession ? getAssignedDocs(actaDocumentos, userSession) : [];
   const actasAsignadasTotal = assignedActas.length;
-  // Modelo de acta general: una sola acta reúne todos los documentos del perfil.
-  // "Pendientes" = cantidad de documentos por recibir si aún no firmó su acta general.
+  // Modelo de acta general: cada documento se firma independientemente, así que un
+  // documento agregado después de una firma anterior no se cuenta como ya firmado.
   const actasPendientes = (() => {
-    if (!userSession || assignedActas.length === 0) return 0;
-    if (hasSignedGeneralActa(actaFirmas, userSession.dni)) return 0;
-    return getGeneralActaDocuments(assignedActas, userSession).length;
+    if (!userSession) return 0;
+    const docs = getGeneralActaDocuments(assignedActas, userSession);
+    return docs.filter(d => !isGeneralRowSigned(actaFirmas, userSession.dni, d.id)).length;
   })();
 
   return (

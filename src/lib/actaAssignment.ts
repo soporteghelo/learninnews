@@ -66,6 +66,10 @@ export const ACTA_DECLARACION = 'El trabajador declara haber recibido, leído y 
 
 /** Un documento (fila) dentro del acta general. */
 export interface GeneralActaDoc {
+  /** Id estable del renglón: `${ActaDocumento.id}::${índice del ítem}`, o el propio
+   *  id del documento si no tiene ítems. Se usa para rastrear firmado/pendiente
+   *  por documento (independiente de los demás), no como bloque único. */
+  id: string;
   nombre: string;
   tipo: 'virtual' | 'fisico';  // marca la casilla "Digital" (virtual) o "Físico" en el acta
   driveUrl?: string;
@@ -84,20 +88,34 @@ export function getGeneralActaDocuments(assigned: ActaDocumento[], user: Assigna
   const out: GeneralActaDoc[] = [];
   for (const d of assigned) {
     if (d.items && d.items.length > 0) {
-      for (const it of d.items) {
-        if (!isItemAssignedToUser(d, it, user)) continue;
+      d.items.forEach((it, idx) => {
+        if (!isItemAssignedToUser(d, it, user)) return;
         const tipo: 'virtual' | 'fisico' = it.tipo || (it.driveUrl ? 'virtual' : 'fisico');
-        out.push({ nombre: it.nombre, tipo, driveUrl: it.driveUrl, categoria: it.categoria });
-      }
+        out.push({ id: `${d.id}::${idx}`, nombre: it.nombre, tipo, driveUrl: it.driveUrl, categoria: it.categoria });
+      });
     } else {
-      out.push({ nombre: d.titulo, tipo: d.driveDocUrl ? 'virtual' : 'fisico', driveUrl: d.driveDocUrl || undefined });
+      out.push({ id: d.id, nombre: d.titulo, tipo: d.driveDocUrl ? 'virtual' : 'fisico', driveUrl: d.driveDocUrl || undefined });
     }
   }
   return out;
 }
 
-/** ¿El trabajador ya firmó su acta general? */
-export function hasSignedGeneralActa(firmas: { dni: string; documentoId: string }[], dni: string): boolean {
+/**
+ * ¿Esta firma general cubre el renglón `targetId`? Las firmas creadas antes de
+ * rastrear documentos por renglón (columna `documentos` vacía) se consideran que
+ * cubren todo lo que el trabajador tenía asignado en el momento de firmar —
+ * comportamiento previo, preservado para no invalidar firmas históricas.
+ */
+export function firmaCoversRow(f: { documentos: string[] }, targetId: string): boolean {
+  return f.documentos.length === 0 || f.documentos.includes(targetId);
+}
+
+/** ¿El renglón `rowId` del acta general de este DNI ya está firmado (en cualquiera de sus firmas)? */
+export function isGeneralRowSigned(
+  firmas: { dni: string; documentoId: string; documentos: string[] }[],
+  dni: string,
+  rowId: string
+): boolean {
   const d = String(dni || '').trim();
-  return firmas.some(f => String(f.dni).trim() === d && f.documentoId === GENERAL_ACTA_ID);
+  return firmas.some(f => String(f.dni).trim() === d && f.documentoId === GENERAL_ACTA_ID && firmaCoversRow(f, rowId));
 }

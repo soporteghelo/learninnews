@@ -1219,7 +1219,7 @@ export async function fetchShortEvals(): Promise<ShortEval[]> {
   } catch { return []; }
 }
 
-export async function fetchShortResultsDni(evalId: string): Promise<{ dni: string; apellidos: string; nombres: string; nota: number; fechaHora: string }[]> {
+export async function fetchShortResultsDni(evalId: string): Promise<{ dni: string; apellidos: string; nombres: string; guardia: string; nota: number; fechaHora: string }[]> {
   const url = getSheetUrl(SHEETS_CONFIG.sheets.shortResults);
   try {
     const response = await fetch(url, { cache: 'no-store' });
@@ -1235,6 +1235,7 @@ export async function fetchShortResultsDni(evalId: string): Promise<{ dni: strin
               dni: String(r.DNI || '').trim(),
               apellidos: String(r.Apellidos || '').trim(),
               nombres: String(r.Nombres || '').trim(),
+              guardia: String(r.Guardia || '').trim(),
               nota: parseFloat(r.Nota || '0') || 0,
               fechaHora: String(r.FechaHora || '').trim(),
             })));
@@ -1247,7 +1248,7 @@ export async function fetchShortResultsDni(evalId: string): Promise<{ dni: strin
 
 export async function fetchAllShortResults(): Promise<Array<{
   evaluacionId: string; evaluacionNombre: string; tema: string;
-  dni: string; apellidos: string; nombres: string;
+  dni: string; apellidos: string; nombres: string; guardia: string;
   nota: number; porcentaje: number; fechaHora: string; totalPreguntas: number; correctas: number;
   preguntasErroneas: ShortEvalWrongAnswer[];
 }>> {
@@ -1267,6 +1268,7 @@ export async function fetchAllShortResults(): Promise<Array<{
             dni: String(r.DNI || '').trim(),
             apellidos: String(r.Apellidos || '').trim(),
             nombres: String(r.Nombres || '').trim(),
+            guardia: String(r.Guardia || '').trim(),
             nota: parseFloat(r.Nota || '0') || 0,
             porcentaje: parseFloat(r.Porcentaje || '0') || 0,
             fechaHora: String(r.FechaHora || '').trim(),
@@ -1307,6 +1309,7 @@ export async function saveShortEvalResult(data: {
   dni: string;
   apellidos: string;
   nombres: string;
+  guardia: string;
   nota: number;
   porcentaje: number;
   totalPreguntas: number;
@@ -1415,6 +1418,10 @@ export async function fetchActaFirmas(): Promise<ActaFirma[]> {
             firmaAsistenciaUrl: String(r.FirmaAsistenciaUrl || '').trim(),
             correoEnviado: String(r.CorreoEnviado || '').trim(),
             dispositivo: String(r.Dispositivo || '').trim(),
+            documentos: (() => {
+              try { return r.Documentos ? JSON.parse(r.Documentos) : []; }
+              catch { return []; }
+            })(),
           })));
         },
         error: () => resolve([]),
@@ -1473,6 +1480,12 @@ export async function saveActaFirma(data: {
   empresa?: string;
   correo: string;
   driveDocUrl?: string;
+  // Timestamp generado en el cliente (Date.now()); el backend lo usa como Id de la
+  // fila y en los nombres de archivo, para que coincida con el N° impreso en el PDF.
+  timestampId?: number;
+  // Ids de los renglones (GeneralActaDoc.id) que esta firma cubre — permite firmar
+  // solo los documentos nuevos sin re-cubrir los ya firmados en firmas anteriores.
+  documentos: string[];
   pdfBase64: string;
   signatureBase64?: string;
   selfieBase64?: string;

@@ -371,7 +371,7 @@ export default function AdminPanel({
   // Short Evaluaciones state
   const [shortEvals, setShortEvals] = useState<ShortEval[]>([]);
   const [shortEvalsLoading, setShortEvalsLoading] = useState(false);
-  const [shortResults, setShortResults] = useState<Array<{ evaluacionId: string; dni: string; nombres: string; apellidos: string; nota: number; porcentaje: number; fechaHora: string; tema: string; preguntasErroneas: ShortEvalWrongAnswer[] }>>([]);
+  const [shortResults, setShortResults] = useState<Array<{ evaluacionId: string; dni: string; nombres: string; apellidos: string; guardia: string; nota: number; porcentaje: number; fechaHora: string; tema: string; preguntasErroneas: ShortEvalWrongAnswer[] }>>([]);
   // New eval form
   const [newEvalNombre, setNewEvalNombre] = useState('');
   const [newEvalDesc, setNewEvalDesc] = useState('');
@@ -383,10 +383,10 @@ export default function AdminPanel({
   const [expandedResult, setExpandedResult] = useState<string | null>(null);
   const [deletingResult, setDeletingResult] = useState<string | null>(null);
   // Sort & filter for the short-eval results table (only one table is visible at a time)
-  type ResultsSortKey = 'dni' | 'nombre' | 'nota' | 'porcentaje' | 'fecha' | 'fallo';
+  type ResultsSortKey = 'dni' | 'nombre' | 'guardia' | 'nota' | 'porcentaje' | 'fecha' | 'fallo';
   const [resultsSort, setResultsSort] = useState<{ key: ResultsSortKey; dir: 'asc' | 'desc' }>({ key: 'fecha', dir: 'asc' });
-  const [resultsFilters, setResultsFilters] = useState<{ dni: string; nombre: string; nota: string; porcentaje: string; fecha: string; fallo: string }>(
-    { dni: '', nombre: '', nota: '', porcentaje: '', fecha: '', fallo: '' }
+  const [resultsFilters, setResultsFilters] = useState<{ dni: string; nombre: string; guardia: string; nota: string; porcentaje: string; fecha: string; fallo: string }>(
+    { dni: '', nombre: '', guardia: '', nota: '', porcentaje: '', fecha: '', fallo: '' }
   );
   const toggleResultsSort = (key: ResultsSortKey) => {
     setResultsSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
@@ -1855,7 +1855,7 @@ ${text}`;
 
   const otherTabItems = ([
     { key: 'progress', label: 'Usuarios', icon: Users, badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
-    { key: 'shortEvals', label: 'Evals', icon: ClipboardCheck, badge: shortEvals.length > 0 ? shortEvals.length : null },
+    { key: 'shortEvals', label: 'Shorts', icon: ClipboardCheck, badge: shortEvals.length > 0 ? shortEvals.length : null },
     { key: 'actas', label: 'Documentos y Capacitaciones', icon: FileSignature, badge: actaDocs.length > 0 ? actaDocs.length : null },
     { key: 'config', label: 'Configuración', icon: Settings, badge: null },
   ] as { key: AdminTab; label: string; icon: typeof BookOpen; badge: number | null }[]);
@@ -3579,7 +3579,7 @@ ${text}`;
                           <button onClick={() => {
                               setShowResultsFor(showResults ? null : ev.id);
                               setResultsSort({ key: 'fecha', dir: 'asc' });
-                              setResultsFilters({ dni: '', nombre: '', nota: '', porcentaje: '', fecha: '', fallo: '' });
+                              setResultsFilters({ dni: '', nombre: '', guardia: '', nota: '', porcentaje: '', fecha: '', fallo: '' });
                               setResultsPage(1);
                             }} title="Ver resultados"
                             className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
@@ -3599,6 +3599,7 @@ ${text}`;
                           .filter(r => {
                             if (activeFilters.dni && !r.dni.toLowerCase().includes(activeFilters.dni.toLowerCase())) return false;
                             if (activeFilters.nombre && !`${r.apellidos} ${r.nombres}`.toLowerCase().includes(activeFilters.nombre.toLowerCase())) return false;
+                            if (activeFilters.guardia && r.guardia !== activeFilters.guardia) return false;
                             if (activeFilters.nota && !matchNumericFilter(r.nota, activeFilters.nota, r.nota.toFixed(1))) return false;
                             if (activeFilters.porcentaje && !matchNumericFilter(r.porcentaje, activeFilters.porcentaje, String(r.porcentaje))) return false;
                             if (activeFilters.fecha && !r.fechaHora.toLowerCase().includes(activeFilters.fecha.toLowerCase())) return false;
@@ -3610,6 +3611,7 @@ ${text}`;
                             switch (resultsSort.key) {
                               case 'dni': return a.dni.localeCompare(b.dni, 'es', { numeric: true }) * dir;
                               case 'nombre': return `${a.apellidos} ${a.nombres}`.localeCompare(`${b.apellidos} ${b.nombres}`, 'es', { sensitivity: 'base' }) * dir;
+                              case 'guardia': return a.guardia.localeCompare(b.guardia, 'es') * dir;
                               case 'nota': return (a.nota - b.nota) * dir;
                               case 'porcentaje': return (a.porcentaje - b.porcentaje) * dir;
                               case 'fecha': return a.fechaHora.localeCompare(b.fechaHora, 'es') * dir;
@@ -3644,6 +3646,9 @@ ${text}`;
                                       <button onClick={() => toggleResultsSort('nombre')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Apellidos y Nombres <SortIcon col="nombre" /></button>
                                     </th>
                                     <th className="text-center pb-1 pr-3">
+                                      <button onClick={() => toggleResultsSort('guardia')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Guardia <SortIcon col="guardia" /></button>
+                                    </th>
+                                    <th className="text-center pb-1 pr-3">
                                       <button onClick={() => toggleResultsSort('nota')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Nota <SortIcon col="nota" /></button>
                                     </th>
                                     <th className="text-center pb-1">
@@ -3660,6 +3665,15 @@ ${text}`;
                                   <tr className="align-top">
                                     <th className="pb-2 pr-3"><input value={resultsFilters.dni} onChange={e => setResultsFilters(f => ({ ...f, dni: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
                                     <th className="pb-2 pr-3"><input value={resultsFilters.nombre} onChange={e => setResultsFilters(f => ({ ...f, nombre: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                    <th className="pb-2 pr-3">
+                                      <select value={resultsFilters.guardia} onChange={e => setResultsFilters(f => ({ ...f, guardia: e.target.value }))}
+                                        className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center focus:outline-none focus:border-[#1b4d89]">
+                                        <option value="">Todas</option>
+                                        <option value="A">A</option>
+                                        <option value="B">B</option>
+                                        <option value="C">C</option>
+                                      </select>
+                                    </th>
                                     <th className="pb-2 pr-3"><input value={resultsFilters.nota} onChange={e => setResultsFilters(f => ({ ...f, nota: e.target.value }))} placeholder=">14" title="Usa >, <, >=, <=, = o un número. Ej: >14, <=10" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
                                     <th className="pb-2"><input value={resultsFilters.porcentaje} onChange={e => setResultsFilters(f => ({ ...f, porcentaje: e.target.value }))} placeholder=">70" title="Usa >, <, >=, <=, = o un número. Ej: >70, <=50" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
                                     <th className="pb-2 pl-3"><input value={resultsFilters.fecha} onChange={e => setResultsFilters(f => ({ ...f, fecha: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
@@ -3669,7 +3683,7 @@ ${text}`;
                                 </thead>
                                 <tbody className="divide-y divide-[#f3f4f5]">
                                   {displayResults.length === 0 ? (
-                                    <tr><td colSpan={7} className="py-3 text-center text-[#737781] italic text-[11px]">Sin resultados para los filtros aplicados</td></tr>
+                                    <tr><td colSpan={8} className="py-3 text-center text-[#737781] italic text-[11px]">Sin resultados para los filtros aplicados</td></tr>
                                   ) : pageResults.map((r) => {
                                     const rowKey = `${r.evaluacionId}__${r.dni}`;
                                     const wrong = r.preguntasErroneas || [];
@@ -3680,6 +3694,7 @@ ${text}`;
                                         <tr>
                                           <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
                                           <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.apellidos} {r.nombres}</td>
+                                          <td className="py-1.5 pr-3 text-center font-bold text-[#424750]">{r.guardia || '—'}</td>
                                           <td className={`py-1.5 pr-3 text-center font-bold ${r.nota >= 16 ? 'text-emerald-600' : r.nota >= 12 ? 'text-amber-600' : 'text-red-500'}`}>
                                             {r.nota.toFixed(1)}/20
                                           </td>
@@ -3714,7 +3729,7 @@ ${text}`;
                                         </tr>
                                         {isExpanded && wrong.length > 0 && (
                                           <tr>
-                                            <td colSpan={7} className="py-2 px-2 bg-white">
+                                            <td colSpan={8} className="py-2 px-2 bg-white">
                                               <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">
                                                 Preguntas falladas ({wrong.length})
                                               </p>

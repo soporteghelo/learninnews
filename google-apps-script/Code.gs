@@ -878,7 +878,7 @@ function getOrCreateColumn(sheet, columnName) {
 // =============================================
 
 var SHORT_EVALS_HEADERS = ['Id', 'Nombre', 'Descripcion', 'TopicId', 'TopicTitle', 'ChunkIds', 'Activo', 'FechaCreacion'];
-var SHORT_RESULTS_HEADERS = ['EvaluacionId', 'EvaluacionNombre', 'Tema', 'DNI', 'Apellidos', 'Nombres', 'Nota', 'Porcentaje', 'FechaHora', 'TotalPreguntas', 'Correctas', 'PreguntasErroneas'];
+var SHORT_RESULTS_HEADERS = ['EvaluacionId', 'EvaluacionNombre', 'Tema', 'DNI', 'Apellidos', 'Nombres', 'Guardia', 'Nota', 'Porcentaje', 'FechaHora', 'TotalPreguntas', 'Correctas', 'PreguntasErroneas'];
 
 function getOrCreateSheetWithHeaders(ss, name, headers) {
   var sheet = ss.getSheetByName(name);
@@ -984,6 +984,8 @@ function deleteShortEval(ss, data) {
 
 function saveShortEvalResult(ss, data) {
   var sheet = getOrCreateSheetWithHeaders(ss, SHORT_RESULTS_SHEET_NAME, SHORT_RESULTS_HEADERS);
+  // Asegura la columna en hojas creadas antes de esta versión
+  getOrCreateColumn(sheet, 'Guardia');
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
   // Blindaje anti-duplicado: si ya existe (EvaluacionId + DNI), no volver a insertar
@@ -1009,6 +1011,7 @@ function saveShortEvalResult(ss, data) {
     DNI: String(data.dni || '').trim(),
     Apellidos: String(data.apellidos || '').trim(),
     Nombres: String(data.nombres || '').trim(),
+    Guardia: String(data.guardia || '').trim(),
     Nota: data.nota !== undefined ? data.nota : '',
     Porcentaje: data.porcentaje !== undefined ? data.porcentaje : '',
     FechaHora: nowPeruString(),
@@ -1047,7 +1050,7 @@ function deleteShortEvalResult(ss, data) {
 // =============================================
 
 var ACTAS_DOCS_HEADERS = ['Id', 'Titulo', 'Descripcion', 'Perfiles', 'LinkDrive', 'DnisAsignados', 'CuerpoHtml', 'Items', 'DriveDocUrl', 'RequiereFirmaDibujada', 'Activo', 'FechaCreacion'];
-var ACTAS_FIRMAS_HEADERS = ['Id', 'DocumentoId', 'DocumentoTitulo', 'DNI', 'Apellidos', 'Nombres', 'Cargo', 'Area', 'Empresa', 'Correo', 'FechaFirma', 'ActaPdfUrl', 'SelfieUrl', 'FirmaUrl', 'FirmaAsistenciaUrl', 'CorreoEnviado', 'Dispositivo'];
+var ACTAS_FIRMAS_HEADERS = ['Id', 'DocumentoId', 'DocumentoTitulo', 'DNI', 'Apellidos', 'Nombres', 'Cargo', 'Area', 'Empresa', 'Correo', 'FechaFirma', 'ActaPdfUrl', 'SelfieUrl', 'FirmaUrl', 'FirmaAsistenciaUrl', 'CorreoEnviado', 'Dispositivo', 'Documentos'];
 
 /**
  * Sube un archivo (PDF, imagen, etc.) elegido por el admin en el formulario de
@@ -1143,19 +1146,35 @@ function saveActaFirma(ss, data) {
     if (!data.documentoId) return createResponse({ status: 'error', message: 'Documento requerido' });
 
     var sheet = getOrCreateSheetWithHeaders(ss, ACTAS_FIRMAS_SHEET_NAME, ACTAS_FIRMAS_HEADERS);
-    // Asegura la columna en hojas creadas antes de esta versión
+    // Asegura columnas en hojas creadas antes de esta versión
     getOrCreateColumn(sheet, 'FirmaAsistenciaUrl');
+    getOrCreateColumn(sheet, 'Documentos');
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
-    // Anti-duplicado por DocumentoId + DNI
+    // `documentos`: ids de los renglones que cubre esta firma (solo aplica al acta
+    // general; para el modelo antiguo de firma por documento individual llega vacío).
+    var documentosNuevos = Array.isArray(data.documentos) ? data.documentos.map(function (x) { return String(x); }) : [];
+    var documentosNuevosJson = JSON.stringify(documentosNuevos.slice().sort());
+
     var values = sheet.getDataRange().getValues();
     var docIdx = headers.indexOf('DocumentoId');
     var dniIdx = headers.indexOf('DNI');
+    var documentosIdx = headers.indexOf('Documentos');
     if (docIdx !== -1 && dniIdx !== -1) {
+      var esActaGeneral = String(data.documentoId).trim() === 'ACTA_GENERAL';
       for (var i = 1; i < values.length; i++) {
-        if (String(values[i][docIdx]).trim() === String(data.documentoId).trim() &&
-            String(values[i][dniIdx]).trim() === String(data.dni).trim()) {
-          var urlIdx = headers.indexOf('ActaPdfUrl');
+        if (String(values[i][docIdx]).trim() !== String(data.documentoId).trim() ||
+            String(values[i][dniIdx]).trim() !== String(data.dni).trim()) continue;
+        var urlIdx = headers.indexOf('ActaPdfUrl');
+        if (!esActaGeneral) {
+          // Modelo antiguo (firma por documento individual): una sola firma por documento+DNI.
+          return createResponse({ status: 'ok', message: 'Ya firmado', duplicate: true, url: urlIdx !== -1 ? values[i][urlIdx] : '' });
+        }
+        // Acta general: se permite volver a firmar cuando hay documentos nuevos que
+        // cubrir; solo se bloquea si el lote es idéntico a uno ya firmado (doble envío).
+        var existente = documentosIdx !== -1 ? String(values[i][documentosIdx] || '[]') : '[]';
+        var existenteOrdenado = JSON.stringify((function () { try { return JSON.parse(existente); } catch (e) { return []; } })().slice().sort());
+        if (existenteOrdenado === documentosNuevosJson) {
           return createResponse({ status: 'ok', message: 'Ya firmado', duplicate: true, url: urlIdx !== -1 ? values[i][urlIdx] : '' });
         }
       }
@@ -1163,7 +1182,9 @@ function saveActaFirma(ss, data) {
 
     var now = new Date();
     var dni = String(data.dni).trim();
-    var docId = now.getTime();
+    // Si el cliente envía su propio timestamp (generado al renderizar el PDF), se
+    // usa tal cual: así el N° impreso en el acta coincide con el Id guardado aquí.
+    var docId = data.timestampId ? Number(data.timestampId) : now.getTime();
 
     // Estructura: <GENERAL>/DOC_ENTREGAS/<DNI>/  (y aseguramos que exista DOCUMENTOS)
     var parentFolder = getActasFolder_();
@@ -1240,7 +1261,7 @@ function saveActaFirma(ss, data) {
 
     // 4. Registrar la firma
     var rowData = buildRowFromObject(headers, {
-      Id: dni + '-' + String(data.documentoId).trim() + '-' + now.getTime(),
+      Id: dni + '-' + String(data.documentoId).trim() + '-' + docId,
       DocumentoId: String(data.documentoId).trim(),
       DocumentoTitulo: String(data.documentoTitulo || '').trim(),
       DNI: dni,
@@ -1256,7 +1277,8 @@ function saveActaFirma(ss, data) {
       FirmaUrl: firmaUrl,
       FirmaAsistenciaUrl: firmaAsistenciaUrl,
       CorreoEnviado: correoEnviado,
-      Dispositivo: String(data.dispositivo || '').trim()
+      Dispositivo: String(data.dispositivo || '').trim(),
+      Documentos: documentosNuevosJson
     });
     sheet.appendRow(rowData);
     SpreadsheetApp.flush();

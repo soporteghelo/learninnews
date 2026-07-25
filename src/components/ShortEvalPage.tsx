@@ -40,6 +40,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
   const [dni, setDni] = useState('');
   const [apellidos, setApellidos] = useState('');
   const [nombres, setNombres] = useState('');
+  const [guardia, setGuardia] = useState('');
   const [entryError, setEntryError] = useState('');
 
   // Already taken
@@ -97,7 +98,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
 
   const handleEntry = async () => {
     setEntryError('');
-    if (!dni.trim() || !apellidos.trim() || !nombres.trim()) {
+    if (!dni.trim() || !apellidos.trim() || !nombres.trim() || !guardia) {
       setEntryError('Por favor completa todos los campos.');
       return;
     }
@@ -210,6 +211,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
           dni: dni.trim(),
           apellidos: apellidos.trim(),
           nombres: nombres.trim(),
+          guardia,
           nota: finalScoreVal,
           porcentaje: pct,
           totalPreguntas: total,
@@ -233,6 +235,7 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
     setDni('');
     setApellidos('');
     setNombres('');
+    setGuardia('');
     setActiveQuestions([]);
     setCurrentIdx(0);
     setAnsweredMap({});
@@ -458,6 +461,19 @@ export default function ShortEvalPage({ evalId }: ShortEvalPageProps) {
                 placeholder="NOMBRES"
                 className="w-full px-4 py-3 rounded-xl border border-[#e1e3e4] text-sm font-semibold text-[#191c1d] focus:outline-none focus:border-[#1b4d89] focus:ring-2 focus:ring-[#1b4d89]/10 bg-[#f8f9fa]"
               />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1">Guardia</label>
+              <select
+                value={guardia}
+                onChange={e => setGuardia(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-[#e1e3e4] text-sm font-semibold text-[#191c1d] focus:outline-none focus:border-[#1b4d89] focus:ring-2 focus:ring-[#1b4d89]/10 bg-[#f8f9fa]"
+              >
+                <option value="">Selecciona tu guardia</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+              </select>
             </div>
 
             {entryError && (

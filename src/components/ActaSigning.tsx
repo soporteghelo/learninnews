@@ -47,6 +47,14 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
   // Folio de verificación único, estable durante esta firma
   const folio = useMemo(() => 'AC-' + userSession.dni + '-' + Date.now().toString(36).toUpperCase(), [userSession.dni]);
 
+  // Timestamp estable para esta firma: se genera una sola vez en el cliente y se
+  // envía al backend, que lo usa tal cual como Id de la fila y en los nombres de
+  // archivo — así el N° impreso en el PDF coincide exactamente con el Id guardado
+  // en ACTAS_FIRMAS (en vez de que el backend genere su propio timestamp después
+  // de que el PDF ya fue renderizado).
+  const docTimestamp = useMemo(() => Date.now(), []);
+  const actaNumero = `${userSession.dni}-${GENERAL_ACTA_ID}-${docTimestamp}`;
+
   // Documentos que el trabajador confirma recibir (por defecto todos marcados).
   // Solo los marcados salen en el acta.
   const [selectedIdx, setSelectedIdx] = useState<Set<number>>(() => new Set(docs.map((_, i) => i)));
@@ -189,6 +197,8 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
         empresa: userSession.empresa,
         correo: correo.trim(),
         driveDocUrl: '',
+        timestampId: docTimestamp,
+        documentos: selectedDocs.map(d => d.id),
         pdfBase64,
         signatureBase64: signatureData || undefined,
         selfieBase64: selfieData || undefined,
@@ -540,6 +550,7 @@ export default function ActaSigning({ documentos, userSession, appConfig, onBack
           appConfig={appConfig}
           logoSrc={logoSrc}
           representanteFirmaSrc={firmaRepSrc}
+          numero={actaNumero}
           folio={folio}
           geo={geo}
           correo={correo.trim()}

@@ -5,7 +5,7 @@
  * Pura y memoizable (antes vivía dentro de AdminPanel).
  */
 import type { ActaDocumento, ActaFirma, ActaItem } from '../types';
-import { GENERAL_ACTA_ID, getEffectiveAssignment } from './actaAssignment';
+import { GENERAL_ACTA_ID, getEffectiveAssignment, firmaCoversRow } from './actaAssignment';
 
 export interface FirmaRosterRow {
   dni: string;
@@ -38,12 +38,17 @@ function buildRosterForAssignment(
   doc: ActaDocumento,
   firmas: ActaFirma[],
   ingresos: RosterIngreso[],
+  /** Ids de renglón (ver GeneralActaDoc.id) que representan a `doc` (o al ítem
+   *  puntual, si se llama desde buildItemRoster). Una firma general solo cuenta
+   *  para este roster si cubre alguno de estos ids — así un documento agregado
+   *  después de una firma anterior no aparece como ya firmado. */
+  targetIds: string[],
 ): FirmaRosterRow[] {
   const perfilesLower = perfiles.map(p => p.toLowerCase().trim());
-  // Firmas específicas de este documento (modelo antiguo) + firma del acta general.
-  // Una persona que firmó su acta general se considera firmante de todos sus documentos.
+  // Firmas específicas de este documento (modelo antiguo) + firmas del acta general
+  // que efectivamente cubren alguno de los renglones de este documento/ítem.
   const firmasDoc = firmas.filter(f => f.documentoId === doc.id);
-  const firmasGeneral = firmas.filter(f => f.documentoId === GENERAL_ACTA_ID);
+  const firmasGeneral = firmas.filter(f => f.documentoId === GENERAL_ACTA_ID && targetIds.some(id => firmaCoversRow(f, id)));
   const firmaByDni = new Map<string, ActaFirma>();
   for (const f of firmasDoc) firmaByDni.set(String(f.dni).trim(), f);
   for (const f of firmasGeneral) { const d = String(f.dni).trim(); if (!firmaByDni.has(d)) firmaByDni.set(d, f); }
@@ -92,7 +97,12 @@ export function buildFirmaRoster(
   firmas: ActaFirma[],
   ingresos: RosterIngreso[],
 ): FirmaRosterRow[] {
-  return buildRosterForAssignment(doc.perfiles, doc.dnisAsignados, doc, firmas, ingresos);
+  // Doc-level: cuenta como firmado si se firmó cualquiera de sus renglones (en la
+  // práctica casi siempre uno solo, ya que cada documento es independiente).
+  const targetIds = doc.items && doc.items.length > 0
+    ? doc.items.map((_, idx) => `${doc.id}::${idx}`)
+    : [doc.id];
+  return buildRosterForAssignment(doc.perfiles, doc.dnisAsignados, doc, firmas, ingresos, targetIds);
 }
 
 /** Roster de firmas de UN documento (item) dentro de un acta, usando su asignación
@@ -104,5 +114,7 @@ export function buildItemRoster(
   ingresos: RosterIngreso[],
 ): FirmaRosterRow[] {
   const { perfiles, dnisAsignados } = getEffectiveAssignment(doc, item);
-  return buildRosterForAssignment(perfiles, dnisAsignados, doc, firmas, ingresos);
+  const idx = doc.items.indexOf(item);
+  const targetId = idx !== -1 ? `${doc.id}::${idx}` : doc.id;
+  return buildRosterForAssignment(perfiles, dnisAsignados, doc, firmas, ingresos, [targetId]);
 }
