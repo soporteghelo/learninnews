@@ -23,6 +23,13 @@ function esc(s: string | undefined): string {
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
+// Filas totales de la tabla: si hay menos asistentes que esto, se completa con
+// filas vacías (numeradas, con los bordes ya dibujados) para que la hoja se vea
+// como un formulario A4 completo en vez de una tabla recortada al contenido.
+// 13 es el máximo que cabe en una sola página A4 portrait incluso si TODAS las
+// filas tuvieran firma dibujada (las más altas); con menos filas llenas sobra margen.
+const TOTAL_ROWS = 13;
+
 /**
  * "Registro de Inducción, Capacitación, Entrenamiento y Simulacros de Emergencia" —
  * lista de asistencia que se genera para documentos de categoría "capacitación",
@@ -46,6 +53,7 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
   const cellStyle: React.CSSProperties = { border: '1px solid #1f2937', padding: '4px 8px', fontSize: '9.5px', verticalAlign: 'middle' };
   const labelStyle: React.CSSProperties = { ...cellStyle, fontWeight: 700, background: '#f3f4f6' };
   const headStyle: React.CSSProperties = { ...cellStyle, background: '#dbe3ef', fontWeight: 800, textAlign: 'center' };
+  const rowCellStyle: React.CSSProperties = { ...cellStyle, textAlign: 'center' };
 
   const tipos: { id: 'induccion' | 'capacitacion' | 'entrenamiento' | 'simulacro'; label: string }[] = [
     { id: 'induccion', label: 'Inducción' },
@@ -54,8 +62,10 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
     { id: 'simulacro', label: 'Simulacro de Emergencia' },
   ];
 
+  const emptyRowsCount = Math.max(0, TOTAL_ROWS - rows.length);
+
   return (
-    <div ref={ref} style={{ width: '210mm', background: '#ffffff', padding: '10mm', fontFamily: 'Arial, Helvetica, sans-serif', color: '#111827' }}>
+    <div ref={ref} style={{ width: '210mm', minHeight: '265mm', background: '#ffffff', padding: '10mm', fontFamily: 'Arial, Helvetica, sans-serif', color: '#111827' }}>
       {/* Encabezado */}
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px' }}>
         <tbody>
@@ -152,17 +162,28 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
             <tr><td style={{ ...cellStyle, textAlign: 'center', fontStyle: 'italic', color: '#6b7280' }} colSpan={7}>Sin asistentes registrados todavía</td></tr>
           ) : rows.map((r, i) => (
             <tr key={r.dni}>
-              <td style={{ ...cellStyle, textAlign: 'center' }}>{i + 1}</td>
-              <td style={cellStyle}>{esc(r.nombre)}</td>
-              <td style={{ ...cellStyle, textAlign: 'center' }}>{esc(r.dni)}</td>
-              <td style={cellStyle}>{esc(r.cargo)}</td>
-              <td style={cellStyle}>{esc(r.area)}</td>
-              <td style={{ ...cellStyle, textAlign: 'center' }}>
+              <td style={rowCellStyle}>{i + 1}</td>
+              <td style={rowCellStyle}>{esc(r.nombre)}</td>
+              <td style={rowCellStyle}>{esc(r.dni)}</td>
+              <td style={rowCellStyle}>{esc(r.cargo)}</td>
+              <td style={rowCellStyle}>{esc(r.area)}</td>
+              <td style={rowCellStyle}>
                 {r.firmaBase64
                   ? <img src={r.firmaBase64} alt="firma" style={{ maxWidth: '70px', maxHeight: '26px' }} />
                   : ''}
               </td>
-              <td style={cellStyle}>&nbsp;</td>
+              <td style={rowCellStyle}>&nbsp;</td>
+            </tr>
+          ))}
+          {Array.from({ length: emptyRowsCount }).map((_, i) => (
+            <tr key={`empty-${i}`}>
+              <td style={rowCellStyle}>{rows.length + i + 1}</td>
+              <td style={rowCellStyle}>&nbsp;</td>
+              <td style={rowCellStyle}>&nbsp;</td>
+              <td style={rowCellStyle}>&nbsp;</td>
+              <td style={rowCellStyle}>&nbsp;</td>
+              <td style={rowCellStyle}>&nbsp;</td>
+              <td style={rowCellStyle}>&nbsp;</td>
             </tr>
           ))}
         </tbody>

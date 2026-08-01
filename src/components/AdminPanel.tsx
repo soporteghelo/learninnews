@@ -431,25 +431,7 @@ export default function AdminPanel({
   const [generatingPdfKey, setGeneratingPdfKey] = useState<string | null>(null);
   const [distribucionData, setDistribucionData] = useState<{ item: ActaItem; documentoTitulo: string; rows: DistribucionRow[] } | null>(null);
   const distribucionRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!distribucionData) return;
-    const element = distribucionRef.current;
-    if (!element) return;
-    const slug = (distribucionData.item.nombre || 'documento').toUpperCase().replace(/[^A-Z0-9]/gi, '_').replace(/_+/g, '_').slice(0, 40);
-    const opt = {
-      margin: 5,
-      filename: `LISTA_DISTRIBUCION_${slug}_${new Date().toISOString().split('T')[0]}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' as const },
-    };
-    // @ts-ignore
-    html2pdf().from(element).set(opt).save().finally(() => {
-      setDistribucionData(null);
-      setGeneratingPdfKey(null);
-    });
-  }, [distribucionData]);
+  const [downloadingDistribucion, setDownloadingDistribucion] = useState(false);
 
   const handleGenerateDistribucion = async (doc: ActaDocumento, item: ActaItem, key: string) => {
     setGeneratingPdfKey(key);
@@ -457,7 +439,6 @@ export default function AdminPanel({
       const roster = buildItemRoster(doc, item, actaFirmas, ingresoRecords).filter(r => r.firma);
       if (roster.length === 0) {
         showToast('Nadie ha firmado este documento todavía', 'error');
-        setGeneratingPdfKey(null);
         return;
       }
       const rows: DistribucionRow[] = await Promise.all(roster.map(async (r): Promise<DistribucionRow> => {
@@ -467,21 +448,70 @@ export default function AdminPanel({
         ]);
         return { ...r, fotoBase64: fotoBase64 || undefined, firmaBase64: firmaBase64 || undefined };
       }));
+      // Se abre la vista previa; la descarga real la dispara el usuario desde ahí.
       setDistribucionData({ item, documentoTitulo: doc.titulo, rows });
     } catch {
       showToast('Error al generar la lista de distribución', 'error');
+    } finally {
       setGeneratingPdfKey(null);
+    }
+  };
+
+  const handleDownloadDistribucionPdf = async () => {
+    if (!distribucionData) return;
+    const element = distribucionRef.current;
+    if (!element) return;
+    setDownloadingDistribucion(true);
+    const slug = (distribucionData.item.nombre || 'documento').toUpperCase().replace(/[^A-Z0-9]/gi, '_').replace(/_+/g, '_').slice(0, 40);
+    const opt = {
+      margin: 5,
+      filename: `LISTA_DISTRIBUCION_${slug}_${new Date().toISOString().split('T')[0]}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
+    };
+    try {
+      // @ts-ignore
+      await html2pdf().from(element).set(opt).save();
+      setDistribucionData(null);
+    } catch {
+      showToast('Error al generar el PDF', 'error');
+    } finally {
+      setDownloadingDistribucion(false);
     }
   };
 
   // Lista de asistencia (solo capacitaciones): usa la firma adicional pedida al firmar
   const [asistenciaData, setAsistenciaData] = useState<{ doc: ActaDocumento; item: ActaItem; rows: AsistenciaRow[] } | null>(null);
   const asistenciaRef = useRef<HTMLDivElement>(null);
+  const [downloadingAsistencia, setDownloadingAsistencia] = useState(false);
 
-  useEffect(() => {
+  const handleGenerateAsistencia = async (doc: ActaDocumento, item: ActaItem, key: string) => {
+    setGeneratingPdfKey(key);
+    try {
+      const roster = buildItemRoster(doc, item, actaFirmas, ingresoRecords).filter(r => r.firma);
+      if (roster.length === 0) {
+        showToast('Nadie ha firmado esta capacitación todavía', 'error');
+        return;
+      }
+      const rows: AsistenciaRow[] = await Promise.all(roster.map(async (r): Promise<AsistenciaRow> => {
+        const firmaBase64 = await fetchDriveImageAsBase64(r.firma?.firmaAsistenciaUrl);
+        return { ...r, firmaBase64: firmaBase64 || undefined };
+      }));
+      // Se abre la vista previa; la descarga real la dispara el usuario desde ahí.
+      setAsistenciaData({ doc, item, rows });
+    } catch {
+      showToast('Error al generar la lista de asistencia', 'error');
+    } finally {
+      setGeneratingPdfKey(null);
+    }
+  };
+
+  const handleDownloadAsistenciaPdf = async () => {
     if (!asistenciaData) return;
     const element = asistenciaRef.current;
     if (!element) return;
+    setDownloadingAsistencia(true);
     const slug = (asistenciaData.item.nombre || 'capacitacion').toUpperCase().replace(/[^A-Z0-9]/gi, '_').replace(/_+/g, '_').slice(0, 40);
     const opt = {
       margin: 5,
@@ -490,30 +520,14 @@ export default function AdminPanel({
       html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
     };
-    // @ts-ignore
-    html2pdf().from(element).set(opt).save().finally(() => {
-      setAsistenciaData(null);
-      setGeneratingPdfKey(null);
-    });
-  }, [asistenciaData]);
-
-  const handleGenerateAsistencia = async (doc: ActaDocumento, item: ActaItem, key: string) => {
-    setGeneratingPdfKey(key);
     try {
-      const roster = buildItemRoster(doc, item, actaFirmas, ingresoRecords).filter(r => r.firma);
-      if (roster.length === 0) {
-        showToast('Nadie ha firmado esta capacitación todavía', 'error');
-        setGeneratingPdfKey(null);
-        return;
-      }
-      const rows: AsistenciaRow[] = await Promise.all(roster.map(async (r): Promise<AsistenciaRow> => {
-        const firmaBase64 = await fetchDriveImageAsBase64(r.firma?.firmaAsistenciaUrl);
-        return { ...r, firmaBase64: firmaBase64 || undefined };
-      }));
-      setAsistenciaData({ doc, item, rows });
+      // @ts-ignore
+      await html2pdf().from(element).set(opt).save();
+      setAsistenciaData(null);
     } catch {
-      showToast('Error al generar la lista de asistencia', 'error');
-      setGeneratingPdfKey(null);
+      showToast('Error al generar el PDF', 'error');
+    } finally {
+      setDownloadingAsistencia(false);
     }
   };
 
@@ -4287,31 +4301,87 @@ ${text}`;
         </motion.button>
       )}
 
-      {/* Plantilla de lista de distribución — fuera de pantalla, solo para capturar con html2canvas/html2pdf */}
-      {distribucionData && (
-        <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
-          <ActaDistribucionTemplate
-            ref={distribucionRef}
-            item={distribucionData.item}
-            documentoTitulo={distribucionData.documentoTitulo}
-            rows={distribucionData.rows}
-            appConfig={appConfig ?? null}
-          />
-        </div>
-      )}
+      {/* Vista previa de la lista de distribución — el usuario confirma antes de exportar */}
+      <AnimatePresence>
+        {distribucionData && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4"
+            onClick={() => !downloadingDistribucion && setDistribucionData(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl w-full max-w-[95vw] max-h-[90vh] flex flex-col overflow-hidden shadow-2xl"
+            >
+              <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-[#e1e3e4] flex-shrink-0">
+                <p className="font-bold text-[#00366b] text-sm">Vista previa — Lista de distribución</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setDistribucionData(null)} disabled={downloadingDistribucion}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-[#737781] hover:bg-[#f3f4f5] transition-all disabled:opacity-50">
+                    Cancelar
+                  </button>
+                  <button onClick={handleDownloadDistribucionPdf} disabled={downloadingDistribucion}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold bg-[#1b4d89] text-white hover:bg-[#00366b] transition-all disabled:opacity-50">
+                    {downloadingDistribucion ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                    Descargar PDF
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-4 bg-[#f3f4f5]">
+                <ActaDistribucionTemplate
+                  ref={distribucionRef}
+                  item={distribucionData.item}
+                  documentoTitulo={distribucionData.documentoTitulo}
+                  rows={distribucionData.rows}
+                  appConfig={appConfig ?? null}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Plantilla de lista de asistencia (capacitaciones) — fuera de pantalla, solo para capturar con html2canvas/html2pdf */}
-      {asistenciaData && (
-        <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
-          <ActaAsistenciaTemplate
-            ref={asistenciaRef}
-            doc={asistenciaData.doc}
-            item={asistenciaData.item}
-            rows={asistenciaData.rows}
-            appConfig={appConfig ?? null}
-          />
-        </div>
-      )}
+      {/* Vista previa de la lista de asistencia — el usuario confirma antes de exportar */}
+      <AnimatePresence>
+        {asistenciaData && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4"
+            onClick={() => !downloadingAsistencia && setAsistenciaData(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl w-full max-w-[95vw] max-h-[90vh] flex flex-col overflow-hidden shadow-2xl"
+            >
+              <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-[#e1e3e4] flex-shrink-0">
+                <p className="font-bold text-[#00366b] text-sm">Vista previa — Lista de asistencia</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setAsistenciaData(null)} disabled={downloadingAsistencia}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-[#737781] hover:bg-[#f3f4f5] transition-all disabled:opacity-50">
+                    Cancelar
+                  </button>
+                  <button onClick={handleDownloadAsistenciaPdf} disabled={downloadingAsistencia}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold bg-[#1b4d89] text-white hover:bg-[#00366b] transition-all disabled:opacity-50">
+                    {downloadingAsistencia ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                    Descargar PDF
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-4 bg-[#f3f4f5]">
+                <ActaAsistenciaTemplate
+                  ref={asistenciaRef}
+                  doc={asistenciaData.doc}
+                  item={asistenciaData.item}
+                  rows={asistenciaData.rows}
+                  appConfig={appConfig ?? null}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Edit User Profile Modal (perfil / correo / DNI) */}
       <AnimatePresence>

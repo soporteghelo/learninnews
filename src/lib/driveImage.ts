@@ -11,8 +11,12 @@ export async function fetchDriveImageAsBase64(rawUrl?: string | null): Promise<s
   const idMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
                   url.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
                   url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  // weserv necesita el esquema (https://) en la URL de origen: sin él, su fetch
+  // upstream falla con 400/404 y la imagen nunca llega (firma/foto quedan vacías
+  // en los PDFs generados, sin ningún error visible ya que el catch de abajo
+  // devuelve '').
   const proxyUrl = idMatch?.[1]
-    ? `https://images.weserv.nl/?url=lh3.googleusercontent.com/d/${idMatch[1]}`
+    ? `https://images.weserv.nl/?url=${encodeURIComponent(`https://lh3.googleusercontent.com/d/${idMatch[1]}`)}`
     : `https://images.weserv.nl/?url=${encodeURIComponent(url)}`;
 
   try {
