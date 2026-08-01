@@ -359,6 +359,33 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Refresca el perfil (público/audiencia) del usuario cada 30s mientras la sesión
+  // está activa: si el admin le cambia el perfil desde el panel (p.ej. a "Empleado
+  // Mina"), los cursos adicionales que le correspondan aparecen solos, sin que el
+  // trabajador tenga que cerrar sesión y volver a entrar.
+  useEffect(() => {
+    const dni = userSession?.dni;
+    if (!dni) return;
+    const poll = async () => {
+      try {
+        const fresh = await fetchIngresoByDni(dni, true);
+        if (!fresh) return;
+        const freshAudience = migrateAudience(fresh.publico);
+        const freshKey = freshAudience.join('|');
+        setUserSession(prev => {
+          if (!prev || prev.dni !== dni) return prev;
+          if (freshKey === (prev.audience || []).join('|')) return prev;
+          const updated = { ...prev, audience: freshAudience };
+          localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.session), JSON.stringify(updated));
+          return updated;
+        });
+        setAudience(prevAud => (prevAud && freshKey === prevAud.join('|')) ? prevAud : freshAudience);
+      } catch { /* non-critical */ }
+    };
+    const id = setInterval(poll, 30 * 1000);
+    return () => clearInterval(id);
+  }, [userSession?.dni]);
+
   // --- Handlers ---
   const handleLogin = async (dni: string, apellidos: string, nombres: string) => {
     setIsRegistering(true);

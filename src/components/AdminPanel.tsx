@@ -18,7 +18,7 @@ import {
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, deleteUsuario, updateAppDynamicConfig,
+  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, deleteUsuario, updateIngresoProgress, updateAppDynamicConfig,
   fetchShortEvals, createShortEval, updateShortEvalStatus, deleteShortEval, fetchAllShortResults,
   deleteShortEvalResult,
   fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo, uploadActaArchivo,
@@ -353,6 +353,7 @@ export default function AdminPanel({
   const [progressSearch, setProgressSearch] = useState('');
   const [progressEmpresaFilter, setProgressEmpresaFilter] = useState('');
   const [progressPublicoFilter, setProgressPublicoFilter] = useState('');
+  const [progressWeekFilter, setProgressWeekFilter] = useState('');
   const [progressExpandedDni, setProgressExpandedDni] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<IngresoRecord | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -367,6 +368,7 @@ export default function AdminPanel({
   });
   const [savingProfile, setSavingProfile] = useState(false);
   const [deletingUser, setDeletingUser] = useState(false);
+  const [resettingQuizKey, setResettingQuizKey] = useState<string | null>(null);
 
   // Short Evaluaciones state
   const [shortEvals, setShortEvals] = useState<ShortEval[]>([]);
@@ -915,6 +917,49 @@ export default function AdminPanel({
       showToast('Error al eliminar el usuario', 'error');
     } finally {
       setDeletingUser(false);
+    }
+  };
+
+  /**
+   * Reinicia solo la nota del cuestionario de un módulo para un usuario, sin
+   * tocar su avance de lecciones (currentChunk/completed). Borra también el
+   * intento en curso que el backend guarda anidado en la misma fila
+   * (quizSavedProgress), para que no le aparezca "continuar" un intento viejo.
+   */
+  const handleResetQuiz = async (record: IngresoRecord, topic: LearnTopic) => {
+    if (!window.confirm(`¿Reiniciar el cuestionario de "${topic.title}" para ${record.nombres} ${record.apellidos}? Se borra su nota de este módulo; el avance de las lecciones no se toca.`)) return;
+    const key = `${record.dni}:${topic.id}`;
+    setResettingQuizKey(key);
+    try {
+      const currentProgress = parseUserProgress(record.progressJson);
+      const newProgress = currentProgress.map((p: any) => {
+        if (p.topicId !== topic.id) return p;
+        const { quizScore, quizSavedProgress, ...rest } = p;
+        return rest;
+      });
+      const quizScores = newProgress.filter(p => p.quizScore !== undefined).map(p => p.quizScore!);
+      const avgNotaOutOf20 = quizScores.length > 0 ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : 0;
+      const avgNotaPct = Math.round((avgNotaOutOf20 / 20) * 100);
+      const result = await updateIngresoProgress({
+        dni: record.dni,
+        avance: record.avance || '0%',
+        nota: `${avgNotaPct}%`,
+        modulosCompletados: Number(record.modulosCompletados) || undefined,
+        intentosQuiz: quizScores.length,
+        progress: newProgress,
+      });
+      if (result.success) {
+        setIngresoRecords(prev => prev.map(r => r.dni === record.dni
+          ? { ...r, progressJson: JSON.stringify(newProgress), nota: `${avgNotaPct}%`, intentosQuiz: String(quizScores.length) }
+          : r));
+        showToast('Cuestionario reiniciado');
+      } else {
+        showToast(result.message || 'No se pudo reiniciar el cuestionario', 'error');
+      }
+    } catch {
+      showToast('Error al reiniciar el cuestionario', 'error');
+    } finally {
+      setResettingQuizKey(null);
     }
   };
 
@@ -1701,11 +1746,22 @@ ${text}`;
     if (search && !`${r.nombres} ${r.apellidos} ${r.dni}`.toLowerCase().includes(search)) return false;
     if (progressEmpresaFilter && r.empresa !== progressEmpresaFilter) return false;
     if (progressPublicoFilter && r.publico !== progressPublicoFilter) return false;
+    if (progressWeekFilter && isoWeekKey(parseInicio(r.inicio)) !== progressWeekFilter) return false;
     return true;
   });
 
   const empresasOptions = [...new Set(ingresoRecords.map(r => r.empresa).filter(Boolean))].sort() as string[];
   const publicoOptions = [...new Set(ingresoRecords.map(r => r.publico).filter(Boolean))].sort() as string[];
+  const weekOptions = (() => {
+    const map = new Map<string, string>();
+    for (const r of ingresoRecords) {
+      const d = parseInicio(r.inicio);
+      if (!d) continue;
+      const key = isoWeekKey(d);
+      if (!map.has(key)) map.set(key, isoWeekLabel(d));
+    }
+    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  })();
 
   const avgAvance = ingresoRecords.length === 0 ? 0 : Math.round(
     ingresoRecords.reduce((sum, r) => sum + (parseFloat(r.avance?.replace('%', '') || '0') || 0), 0) / ingresoRecords.length
@@ -3133,6 +3189,16 @@ ${text}`;
                       className="w-full pl-9 pr-4 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-sm text-[#191c1d] focus:border-[#1b4d89] outline-none"
                     />
                   </div>
+                  {weekOptions.length > 0 && (
+                    <select
+                      value={progressWeekFilter}
+                      onChange={e => setProgressWeekFilter(e.target.value)}
+                      className="px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                    >
+                      <option value="">Todas las semanas</option>
+                      {weekOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                    </select>
+                  )}
                   {empresasOptions.length > 0 && (
                     <select
                       value={progressEmpresaFilter}
@@ -3329,9 +3395,21 @@ ${text}`;
                                               </div>
                                             </div>
                                             {score !== undefined ? (
-                                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 ${score >= 14 ? 'bg-emerald-100 text-emerald-700' : score >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
-                                                {score.toFixed(1)}/20
-                                              </span>
+                                              <>
+                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 ${score >= 14 ? 'bg-emerald-100 text-emerald-700' : score >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
+                                                  {score.toFixed(1)}/20
+                                                </span>
+                                                <button
+                                                  onClick={() => handleResetQuiz(record, topic)}
+                                                  disabled={resettingQuizKey === `${record.dni}:${topic.id}`}
+                                                  title="Reiniciar cuestionario desde 0"
+                                                  className="flex-shrink-0 p-1 rounded-md bg-red-50 text-red-500 hover:bg-red-100 transition-colors disabled:opacity-50"
+                                                >
+                                                  {resettingQuizKey === `${record.dni}:${topic.id}`
+                                                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                    : <RefreshCw className="w-3 h-3" />}
+                                                </button>
+                                              </>
                                             ) : notStarted ? (
                                               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 bg-slate-100 text-slate-400">
                                                 0.0/20
