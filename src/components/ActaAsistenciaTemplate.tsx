@@ -1,8 +1,10 @@
 import React, { useMemo } from 'react';
+import { ExternalLink } from 'lucide-react';
 import type { ActaDocumento, ActaItem, AppDynamicConfig } from '../types';
 import type { FirmaRosterRow } from '../lib/firmaRoster';
 
 export interface AsistenciaRow extends FirmaRosterRow {
+  fotoBase64?: string;
   firmaBase64?: string;
 }
 
@@ -52,8 +54,10 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
 
   const cellStyle: React.CSSProperties = { border: '1px solid #1f2937', padding: '4px 8px', fontSize: '9.5px', verticalAlign: 'middle' };
   const labelStyle: React.CSSProperties = { ...cellStyle, fontWeight: 700, background: '#f3f4f6' };
-  const headStyle: React.CSSProperties = { ...cellStyle, background: '#dbe3ef', fontWeight: 800, textAlign: 'center' };
-  const rowCellStyle: React.CSSProperties = { ...cellStyle, textAlign: 'center' };
+  // Estilos propios (más compactos) de la tabla de asistentes: con FIRMA + FOTO + CERT.
+  // sumadas a las columnas originales, hacen falta 9 columnas angostas en vez de 7.
+  const attHeadStyle: React.CSSProperties = { border: '1px solid #1f2937', padding: '3px 4px', fontSize: '8px', verticalAlign: 'middle', background: '#dbe3ef', fontWeight: 800, textAlign: 'center' };
+  const attRowStyle: React.CSSProperties = { border: '1px solid #1f2937', padding: '2px 3px', fontSize: '7.5px', verticalAlign: 'middle', textAlign: 'center' };
 
   const tipos: { id: 'induccion' | 'capacitacion' | 'entrenamiento' | 'simulacro'; label: string }[] = [
     { id: 'induccion', label: 'Inducción' },
@@ -149,41 +153,69 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
       </table>
 
       {/* Tabla de asistentes */}
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: '4%' }} />
+          <col style={{ width: '20%' }} />
+          <col style={{ width: '9%' }} />
+          <col style={{ width: '15%' }} />
+          <col style={{ width: '11%' }} />
+          <col style={{ width: '12%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '6%' }} />
+          <col style={{ width: '16%' }} />
+        </colgroup>
         <thead>
           <tr>
-            {['N°', 'APELLIDOS Y NOMBRES', 'N° DNI', 'OCUPACIÓN', 'ÁREA', 'FIRMA', 'OBSERVACIONES'].map(h => (
-              <th key={h} style={headStyle}>{h}</th>
+            {['N°', 'APELLIDOS Y NOMBRES', 'N° DNI', 'OCUPACIÓN', 'ÁREA', 'FIRMA', 'FOTO', 'CERT.', 'OBSERVACIONES'].map(h => (
+              <th key={h} style={attHeadStyle}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
-            <tr><td style={{ ...cellStyle, textAlign: 'center', fontStyle: 'italic', color: '#6b7280' }} colSpan={7}>Sin asistentes registrados todavía</td></tr>
+            <tr><td style={{ ...attRowStyle, fontStyle: 'italic', color: '#6b7280' }} colSpan={9}>Sin asistentes registrados todavía</td></tr>
           ) : rows.map((r, i) => (
             <tr key={r.dni}>
-              <td style={rowCellStyle}>{i + 1}</td>
-              <td style={rowCellStyle}>{esc(r.nombre)}</td>
-              <td style={rowCellStyle}>{esc(r.dni)}</td>
-              <td style={rowCellStyle}>{esc(r.cargo)}</td>
-              <td style={rowCellStyle}>{esc(r.area)}</td>
-              <td style={rowCellStyle}>
+              <td style={attRowStyle}>{i + 1}</td>
+              <td style={{ ...attRowStyle, overflowWrap: 'break-word' }}>{esc(r.nombre)}</td>
+              <td style={attRowStyle}>{esc(r.dni)}</td>
+              <td style={{ ...attRowStyle, overflowWrap: 'break-word' }}>{esc(r.cargo)}</td>
+              <td style={{ ...attRowStyle, overflowWrap: 'break-word' }}>{esc(r.area)}</td>
+              <td style={attRowStyle}>
                 {r.firmaBase64
-                  ? <img src={r.firmaBase64} alt="firma" style={{ maxWidth: '70px', maxHeight: '26px' }} />
+                  ? <img src={r.firmaBase64} alt="firma" style={{ maxWidth: '50px', maxHeight: '22px' }} />
                   : ''}
               </td>
-              <td style={rowCellStyle}>&nbsp;</td>
+              <td style={attRowStyle}>
+                {r.fotoBase64
+                  ? <img src={r.fotoBase64} alt="foto" style={{ width: '18px', height: '18px', objectFit: 'cover', borderRadius: '2px' }} />
+                  : '—'}
+              </td>
+              <td style={attRowStyle}>
+                {r.firma?.actaPdfUrl
+                  ? (
+                    <a href={r.firma.actaPdfUrl} target="_blank" rel="noopener noreferrer"
+                      style={{ color: '#1b4d89', display: 'inline-flex' }} title="Ver certificado firmado">
+                      <ExternalLink size={11} />
+                    </a>
+                  )
+                  : '—'}
+              </td>
+              <td style={attRowStyle}>&nbsp;</td>
             </tr>
           ))}
           {Array.from({ length: emptyRowsCount }).map((_, i) => (
             <tr key={`empty-${i}`}>
-              <td style={rowCellStyle}>{rows.length + i + 1}</td>
-              <td style={rowCellStyle}>&nbsp;</td>
-              <td style={rowCellStyle}>&nbsp;</td>
-              <td style={rowCellStyle}>&nbsp;</td>
-              <td style={rowCellStyle}>&nbsp;</td>
-              <td style={rowCellStyle}>&nbsp;</td>
-              <td style={rowCellStyle}>&nbsp;</td>
+              <td style={attRowStyle}>{rows.length + i + 1}</td>
+              <td style={attRowStyle}>&nbsp;</td>
+              <td style={attRowStyle}>&nbsp;</td>
+              <td style={attRowStyle}>&nbsp;</td>
+              <td style={attRowStyle}>&nbsp;</td>
+              <td style={attRowStyle}>&nbsp;</td>
+              <td style={attRowStyle}>&nbsp;</td>
+              <td style={attRowStyle}>&nbsp;</td>
+              <td style={attRowStyle}>&nbsp;</td>
             </tr>
           ))}
         </tbody>

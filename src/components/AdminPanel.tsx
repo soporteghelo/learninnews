@@ -32,7 +32,7 @@ import type {
 import { parseInicio, getISOWeek, isoWeekLabel, isoWeekKey } from '../lib/dateUtils';
 import { matchNumericFilter } from '../lib/filterUtils';
 import { buildFirmaRoster, buildItemRoster, type FirmaRosterRow } from '../lib/firmaRoster';
-import { BarChart, Donut, ProgressBar } from './AdminCharts';
+import { BarChart, ProgressBar } from './AdminCharts';
 import html2pdf from 'html2pdf.js';
 import { fetchDriveImageAsBase64 } from '../lib/driveImage';
 import ActaDistribucionTemplate, { type DistribucionRow } from './ActaDistribucionTemplate';
@@ -497,8 +497,11 @@ export default function AdminPanel({
         return;
       }
       const rows: AsistenciaRow[] = await Promise.all(roster.map(async (r): Promise<AsistenciaRow> => {
-        const firmaBase64 = await fetchDriveImageAsBase64(r.firma?.firmaAsistenciaUrl);
-        return { ...r, firmaBase64: firmaBase64 || undefined };
+        const [fotoBase64, firmaBase64] = await Promise.all([
+          fetchDriveImageAsBase64(r.firma?.selfieUrl),
+          fetchDriveImageAsBase64(r.firma?.firmaAsistenciaUrl),
+        ]);
+        return { ...r, fotoBase64: fotoBase64 || undefined, firmaBase64: firmaBase64 || undefined };
       }));
       // Se abre la vista previa; la descarga real la dispara el usuario desde ahí.
       setAsistenciaData({ doc, item, rows });
@@ -1782,7 +1785,7 @@ ${text}`;
       { label: '18–20', color: '#10b981', value: 0 },
     ];
     const weekMap = new Map<string, { key: string; label: string; value: number }>();
-    let approved = 0, evaluated = 0;
+    let evaluated = 0;
     for (const r of filteredIngresos) {
       let scores: number[] = [];
       try { scores = (JSON.parse(r.progressJson || '[]') as UserProgress[]).filter(p => p.quizScore !== undefined).map(p => p.quizScore!); } catch { /* ignore */ }
@@ -1791,7 +1794,6 @@ ${text}`;
         const idx = avg >= 18 ? 4 : avg >= 16 ? 3 : avg >= 14 ? 2 : avg >= 11 ? 1 : 0;
         buckets[idx].value++;
         evaluated++;
-        if (avg >= 14) approved++;
       }
       const d = parseInicio(r.inicio);
       if (d) {
@@ -1801,7 +1803,7 @@ ${text}`;
       }
     }
     const weeks = Array.from(weekMap.values()).sort((a, b) => a.key.localeCompare(b.key)).slice(-8);
-    return { buckets, weeks, approved, notApproved: evaluated - approved, evaluated };
+    return { buckets, weeks, evaluated };
   }, [filteredIngresos]);
 
   // ========== AUTH SCREEN ==========
@@ -1936,7 +1938,7 @@ ${text}`;
         onClick={() => { setActiveTab('topics'); if (window.innerWidth < 1024) setSidebarOpen(false); }}
         className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
           isCoursesGroupActive
-            ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-white shadow-md shadow-[#00366b]/25'
+            ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-[#ffffff] shadow-md shadow-[#00366b]/25'
             : 'text-[#57606f] hover:bg-[#f3f4f5] hover:text-[#00366b]'
         }`}
       >
@@ -1986,7 +1988,7 @@ ${text}`;
             onClick={() => { setActiveTab(tab.key); if (window.innerWidth < 1024) setSidebarOpen(false); }}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
               isActive
-                ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-white shadow-md shadow-[#00366b]/25'
+                ? 'bg-gradient-to-r from-[#00366b] to-[#1b4d89] text-[#ffffff] shadow-md shadow-[#00366b]/25'
                 : 'text-[#57606f] hover:bg-[#f3f4f5] hover:text-[#00366b]'
             }`}
           >
@@ -1994,7 +1996,7 @@ ${text}`;
             <span className="flex-1 text-left">{tab.label}</span>
             {tab.badge !== null && (
               <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[16px] text-center leading-none ${
-                isActive ? 'bg-white/25 text-white' : 'bg-[#eef1f6] text-[#424750]'
+                isActive ? 'bg-white/25 text-[#ffffff]' : 'bg-[#eef1f6] text-[#424750]'
               }`}>{tab.badge}</span>
             )}
           </button>
@@ -3153,7 +3155,7 @@ ${text}`;
 
                 {/* Panel de analíticas (gráficos) */}
                 {progressAnalytics.evaluated > 0 && (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="bg-white rounded-xl p-4 border border-[#e1e3e4]">
                       <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-3">Distribución de notas</p>
                       <BarChart data={progressAnalytics.buckets} />
@@ -3163,17 +3165,6 @@ ${text}`;
                       {progressAnalytics.weeks.length > 0
                         ? <BarChart data={progressAnalytics.weeks.map(w => ({ label: w.label, value: w.value, color: '#1b4d89' }))} />
                         : <p className="text-xs text-[#737781] italic">Sin datos de fecha</p>}
-                    </div>
-                    <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] flex flex-col justify-center">
-                      <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-3">Aprobación (≥14)</p>
-                      <Donut
-                        segments={[
-                          { label: 'Aprobados', value: progressAnalytics.approved, color: '#10b981' },
-                          { label: 'Desaprob.', value: progressAnalytics.notApproved, color: '#f59e0b' },
-                        ]}
-                        centerLabel={`${Math.round((progressAnalytics.approved / Math.max(1, progressAnalytics.evaluated)) * 100)}%`}
-                        centerSub="APROB."
-                      />
                     </div>
                   </div>
                 )}
