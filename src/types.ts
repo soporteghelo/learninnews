@@ -14,6 +14,10 @@ export interface AppDynamicConfig {
   // Datos fijos del acta de recepción de documentos (from CONFIG sheet)
   lugar?: string;            // lugar / proyecto minero
   contratista?: string;      // nombre de la contratista que entrega
+  // Datos fijos de la lista de asistencia (from CONFIG sheet)
+  ruc?: string;
+  actividadEconomica?: string;
+  domicilio?: string;
   // Video tutorial de la app (from CONFIG sheet, columna Tutorial)
   tutorialUrl?: string;
   // Módulo de actas visible en la vista de usuario (from CONFIG sheet, columna Actas: TRUE/FALSE)

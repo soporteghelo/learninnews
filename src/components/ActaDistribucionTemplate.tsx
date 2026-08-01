@@ -126,19 +126,19 @@ const ActaDistribucionTemplate = React.forwardRef<HTMLDivElement, ActaDistribuci
               <td style={{ ...rowCellStyle, whiteSpace: 'nowrap' }}>{esc(r.firma?.fechaFirma)}</td>
               <td style={rowCellStyle}>
                 {r.firmaBase64
-                  ? <img src={r.firmaBase64} alt="firma" style={{ maxWidth: '38px', maxHeight: '18px' }} />
+                  ? <img src={r.firmaBase64} alt="firma" style={{ display: 'block', margin: '0 auto', maxWidth: '38px', maxHeight: '18px' }} />
                   : (r.firma ? '✓' : '')}
               </td>
               <td style={rowCellStyle}>
                 {r.fotoBase64
-                  ? <img src={r.fotoBase64} alt="foto" style={{ width: '18px', height: '18px', objectFit: 'cover', borderRadius: '2px' }} />
+                  ? <img src={r.fotoBase64} alt="foto" style={{ display: 'block', margin: '0 auto', width: '18px', height: '18px', objectFit: 'cover', borderRadius: '2px' }} />
                   : '—'}
               </td>
               <td style={rowCellStyle}>
                 {r.firma?.actaPdfUrl
                   ? (
                     <a href={r.firma.actaPdfUrl} target="_blank" rel="noopener noreferrer"
-                      style={{ color: '#1b4d89', display: 'inline-flex' }} title="Ver certificado firmado">
+                      style={{ color: '#1b4d89', display: 'flex', justifyContent: 'center' }} title="Ver certificado firmado">
                       <ExternalLink size={11} />
                     </a>
                   )

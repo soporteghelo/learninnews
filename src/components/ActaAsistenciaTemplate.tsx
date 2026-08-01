@@ -107,13 +107,13 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
           </tr>
           <tr>
             <td style={labelStyle}>RUC:</td>
-            <td style={{ ...cellStyle, width: '30%' }}>&nbsp;</td>
+            <td style={{ ...cellStyle, width: '30%' }}>{esc(appConfig?.ruc) || ' '}</td>
             <td style={labelStyle}>Actividad económica:</td>
-            <td style={cellStyle}>&nbsp;</td>
+            <td style={cellStyle}>{esc(appConfig?.actividadEconomica) || ' '}</td>
           </tr>
           <tr>
             <td style={labelStyle}>Domicilio:</td>
-            <td style={cellStyle} colSpan={2}>&nbsp;</td>
+            <td style={cellStyle} colSpan={2}>{esc(appConfig?.domicilio) || ' '}</td>
             <td style={cellStyle}>&nbsp;</td>
           </tr>
         </tbody>
@@ -184,19 +184,19 @@ const ActaAsistenciaTemplate = React.forwardRef<HTMLDivElement, ActaAsistenciaTe
               <td style={{ ...attRowStyle, overflowWrap: 'break-word' }}>{esc(r.area)}</td>
               <td style={attRowStyle}>
                 {r.firmaBase64
-                  ? <img src={r.firmaBase64} alt="firma" style={{ maxWidth: '50px', maxHeight: '22px' }} />
+                  ? <img src={r.firmaBase64} alt="firma" style={{ display: 'block', margin: '0 auto', maxWidth: '50px', maxHeight: '22px' }} />
                   : ''}
               </td>
               <td style={attRowStyle}>
                 {r.fotoBase64
-                  ? <img src={r.fotoBase64} alt="foto" style={{ width: '18px', height: '18px', objectFit: 'cover', borderRadius: '2px' }} />
+                  ? <img src={r.fotoBase64} alt="foto" style={{ display: 'block', margin: '0 auto', width: '18px', height: '18px', objectFit: 'cover', borderRadius: '2px' }} />
                   : '—'}
               </td>
               <td style={attRowStyle}>
                 {r.firma?.actaPdfUrl
                   ? (
                     <a href={r.firma.actaPdfUrl} target="_blank" rel="noopener noreferrer"
-                      style={{ color: '#1b4d89', display: 'inline-flex' }} title="Ver certificado firmado">
+                      style={{ color: '#1b4d89', display: 'flex', justifyContent: 'center' }} title="Ver certificado firmado">
                       <ExternalLink size={11} />
                     </a>
                   )

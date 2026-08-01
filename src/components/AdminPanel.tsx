@@ -4253,7 +4253,7 @@ ${text}`;
         {activeTab === 'config' && (
           <div className="space-y-4">
             <div className="bg-white rounded-2xl border border-[#e1e3e4] p-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Título</label>
                   <input type="text" value={configDraft.title} onChange={e => handleUpdateConfigDraft({ title: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
@@ -4262,7 +4262,7 @@ ${text}`;
                   <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Contacto de soporte</label>
                   <input type="text" value={configDraft.contact} onChange={e => handleUpdateConfigDraft({ contact: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
                 </div>
-                <div className="md:col-span-2">
+                <div className="col-span-2">
                   <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Mensaje de bienvenida (pantalla de login)</label>
                   <textarea value={configDraft.message} onChange={e => handleUpdateConfigDraft({ message: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none resize-none" rows={2} />
                 </div>
@@ -4314,7 +4314,19 @@ ${text}`;
                   <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Contratista</label>
                   <input type="text" value={configDraft.contratista || ''} onChange={e => handleUpdateConfigDraft({ contratista: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
                 </div>
-                <div className="md:col-span-2">
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">RUC</label>
+                  <input type="text" value={configDraft.ruc || ''} onChange={e => handleUpdateConfigDraft({ ruc: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Actividad económica</label>
+                  <input type="text" value={configDraft.actividadEconomica || ''} onChange={e => handleUpdateConfigDraft({ actividadEconomica: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Domicilio</label>
+                  <input type="text" value={configDraft.domicilio || ''} onChange={e => handleUpdateConfigDraft({ domicilio: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
+                </div>
+                <div className="col-span-2">
                   <label className="text-[10px] font-bold uppercase text-[#424750] tracking-[0.15em] block mb-2">Video tutorial (URL)</label>
                   <input type="text" value={configDraft.tutorialUrl || ''} onChange={e => handleUpdateConfigDraft({ tutorialUrl: e.target.value })} className="w-full bg-[#f8f9fa] text-slate-900 font-medium border border-[#e1e3e4] rounded-lg px-4 py-3 text-sm focus:border-[#1b4d89] outline-none" />
                 </div>

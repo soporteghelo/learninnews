@@ -705,7 +705,8 @@ function updateConfig(ss, data) {
     title: 'Titulo', message: 'Mensaje', contact: 'Contacto', adminPass: 'PassAdmin',
     status: 'Estatus', logoCertificado: 'LogoCertificado', firmaRepresentante: 'FirmaRepresentante',
     nombreRepresentante: 'NombreRepresentante', cargoRepresentante: 'CargoRepresentante',
-    lugar: 'Lugar', contratista: 'Contratista', tutorialUrl: 'Tutorial', actasHabilitado: 'Actas'
+    lugar: 'Lugar', contratista: 'Contratista', tutorialUrl: 'Tutorial', actasHabilitado: 'Actas',
+    ruc: 'RUC', actividadEconomica: 'ActividadEconomica', domicilio: 'Domicilio'
   };
 
   Object.keys(fieldToHeader).forEach(function (field) {
@@ -1597,7 +1598,7 @@ function getSheetDefinitions() {
     'DATA': ['Cod', 'IdMain', 'Tema', 'Contenido', 'Video_1', 'Video_2', 'Video_3', 'ComentarioVideo', 'PDF', 'Contexto', 'Orden'],
     'QUIZ': ['IdQuiz', 'IdMain', 'Pregunta', 'OpcionA', 'OpcionB', 'OpcionC', 'OpcionD', 'RespuestaCorrecta', 'Explicacion', 'Dificultad', 'Categoria_contenido'],
     'INGRESOS': ['Id', 'Apellidos', 'Nombres', 'DNI', 'Inicio', 'Avance', 'Publico', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON', 'CertificadoUrl', 'EMPRESA', 'AREA', 'CARGO', 'FOTOGRAFIA', 'SELFIE', 'CERTIFICADO_USO', 'FECHA_INGRESO', 'FECHA_NACIMIENTO', 'CORREO', 'CELULAR', 'NUMERO_CONTACTO_1', 'PARENTESCO_CONTACTO_1', 'NUMERO_CONTACTO_2', 'PARENTESCO_CONTACTO_2'],
-    'CONFIG': ['Titulo', 'Mensaje', 'Contacto', 'PassAdmin', 'Estatus', 'LogoCertificado', 'FirmaRepresentante', 'NombreRepresentante', 'CargoRepresentante', 'Lugar', 'Contratista', 'Tutorial', 'Actas'],
+    'CONFIG': ['Titulo', 'Mensaje', 'Contacto', 'PassAdmin', 'Estatus', 'LogoCertificado', 'FirmaRepresentante', 'NombreRepresentante', 'CargoRepresentante', 'Lugar', 'Contratista', 'Tutorial', 'Actas', 'RUC', 'ActividadEconomica', 'Domicilio'],
     'CERTIFICADOS': ['Id', 'DNI', 'APELLIDOS', 'NOMBRES', 'CARGO', 'NOTA', 'CELULAR', 'FOTO', 'TITULO_CERTIFICADO', 'LinkCertificado', 'Fecha', 'FIRMA', 'TopicId'],
     'SHORT_EVALUACIONES': SHORT_EVALS_HEADERS,
     'SHORT_RESULTADOS': SHORT_RESULTS_HEADERS,

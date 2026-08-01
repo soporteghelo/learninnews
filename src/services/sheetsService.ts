@@ -691,6 +691,9 @@ export async function fetchAppDynamicConfig(): Promise<AppDynamicConfig> {
             cargoRepresentante: row.CargoRepresentante || '',
             lugar: row.Lugar || '',
             contratista: row.Contratista || '',
+            ruc: row.RUC || '',
+            actividadEconomica: row.ActividadEconomica || '',
+            domicilio: row.Domicilio || '',
             tutorialUrl: row.Tutorial || '',
             // Actas visible salvo que la columna diga explícitamente FALSE
             actasHabilitado: String(row.Actas ?? '').trim().toUpperCase() !== 'FALSE',
