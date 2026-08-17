@@ -12,6 +12,18 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
     <title>LearnDrive AI - Tu tutor personal de aprendizaje</title>
+    <script>
+      // Aplica el tema antes del primer render para evitar el parpadeo oscuro.
+      // Por defecto (primer ingreso) la app arranca en modo light.
+      (function () {
+        try {
+          var saved = localStorage.getItem('learn-theme');
+          document.documentElement.classList.toggle('light-mode', saved !== 'dark');
+        } catch (e) {
+          document.documentElement.classList.add('light-mode');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

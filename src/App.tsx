@@ -12,6 +12,7 @@ import {
   fetchAppDynamicConfig,
   fetchGlobalKnownUsers,
   getStaleCachedSheetData,
+  getOfflineSheetData,
   fetchActaDocumentos,
   fetchActaFirmas,
   flushOfflineQueue,
@@ -47,6 +48,7 @@ const QuizMode = lazy(() => import('./components/QuizMode'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const CertificateClaim = lazy(() => import('./components/CertificateClaim'));
 const ShortEvalPage = lazy(() => import('./components/ShortEvalPage'));
+const PacEvalPage = lazy(() => import('./components/PacEvalPage'));
 const ActasScreen = lazy(() => import('./components/ActasScreen'));
 const ConsentSigning = lazy(() => import('./components/ConsentSigning'));
 
@@ -137,9 +139,14 @@ export default function App() {
     const m = window.location.hash.match(/^#\/eval\/([^/?&]+)/);
     return m ? m[1] : null;
   });
+  // --- Detect PAC eval URL (#/pac/ID) before any other init ---
+  const [pacEvalId] = useState<string | null>(() => {
+    const m = window.location.hash.match(/^#\/pac\/([^/?&]+)/);
+    return m ? m[1] : null;
+  });
 
   // --- Global State ---
-  const [view, setView] = useState<AppView>(() => shortEvalId ? 'shortEval' : 'login');
+  const [view, setView] = useState<AppView>(() => shortEvalId ? 'shortEval' : pacEvalId ? 'pacEval' : 'login');
   const [userSession, setUserSession] = useState<UserSession | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
   const [audience, setAudience] = useState<AudienceType[] | null>(null);
@@ -173,9 +180,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!userSession?.dni || shortEvalId) return;
+    if (!userSession?.dni || shortEvalId || pacEvalId) return;
     loadActas().catch(console.error);
-  }, [userSession?.dni, shortEvalId, loadActas]);
+  }, [userSession?.dni, shortEvalId, pacEvalId, loadActas]);
 
   // Reintenta escrituras encoladas offline (progreso/eval) al arrancar y al recuperar conexión
   useEffect(() => {
@@ -187,9 +194,9 @@ export default function App() {
 
   // --- Initialization ---
   useEffect(() => {
-    // Modo evaluación corta: página pública autónoma, no inicializar el app principal
-    // (evita que una sesión guardada redirija a dashboard/perfil sobre la vista 'shortEval').
-    if (shortEvalId) {
+    // Modo evaluación corta/PAC: página pública autónoma, no inicializar el app principal
+    // (evita que una sesión guardada redirija a dashboard/perfil sobre esa vista).
+    if (shortEvalId || pacEvalId) {
       setIsLoading(false);
       return;
     }
@@ -275,10 +282,16 @@ export default function App() {
     };
 
     const initApp = async () => {
-      // Phase 1: stale-while-revalidate — show stale cache instantly, don't wait for network
-      const staleTopics = getStaleCachedSheetData<LearnTopic[]>('topics');
-      const staleChunks = getStaleCachedSheetData<DataChunk[]>('chunks');
-      const staleQuiz   = getStaleCachedSheetData<QuizQuestion[]>('quiz');
+      // Phase 1: stale-while-revalidate — show stale cache instantly, don't wait for network.
+      // Sin conexión aceptamos el respaldo de cualquier antigüedad: el límite de 10 minutos
+      // solo sirve para decidir si conviene revalidar, no para dejar la app en blanco.
+      const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      const pick = <T,>(key: string): T | null =>
+        getStaleCachedSheetData<T>(key) ?? (isOffline ? getOfflineSheetData<T>(key) : null);
+
+      const staleTopics = pick<LearnTopic[]>('topics');
+      const staleChunks = pick<DataChunk[]>('chunks');
+      const staleQuiz   = pick<QuizQuestion[]>('quiz');
       const hasStale = !!(staleTopics && staleChunks);
       if (hasStale) {
         if (staleTopics) setTopics(staleTopics);
@@ -297,9 +310,11 @@ export default function App() {
           fetchAppDynamicConfig(),
           fetchCachedGlobalUsers(),
         ]);
-        setTopics(loadedTopics);
-        setChunks(loadedChunks);
-        setQuizQuestions(loadedQuiz);
+        // Mismo criterio que el polling: una respuesta vacía no debe reemplazar contenido
+        // ya visible (pasa al reabrir la app justo cuando la señal se está cayendo).
+        if (loadedTopics.length > 0 || !hasStale) setTopics(loadedTopics);
+        if (loadedChunks.length > 0 || !hasStale) setChunks(loadedChunks);
+        if (loadedQuiz.length > 0 || !hasStale) setQuizQuestions(loadedQuiz);
         setAppConfig(loadedConfig);
         setGlobalKnownUsers(loadedUsers);
         if (!hasStale) restoreLocalData();
@@ -341,18 +356,23 @@ export default function App() {
     initApp();
   }, []);
 
-  // Background polling — refresh content every 30s while app is open
+  // Background polling — refresh content every 30s while app is open.
+  // Nunca debe empeorar lo que el trabajador ya tiene en pantalla: si no hay red, ni
+  // siquiera lo intenta, y si la respuesta llega vacía se descarta en vez de aplicarse
+  // (antes, una lectura fallida devolvía datos de demostración y borraba la lección
+  // que la persona estaba leyendo).
   useEffect(() => {
     const poll = async () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       try {
         const [t, c, q] = await Promise.all([
           fetchLearnTopics(true),
           fetchDataChunks(true),
           fetchQuizQuestions(true),
         ]);
-        setTopics(t);
-        setChunks(c);
-        setQuizQuestions(q);
+        if (t.length > 0) setTopics(t);
+        if (c.length > 0) setChunks(c);
+        if (q.length > 0) setQuizQuestions(q);
       } catch { /* non-critical */ }
     };
     const id = setInterval(poll, 30 * 1000);
@@ -368,7 +388,7 @@ export default function App() {
     if (!dni) return;
     const poll = async () => {
       try {
-        const fresh = await fetchIngresoByDni(dni, true);
+        const fresh = await fetchIngresoByDni(dni);
         if (!fresh) return;
         const freshAudience = migrateAudience(fresh.publico);
         const freshKey = freshAudience.join('|');
@@ -732,6 +752,14 @@ export default function App() {
     return (
       <Suspense fallback={<ViewLoader />}>
         <ShortEvalPage evalId={shortEvalId} />
+      </Suspense>
+    );
+  }
+
+  if (view === 'pacEval' && pacEvalId) {
+    return (
+      <Suspense fallback={<ViewLoader />}>
+        <PacEvalPage evalId={pacEvalId} />
       </Suspense>
     );
   }

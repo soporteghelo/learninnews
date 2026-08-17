@@ -39,15 +39,57 @@ export function getStaleCachedSheetData<T>(key: string): T | null {
   } catch { return null; }
 }
 
+/**
+ * Último contenido guardado, **sin importar su antigüedad**. Es el respaldo offline:
+ * mientras el trabajador no borre los datos del navegador, el curso que ya vio sigue
+ * disponible aunque se quede días sin internet. Los TTL de arriba solo deciden *cuándo
+ * conviene volver a pedir* datos frescos, nunca si hay algo que mostrar.
+ */
+export function getOfflineSheetData<T>(key: string): T | null {
+  try {
+    const item = localStorage.getItem(`ldc_cache_${key}`);
+    if (!item) return null;
+    const { data } = JSON.parse(item);
+    return (data ?? null) as T | null;
+  } catch { return null; }
+}
+
 function setSheetCache<T>(key: string, data: T): void {
   try {
     localStorage.setItem(`ldc_cache_${key}`, JSON.stringify({ data, ts: Date.now() }));
-  } catch { /* cuota llena */ }
+  } catch {
+    // Cuota llena: el respaldo offline es justamente lo que no queremos perder, así que
+    // liberamos los cachés auxiliares (datos de admin) y reintentamos una vez.
+    try {
+      (['ingresos', 'pacResultados', 'shortResults', 'actaFirmas'] as const)
+        .forEach(k => localStorage.removeItem(`ldc_cache_${k}`));
+      localStorage.setItem(`ldc_cache_${key}`, JSON.stringify({ data, ts: Date.now() }));
+    } catch {
+      console.warn(`No se pudo guardar el respaldo offline de "${key}": almacenamiento lleno.`);
+    }
+  }
 }
 
-export function clearSheetCache(key: 'topics' | 'chunks' | 'quiz' | 'ingresos' | 'all'): void {
+/**
+ * Respaldo para lecturas de contenido: ante un fallo de red devuelve lo último guardado
+ * y solo cae a los datos de demostración si el dispositivo nunca llegó a descargar nada.
+ */
+function offlineFallback<T>(key: string, label: string, mock: () => T[]): T[] {
+  const cached = getOfflineSheetData<T[]>(key);
+  if (cached && cached.length > 0) {
+    console.warn(`Sin conexión al leer ${label}: se usa el contenido guardado en el dispositivo.`);
+    return cached;
+  }
+  if (MOCK_DATA_CONFIG.enabled) return mock();
+  return [];
+}
+
+type SheetCacheKey = 'topics' | 'chunks' | 'quiz' | 'config' | 'ingresos' | 'pacProgramas' | 'pacResultados' | 'shortResults' | 'actaDocumentos' | 'actaFirmas';
+
+export function clearSheetCache(key: SheetCacheKey | 'all'): void {
   if (key === 'all') {
-    ['topics', 'chunks', 'quiz'].forEach(k => localStorage.removeItem(`ldc_cache_${k}`));
+    (['topics', 'chunks', 'quiz', 'pacProgramas', 'pacResultados', 'shortResults', 'actaDocumentos', 'actaFirmas'] as SheetCacheKey[])
+      .forEach(k => localStorage.removeItem(`ldc_cache_${k}`));
   } else {
     localStorage.removeItem(`ldc_cache_${key}`);
   }
@@ -119,19 +161,24 @@ export async function fetchLearnTopics(force = false): Promise<LearnTopic[]> {
               active: row.Activo ? row.Activo.toUpperCase() === 'SI' : true,
             }));
           const sorted = topics.sort((a, b) => (a.order || 999) - (b.order || 999));
+          // Una respuesta vacía casi siempre es una descarga truncada o un CSV servido a
+          // medias, no una hoja realmente sin temas: en ese caso conservamos el respaldo.
+          if (sorted.length === 0) {
+            resolve(offlineFallback<LearnTopic>('topics', 'los temas', getMockTopics));
+            return;
+          }
           setSheetCache('topics', sorted);
           resolve(sorted);
         },
         error: () => {
-          console.warn('Error parsing LEARN CSV, using mock data');
-          resolve(getMockTopics());
+          console.warn('Error parsing LEARN CSV');
+          resolve(offlineFallback<LearnTopic>('topics', 'los temas', getMockTopics));
         },
       });
     });
   } catch (error) {
     console.warn('Error fetching LEARN sheet:', error);
-    if (MOCK_DATA_CONFIG.enabled) return getMockTopics();
-    return [];
+    return offlineFallback<LearnTopic>('topics', 'los temas', getMockTopics);
   }
 }
 
@@ -220,19 +267,22 @@ export async function fetchDataChunks(force = false): Promise<DataChunk[]> {
               order: row.Orden ? parseInt(row.Orden, 10) : 999,
             }));
           const sorted = chunks.sort((a, b) => (a.order || 999) - (b.order || 999));
+          if (sorted.length === 0) {
+            resolve(offlineFallback<DataChunk>('chunks', 'las lecciones', getMockChunks));
+            return;
+          }
           setSheetCache('chunks', sorted);
           resolve(sorted);
         },
         error: () => {
-          console.warn('Error parsing DATA CSV, using mock data');
-          resolve(getMockChunks());
+          console.warn('Error parsing DATA CSV');
+          resolve(offlineFallback<DataChunk>('chunks', 'las lecciones', getMockChunks));
         },
       });
     });
   } catch (error) {
     console.warn('Error fetching DATA sheet:', error);
-    if (MOCK_DATA_CONFIG.enabled) return getMockChunks();
-    return [];
+    return offlineFallback<DataChunk>('chunks', 'las lecciones', getMockChunks);
   }
 }
 
@@ -324,19 +374,22 @@ export async function fetchQuizQuestions(force = false): Promise<QuizQuestion[]>
               difficulty: (row.Dificultad || 'Media') as 'Fácil' | 'Media' | 'Difícil',
               categoriaContenido: row.Categoria_contenido || row.categoriaContenido || '',
             }));
+          if (questions.length === 0) {
+            resolve(offlineFallback<QuizQuestion>('quiz', 'las preguntas', getMockQuiz));
+            return;
+          }
           setSheetCache('quiz', questions);
           resolve(questions);
         },
         error: () => {
-          console.warn('Error parsing QUIZ CSV, using mock data');
-          resolve(getMockQuiz());
+          console.warn('Error parsing QUIZ CSV');
+          resolve(offlineFallback<QuizQuestion>('quiz', 'las preguntas', getMockQuiz));
         },
       });
     });
   } catch (error) {
     console.warn('Error fetching QUIZ sheet:', error);
-    if (MOCK_DATA_CONFIG.enabled) return getMockQuiz();
-    return [];
+    return offlineFallback<QuizQuestion>('quiz', 'las preguntas', getMockQuiz);
   }
 }
 
@@ -664,10 +717,14 @@ export async function fetchAppDynamicConfig(): Promise<AppDynamicConfig> {
     adminPass: ADMIN_CONFIG.password,
     status: 'Activo',
   };
+  // Sin conexión conservamos la última configuración conocida (marca, contacto de
+  // soporte, módulo de actas): caer a los valores por defecto haría que la app se
+  // vea "distinta" cada vez que el trabajador se queda sin señal.
+  const lastKnown = () => getOfflineSheetData<AppDynamicConfig>('config') ?? defaultConfig;
 
   try {
     const response = await fetch(url);
-    if (!response.ok) return defaultConfig;
+    if (!response.ok) return lastKnown();
     const csvText = await response.text();
 
     return new Promise((resolve) => {
@@ -676,10 +733,10 @@ export async function fetchAppDynamicConfig(): Promise<AppDynamicConfig> {
         complete: (results) => {
           const row = results.data[0] as any;
           if (!row || !row.Titulo) {
-            resolve(defaultConfig);
+            resolve(lastKnown());
             return;
           }
-          resolve({
+          const parsed: AppDynamicConfig = {
             title: row.Titulo || defaultConfig.title,
             message: row.Mensaje || defaultConfig.message,
             contact: row.Contacto || '',
@@ -697,13 +754,15 @@ export async function fetchAppDynamicConfig(): Promise<AppDynamicConfig> {
             tutorialUrl: row.Tutorial || '',
             // Actas visible salvo que la columna diga explícitamente FALSE
             actasHabilitado: String(row.Actas ?? '').trim().toUpperCase() !== 'FALSE',
-          });
+          };
+          setSheetCache('config', parsed);
+          resolve(parsed);
         },
-        error: () => resolve(defaultConfig),
+        error: () => resolve(lastKnown()),
       });
     });
   } catch {
-    return defaultConfig;
+    return lastKnown();
   }
 }
 
@@ -783,33 +842,24 @@ export interface IngresoRecord {
   selfieUrl?: string;      // selfie de verificación — columna SELFIE
 }
 
+/**
+ * Certificate links for a single worker, via a server-side lookup (Apps Script
+ * TextFinder scoped to the DNI column, `Code.gs:getCertificadosByDni`) instead
+ * of downloading the whole CERTIFICADOS sheet (every worker's every course) to
+ * keep just this one person's rows. Runs on every login, so this is one of the
+ * biggest per-login savings as the certificate count grows.
+ */
 export async function fetchCertificateLinkByDni(dni: string): Promise<Record<string, string>> {
-  const url = getSheetUrl(SHEETS_CONFIG.sheets.certificates);
   try {
-    const response = await fetch(url);
-    if (!response.ok) return {};
-    const csvText = await response.text();
-
-    return new Promise((resolve) => {
-      Papa.parse(csvText, {
-        header: true,
-        complete: (results) => {
-          const matches = (results.data as any[]).filter(
-            (row: any) => String(row.DNI || '').trim() === String(dni).trim()
-          );
-          if (!matches.length) { resolve({}); return; }
-
-          const map: Record<string, string> = {};
-          matches.forEach((row: any) => {
-            const link = String(row.LinkCertificado || row.PDF_URL || '').trim();
-            const topicId = String(row.TopicId || row.topicId || row.TOPICID || row.topic_id || '').trim();
-            if (link && topicId) map[topicId] = link;
-          });
-          resolve(map);
-        },
-        error: () => resolve({}),
-      });
+    const result = (await postToAppsScript({ action: 'getCertificadosByDni', dni })) as { status: string; certificados?: any[] };
+    if (result.status !== 'ok' || !result.certificados) return {};
+    const map: Record<string, string> = {};
+    result.certificados.forEach((row: any) => {
+      const link = String(row.LinkCertificado || row.PDF_URL || '').trim();
+      const topicId = String(row.TopicId || '').trim();
+      if (link && topicId) map[topicId] = link;
     });
+    return map;
   } catch {
     return {};
   }
@@ -880,11 +930,9 @@ function mapIngresoRow(row: any): IngresoRecord {
 
 /**
  * Fetch + parse the full INGRESOS sheet once, deduped to one best record per DNI,
- * and cache it (same 30s-fresh pattern as topics/chunks/quiz). `fetchIngresoByDni`
- * and `fetchAllIngresos` both read from this single cached dataset instead of each
- * re-downloading and re-parsing the whole sheet — a worker's login (which calls
- * `fetchGlobalKnownUsers` on mount and `fetchIngresoByDni` on submit) and an admin
- * flipping between the Usuarios/Actas tabs no longer pay for the full CSV twice.
+ * and cache it (same 30s-fresh pattern as topics/chunks/quiz) — used by
+ * `fetchAllIngresos` (admin: needs every worker's row). Single-record lookups
+ * (`fetchIngresoByDni`) do NOT go through this anymore — see its own doc comment.
  */
 async function getIngresosDataset(force = false): Promise<IngresoRecord[]> {
   if (!force) {
@@ -923,11 +971,23 @@ async function getIngresosDataset(force = false): Promise<IngresoRecord[]> {
   }
 }
 
-/** Fetch user record from INGRESOS sheet by DNI (uses the shared cached dataset). */
-export async function fetchIngresoByDni(dni: string, force = false): Promise<IngresoRecord | null> {
-  const records = await getIngresosDataset(force);
-  const target = String(dni).trim();
-  return records.find((r) => String(r.dni).trim() === target) || null;
+/**
+ * Fetch a single INGRESOS record by DNI via a server-side lookup (Apps Script
+ * TextFinder scoped to the DNI column, `Code.gs:getIngresoByDni`) instead of
+ * downloading and parsing the entire sheet just to keep one row — this is the
+ * one worker actually asks for, so the cost no longer grows with the total
+ * number of registered workers. Always hits the network (no caching): this is
+ * used for the login lookup and the 30s profile-refresh poll, both of which
+ * want the current state, not a stale cached one.
+ */
+export async function fetchIngresoByDni(dni: string): Promise<IngresoRecord | null> {
+  try {
+    const result = (await postToAppsScript({ action: 'getIngresoByDni', dni })) as { status: string; record?: any };
+    if (result.status !== 'ok' || !result.record) return null;
+    return mapIngresoRow(result.record);
+  } catch {
+    return null;
+  }
 }
 
 /** Fetch ALL rows from INGRESOS sheet, one best record per DNI (uses the shared cached dataset). */
@@ -1222,39 +1282,44 @@ export async function fetchShortEvals(): Promise<ShortEval[]> {
   } catch { return []; }
 }
 
+/**
+ * Todos los resultados de UNA evaluación corta, via un lookup acotado en el
+ * servidor (Apps Script TextFinder por EvaluacionId, `Code.gs:getShortResultadosByEvaluacion`)
+ * en vez de bajar SHORT_RESULTADOS entera (los resultados de TODAS las
+ * evaluaciones de TODOS los trabajadores). Se necesita el roster completo de
+ * esta evaluación (no solo el de un DNI) para reconocer el nombre mientras el
+ * trabajador escribe su DNI, sin ida y vuelta al servidor por cada dígito.
+ */
 export async function fetchShortResultsDni(evalId: string): Promise<{ dni: string; apellidos: string; nombres: string; guardia: string; nota: number; fechaHora: string }[]> {
-  const url = getSheetUrl(SHEETS_CONFIG.sheets.shortResults);
   try {
-    const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) return [];
-    const csvText = await response.text();
-    return new Promise((resolve) => {
-      Papa.parse(csvText, {
-        header: true,
-        complete: (results) => {
-          resolve((results.data as any[])
-            .filter((r: any) => String(r.EvaluacionId || '').trim() === evalId && r.DNI)
-            .map((r: any) => ({
-              dni: String(r.DNI || '').trim(),
-              apellidos: String(r.Apellidos || '').trim(),
-              nombres: String(r.Nombres || '').trim(),
-              guardia: String(r.Guardia || '').trim(),
-              nota: parseFloat(r.Nota || '0') || 0,
-              fechaHora: String(r.FechaHora || '').trim(),
-            })));
-        },
-        error: () => resolve([]),
-      });
-    });
+    const result = (await postToAppsScript({ action: 'getShortResultadosByEvaluacion', evaluacionId: evalId })) as { status: string; resultados?: any[] };
+    if (result.status !== 'ok' || !result.resultados) return [];
+    return result.resultados
+      .filter((r: any) => r.DNI)
+      .map((r: any) => ({
+        dni: String(r.DNI || '').trim(),
+        apellidos: String(r.Apellidos || '').trim(),
+        nombres: String(r.Nombres || '').trim(),
+        guardia: String(r.Guardia || '').trim(),
+        nota: parseFloat(r.Nota || '0') || 0,
+        fechaHora: String(r.FechaHora || '').trim(),
+      }));
   } catch { return []; }
 }
 
-export async function fetchAllShortResults(): Promise<Array<{
+type ShortResultRow = {
   evaluacionId: string; evaluacionNombre: string; tema: string;
   dni: string; apellidos: string; nombres: string; guardia: string;
   nota: number; porcentaje: number; fechaHora: string; totalPreguntas: number; correctas: number;
   preguntasErroneas: ShortEvalWrongAnswer[];
-}>> {
+};
+
+/** Admin-only (dashboard/tabla de resultados) — cacheado 30s, igual que fetchLearnTopics. */
+export async function fetchAllShortResults(force = false): Promise<ShortResultRow[]> {
+  if (!force) {
+    const cached = getSheetCache<ShortResultRow[]>('shortResults');
+    if (cached) return cached;
+  }
   const url = getSheetUrl(SHEETS_CONFIG.sheets.shortResults);
   try {
     const response = await fetch(url, { cache: 'no-store' });
@@ -1264,7 +1329,7 @@ export async function fetchAllShortResults(): Promise<Array<{
       Papa.parse(csvText, {
         header: true,
         complete: (results) => {
-          resolve((results.data as any[]).filter((r: any) => r.EvaluacionId && r.DNI).map((r: any) => ({
+          const records = (results.data as any[]).filter((r: any) => r.EvaluacionId && r.DNI).map((r: any) => ({
             evaluacionId: String(r.EvaluacionId || '').trim(),
             evaluacionNombre: String(r.EvaluacionNombre || '').trim(),
             tema: String(r.Tema || '').trim(),
@@ -1281,7 +1346,9 @@ export async function fetchAllShortResults(): Promise<Array<{
               try { return r.PreguntasErroneas ? JSON.parse(r.PreguntasErroneas) : []; }
               catch { return []; }
             })(),
-          })));
+          }));
+          setSheetCache('shortResults', records);
+          resolve(records);
         },
         error: () => resolve([]),
       });
@@ -1330,6 +1397,204 @@ export async function saveShortEvalResult(data: {
 }
 
 // =============================================
+// PAC - PROGRAMA ANUAL DE CAPACITACIONES
+// =============================================
+import type { PacPrograma, PacPregunta, PacResultado, PacEncuesta, PacWrongAnswer } from '../types';
+
+export async function fetchPacProgramas(force = false): Promise<PacPrograma[]> {
+  if (!force) {
+    const cached = getSheetCache<PacPrograma[]>('pacProgramas');
+    if (cached) return cached;
+  }
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.pacProgramas);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const programas = (results.data as any[]).filter(r => r.Id).map((r: any): PacPrograma => ({
+            id: String(r.Id || '').trim(),
+            nombre: String(r.Nombre || '').trim(),
+            descripcion: String(r.Descripcion || '').trim(),
+            tema: String(r.Tema || '').trim(),
+            capacitador: String(r.Capacitador || '').trim(),
+            fechaProgramada: String(r.FechaProgramada || '').trim(),
+            horaProgramada: String(r.HoraProgramada || '').trim(),
+            materialUrl: String(r.MaterialUrl || '').trim(),
+            materialNombre: String(r.MaterialNombre || '').trim(),
+            perfiles: r.Perfiles ? String(r.Perfiles).split('|').map((s: string) => s.trim()).filter(Boolean) : [],
+            dnisAsignados: r.DnisAsignados ? String(r.DnisAsignados).split('|').map((s: string) => s.trim()).filter(Boolean) : [],
+            notaAprobatoria: parseFloat(r.NotaAprobatoria || '14') || 14,
+            maxIntentos: parseInt(r.MaxIntentos || '3') || 3,
+            activo: String(r.Activo || '').toLowerCase() === 'true' || String(r.Activo || '') === '1',
+            fechaCreacion: String(r.FechaCreacion || '').trim(),
+          }));
+          setSheetCache('pacProgramas', programas);
+          resolve(programas);
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch { return []; }
+}
+
+export async function fetchPacPreguntas(programaId: string): Promise<PacPregunta[]> {
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.pacPreguntas);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          resolve((results.data as any[])
+            .filter((r: any) => r.IdPregunta && String(r.ProgramaId || '').trim() === programaId)
+            .map((r: any): PacPregunta => ({
+              idPregunta: String(r.IdPregunta || '').trim(),
+              programaId: String(r.ProgramaId || '').trim(),
+              pregunta: String(r.Pregunta || '').trim(),
+              optionA: String(r.OpcionA || '').trim(),
+              optionB: String(r.OpcionB || '').trim(),
+              optionC: String(r.OpcionC || '').trim(),
+              optionD: String(r.OpcionD || '').trim(),
+              correctAnswer: (String(r.RespuestaCorrecta || 'A').trim().toUpperCase() as 'A' | 'B' | 'C' | 'D'),
+              explanation: String(r.Explicacion || '').trim(),
+              orden: parseInt(r.Orden || '0') || 0,
+            }))
+            .sort((a, b) => (a.orden || 0) - (b.orden || 0)));
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch { return []; }
+}
+
+function parsePacResultadoRow(r: any): PacResultado {
+  let preguntasErroneas: PacWrongAnswer[] = [];
+  try { preguntasErroneas = r.PreguntasErroneas ? JSON.parse(r.PreguntasErroneas) : []; } catch { /* ignore */ }
+  let encuesta: PacEncuesta = { respuestas: [], sugerencia: '' };
+  try { encuesta = r.Encuesta ? JSON.parse(r.Encuesta) : encuesta; } catch { /* ignore */ }
+  return {
+    id: String(r.Id || '').trim(),
+    programaId: String(r.ProgramaId || '').trim(),
+    programaNombre: String(r.ProgramaNombre || '').trim(),
+    tema: String(r.Tema || '').trim(),
+    intento: parseInt(r.Intento || '0') || 0,
+    dni: String(r.DNI || '').trim(),
+    apellidos: String(r.Apellidos || '').trim(),
+    nombres: String(r.Nombres || '').trim(),
+    guardia: String(r.Guardia || '').trim(),
+    empresa: String(r.Empresa || '').trim(),
+    area: String(r.Area || '').trim(),
+    nota: parseFloat(r.Nota || '0') || 0,
+    aprobado: String(r.Aprobado || '').toLowerCase() === 'true',
+    totalPreguntas: parseInt(r.TotalPreguntas || '0') || 0,
+    correctas: parseInt(r.Correctas || '0') || 0,
+    preguntasErroneas,
+    encuesta,
+    consentimiento: String(r.Consentimiento || '').toLowerCase() === 'true',
+    firmaUrl: String(r.FirmaUrl || '').trim(),
+    selfieUrl: String(r.SelfieUrl || '').trim(),
+    constanciaPdfUrl: String(r.ConstanciaPdfUrl || '').trim(),
+    fechaHora: String(r.FechaHora || '').trim(),
+    dispositivo: String(r.Dispositivo || '').trim(),
+  };
+}
+
+/**
+ * Intentos previos de un DNI en un programa — usado para el chequeo de "ya
+ * aprobó"/"sin intentos" antes de rendir. Via un lookup acotado en el servidor
+ * (Apps Script TextFinder por DNI, `Code.gs:getPacResultadosByDni`) en vez de
+ * bajar PAC_RESULTADOS entera (los intentos de TODOS los trabajadores en
+ * TODOS los programas) — el trabajador solo descarga sus propios intentos.
+ */
+export async function fetchPacResultadosDni(programaId: string, dni: string): Promise<PacResultado[]> {
+  try {
+    const result = (await postToAppsScript({ action: 'getPacResultadosByDni', programaId, dni })) as { status: string; resultados?: any[] };
+    if (result.status !== 'ok' || !result.resultados) return [];
+    return result.resultados.filter((r: any) => r.Id).map(parsePacResultadoRow);
+  } catch { return []; }
+}
+
+/** Todos los intentos de todos los programas — para dashboard, seguimiento y resultados del admin. Cacheado 30s. */
+export async function fetchAllPacResultados(force = false): Promise<PacResultado[]> {
+  if (!force) {
+    const cached = getSheetCache<PacResultado[]>('pacResultados');
+    if (cached) return cached;
+  }
+  const url = getSheetUrl(SHEETS_CONFIG.sheets.pacResultados);
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return [];
+    const csvText = await response.text();
+    return new Promise((resolve) => {
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const records = (results.data as any[]).filter((r: any) => r.Id).map(parsePacResultadoRow);
+          setSheetCache('pacResultados', records);
+          resolve(records);
+        },
+        error: () => resolve([]),
+      });
+    });
+  } catch { return []; }
+}
+
+export async function createPacPrograma(data: Omit<PacPrograma, 'fechaCreacion'>): Promise<{ status: string; message: string }> {
+  const result = await postToAppsScript({ action: 'createPacPrograma', ...data });
+  clearSheetCache('pacProgramas');
+  return result;
+}
+
+export async function updatePacPrograma(data: Omit<PacPrograma, 'fechaCreacion'>): Promise<{ status: string; message: string }> {
+  const result = await postToAppsScript({ action: 'updatePacPrograma', ...data });
+  clearSheetCache('pacProgramas');
+  return result;
+}
+
+export async function deletePacPrograma(id: string): Promise<{ status: string; message: string }> {
+  const result = await postToAppsScript({ action: 'deletePacPrograma', id });
+  clearSheetCache('pacProgramas');
+  return result;
+}
+
+export async function upsertPacPreguntas(programaId: string, preguntas: PacPregunta[]): Promise<{ status: string; message: string }> {
+  return postToAppsScript({ action: 'upsertPacPreguntas', programaId, preguntas });
+}
+
+export async function deletePacResultado(programaId: string, dni: string, intento?: number): Promise<{ status: string; message: string }> {
+  const result = await postToAppsScript({ action: 'deletePacResultado', programaId, dni, intento });
+  clearSheetCache('pacResultados');
+  return result;
+}
+
+export async function uploadPacMaterial(fileBase64: string, fileName: string, mimeType: string): Promise<{ status: string; url?: string; nombre?: string; message?: string }> {
+  return postToAppsScript({ action: 'uploadPacMaterial', fileBase64, fileName, mimeType });
+}
+
+/**
+ * Registra un intento de evaluación PAC. A diferencia de saveShortEvalResult, NO se
+ * encola offline: el servidor asigna el número de intento y aplica la regla de
+ * aprobado/intentos agotados de forma atómica, así que el envío necesita confirmación
+ * de red inmediata (no tiene sentido mostrarle al trabajador una pantalla de resultado
+ * "optimista" cuando ese resultado todavía puede ser rechazado por el servidor).
+ */
+export async function savePacResultado(data: {
+  programaId: string; programaNombre: string; tema: string;
+  dni: string; apellidos: string; nombres: string; guardia: string; empresa: string; area: string;
+  nota: number; totalPreguntas: number; correctas: number; preguntasErroneas: PacWrongAnswer[];
+  encuesta: PacEncuesta; consentimiento: boolean;
+  pdfBase64: string; signatureBase64: string; selfieBase64: string; dispositivo?: string;
+}): Promise<{ status: string; code?: string; message?: string; nota?: number; intento?: number; aprobado?: boolean; url?: string }> {
+  return postToAppsScript({ action: 'savePacResultado', ...data });
+}
+
+// =============================================
 // ACTAS DE ENTREGA / COMPROMISOS
 // =============================================
 import type { ActaDocumento, ActaFirma, ActaItem } from '../types';
@@ -1362,7 +1627,12 @@ function parseActaItems(raw: unknown): ActaItem[] {
   }
 }
 
-export async function fetchActaDocumentos(): Promise<ActaDocumento[]> {
+/** Catálogo de documentos de actas (chico, bounded por lo que crea el admin) — cacheado 30s. */
+export async function fetchActaDocumentos(force = false): Promise<ActaDocumento[]> {
+  if (!force) {
+    const cached = getSheetCache<ActaDocumento[]>('actaDocumentos');
+    if (cached) return cached;
+  }
   const url = getSheetUrl(SHEETS_CONFIG.sheets.actasDocs);
   try {
     const response = await fetch(url, { cache: 'no-store' });
@@ -1372,7 +1642,7 @@ export async function fetchActaDocumentos(): Promise<ActaDocumento[]> {
       Papa.parse(csvText, {
         header: true,
         complete: (results) => {
-          resolve((results.data as any[]).filter(r => r.Id).map((r: any): ActaDocumento => ({
+          const records = (results.data as any[]).filter(r => r.Id).map((r: any): ActaDocumento => ({
             id: String(r.Id || '').trim(),
             titulo: String(r.Titulo || '').trim(),
             descripcion: String(r.Descripcion || '').trim(),
@@ -1385,7 +1655,9 @@ export async function fetchActaDocumentos(): Promise<ActaDocumento[]> {
             requiereFirmaDibujada: String(r.RequiereFirmaDibujada || '').toLowerCase() !== 'false',
             activo: String(r.Activo || '').toLowerCase() === 'true' || String(r.Activo || '') === '1',
             fechaCreacion: String(r.FechaCreacion || '').trim(),
-          })));
+          }));
+          setSheetCache('actaDocumentos', records);
+          resolve(records);
         },
         error: () => resolve([]),
       });
@@ -1393,7 +1665,12 @@ export async function fetchActaDocumentos(): Promise<ActaDocumento[]> {
   } catch { return []; }
 }
 
-export async function fetchActaFirmas(): Promise<ActaFirma[]> {
+/** Firmas de actas — crece con cada firma de cada trabajador en cada documento. Cacheado 30s. */
+export async function fetchActaFirmas(force = false): Promise<ActaFirma[]> {
+  if (!force) {
+    const cached = getSheetCache<ActaFirma[]>('actaFirmas');
+    if (cached) return cached;
+  }
   const url = getSheetUrl(SHEETS_CONFIG.sheets.actasFirmas);
   try {
     const response = await fetch(url, { cache: 'no-store' });
@@ -1403,7 +1680,7 @@ export async function fetchActaFirmas(): Promise<ActaFirma[]> {
       Papa.parse(csvText, {
         header: true,
         complete: (results) => {
-          resolve((results.data as any[]).filter(r => r.DocumentoId && r.DNI).map((r: any): ActaFirma => ({
+          const records = (results.data as any[]).filter(r => r.DocumentoId && r.DNI).map((r: any): ActaFirma => ({
             id: String(r.Id || '').trim(),
             documentoId: String(r.DocumentoId || '').trim(),
             documentoTitulo: String(r.DocumentoTitulo || '').trim(),
@@ -1425,7 +1702,9 @@ export async function fetchActaFirmas(): Promise<ActaFirma[]> {
               try { return r.Documentos ? JSON.parse(r.Documentos) : []; }
               catch { return []; }
             })(),
-          })));
+          }));
+          setSheetCache('actaFirmas', records);
+          resolve(records);
         },
         error: () => resolve([]),
       });
@@ -1448,6 +1727,7 @@ export async function saveActaDocumento(data: {
 }): Promise<{ success: boolean; message?: string }> {
   try {
     const result = await postToAppsScript({ action: 'upsertActaDocumento', ...data, items: JSON.stringify(data.items || []) });
+    clearSheetCache('actaDocumentos');
     return result.status === 'ok' ? { success: true } : { success: false, message: result.message };
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
@@ -1456,6 +1736,7 @@ export async function saveActaDocumento(data: {
 
 export async function deleteActaDocumento(id: string): Promise<void> {
   await postToAppsScript({ action: 'deleteActaDocumento', id });
+  clearSheetCache('actaDocumentos');
 }
 
 /** Sube un archivo (PDF, imagen, etc.) a Drive en la carpeta ACTAS/DOCUMENTOS y devuelve su enlace. */
@@ -1515,6 +1796,7 @@ export async function saveActaFirma(data: {
 export async function resendActaCorreo(id: string, correo?: string): Promise<{ success: boolean; message?: string }> {
   try {
     const result = await postToAppsScript({ action: 'resendActaCorreo', id, correo });
+    clearSheetCache('actaFirmas');
     return result.status === 'ok' ? { success: true } : { success: false, message: result.message };
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };

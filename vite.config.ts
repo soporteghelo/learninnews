@@ -51,7 +51,7 @@ const apiExtractTextPlugin = () => ({
             console.log('[Extractor] Content-Type:', response.headers['content-type']);
 
             // Manejar confirmación de virus (si el archivo es grande)
-            if (response.headers['content-type']?.includes('text/html')) {
+            if (String(response.headers['content-type'] ?? '').includes('text/html')) {
               const html = response.data.toString();
               const confirmMatch = html.match(/confirm=([^&"]+)/);
               if (confirmMatch) {
@@ -141,7 +141,7 @@ const apiDriveVideoPlugin = () => ({
           responseType: 'stream',
         });
 
-        const contentType = first.headers['content-type'] || '';
+        const contentType = String(first.headers['content-type'] ?? '');
         const responseUrl = first.request?.res?.responseUrl || downloadUrl;
 
         let directUrl: string;
@@ -175,12 +175,12 @@ const apiDriveVideoPlugin = () => ({
         });
 
         res.statusCode = upstream.status;
-        res.setHeader('Content-Type', upstream.headers['content-type'] || 'video/mp4');
+        res.setHeader('Content-Type', String(upstream.headers['content-type'] ?? 'video/mp4'));
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'no-store');
-        if (upstream.headers['content-range']) res.setHeader('Content-Range', upstream.headers['content-range']);
-        if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+        if (upstream.headers['content-range']) res.setHeader('Content-Range', String(upstream.headers['content-range']));
+        if (upstream.headers['content-length']) res.setHeader('Content-Length', String(upstream.headers['content-length']));
         upstream.data.pipe(res);
       } catch (error: any) {
         console.error('[DriveVideo] Error:', error.message);
@@ -227,8 +227,22 @@ export default defineConfig({
             options: {
               cacheName: 'sheets-data',
               networkTimeoutSeconds: 8,
-              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 7 },
+              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 30 },
               cacheableResponse: { statuses: [0, 200] },
+              plugins: [
+                {
+                  // getSheetUrl() agrega `&_t=<timestamp>` para saltarse el caché de gviz, lo
+                  // que hacía que CADA petición fuera una URL nueva: el caché se llenaba de
+                  // entradas de un solo uso y offline nunca había coincidencia. Guardamos y
+                  // buscamos con el timestamp removido, así cada hoja ocupa una sola entrada
+                  // reutilizable — la petición a la red sigue llevando el cache-buster.
+                  cacheKeyWillBeUsed: async ({ request }: { request: Request }) => {
+                    const url = new URL(request.url);
+                    url.searchParams.delete('_t');
+                    return url.href;
+                  },
+                },
+              ],
             },
           },
           {

@@ -50,7 +50,7 @@ const EXCLUSIONS: Record<string, string[]> = {
 export default function Onboarding({ onSelectAudience }: OnboardingProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showConfirm, setShowConfirm] = useState(false);
-  const isDark = localStorage.getItem('learn-theme') !== 'light';
+  const isDark = localStorage.getItem('learn-theme') === 'dark';
 
   const isDisabled = (id: string) =>
     [...selected].some(sel => (EXCLUSIONS[sel] ?? []).includes(id));

@@ -29,6 +29,9 @@ const SHORT_EVALS_SHEET_NAME = 'SHORT_EVALUACIONES';
 const SHORT_RESULTS_SHEET_NAME = 'SHORT_RESULTADOS';
 const ACTAS_DOCS_SHEET_NAME = 'ACTAS_DOCUMENTOS';
 const ACTAS_FIRMAS_SHEET_NAME = 'ACTAS_FIRMAS';
+const PAC_PROGRAMAS_SHEET_NAME = 'PAC_PROGRAMAS';
+const PAC_PREGUNTAS_SHEET_NAME = 'PAC_PREGUNTAS';
+const PAC_RESULTADOS_SHEET_NAME = 'PAC_RESULTADOS';
 
 // =============================================
 // CONFIGURACIÓN DE CARPETAS DE DRIVE
@@ -44,6 +47,7 @@ const PROJECT_ROOT_FOLDER_ID = '1bi_81jpB1fEYVE8qnPjOT5wLxCH03zmy';
 const CERT_FOLDER_NAME  = 'CERTIFICADOS';
 const ACTAS_FOLDER_NAME = 'ACTAS';
 const USUARIOS_FOLDER_NAME = 'USUARIOS';
+const PAC_FOLDER_NAME = 'PAC';
 
 /** Carpeta raíz del proyecto en Drive (único ID de carpeta del proyecto). */
 function getRootFolder_() {
@@ -60,6 +64,10 @@ function getActasFolder_() {
 /** Subcarpeta USUARIOS dentro de la raíz (firma+selfie de la autorización de onboarding, por DNI). */
 function getUsuariosFolder_() {
   return getOrCreateSubFolder(getRootFolder_(), USUARIOS_FOLDER_NAME);
+}
+/** Subcarpeta PAC dentro de la raíz (material de referencia y constancias firmadas del Programa Anual de Capacitaciones). */
+function getPacFolder_() {
+  return getOrCreateSubFolder(getRootFolder_(), PAC_FOLDER_NAME);
 }
 /** Devuelve una subcarpeta por nombre SIN crearla (null si no existe). */
 function findSubFolder_(parent, name) {
@@ -221,6 +229,14 @@ function doPost(e) {
       const sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
       if (!sheet) return createResponse({ status: 'error', message: 'Hoja INGRESOS no encontrada' });
       return updateIngreso(sheet, data.ingreso);
+    } else if (data.action === 'getIngresoByDni') {
+      return getIngresoByDni(ss, data);
+    } else if (data.action === 'getCertificadosByDni') {
+      return getCertificadosByDni(ss, data);
+    } else if (data.action === 'getPacResultadosByDni') {
+      return getPacResultadosByDni(ss, data);
+    } else if (data.action === 'getShortResultadosByEvaluacion') {
+      return getShortResultadosByEvaluacion(ss, data);
     } else if (data.action === 'updateUserProfile') {
       return updateUserProfile(ss, data);
     } else if (data.action === 'deleteUsuario') {
@@ -247,6 +263,20 @@ function doPost(e) {
       return saveShortEvalResult(ss, data);
     } else if (data.action === 'deleteShortEvalResult') {
       return deleteShortEvalResult(ss, data);
+    } else if (data.action === 'createPacPrograma') {
+      return createPacPrograma(ss, data);
+    } else if (data.action === 'updatePacPrograma') {
+      return updatePacPrograma(ss, data);
+    } else if (data.action === 'deletePacPrograma') {
+      return deletePacPrograma(ss, data);
+    } else if (data.action === 'upsertPacPreguntas') {
+      return upsertPacPreguntas(ss, data);
+    } else if (data.action === 'savePacResultado') {
+      return savePacResultado(ss, data);
+    } else if (data.action === 'deletePacResultado') {
+      return deletePacResultado(ss, data);
+    } else if (data.action === 'uploadPacMaterial') {
+      return uploadPacMaterial(data);
     } else if (data.action === 'uploadActaArchivo') {
       return uploadActaArchivo(data);
     } else if (data.action === 'upsertActaDocumento') {
@@ -539,6 +569,90 @@ function findIngresoRow_(sheet, colMap, searchKey) {
   var range = sheet.getRange(2, dniColIdx + 1, sheet.getLastRow() - 1, 1);
   var found = range.createTextFinder(String(searchKey)).matchEntireCell(true).findNext();
   return found ? found.getRow() : -1;
+}
+
+// =============================================
+// LECTURAS ACOTADAS POR DNI (evitan bajar la hoja completa)
+// =============================================
+// Antes, el cliente descargaba el CSV público de la hoja ENTERA (todos los DNIs)
+// solo para quedarse con la fila de una persona — un costo que crece con el total
+// de registros de todos los trabajadores, no con los de uno. Estas acciones hacen
+// ese filtro del lado del servidor con TextFinder acotado a una sola columna (no
+// sheet.getDataRange() completo), y solo traen a memoria las filas que sí matchean.
+
+/** Todas las filas de `sheet` donde la columna `columnName` == `value` (comparación exacta de celda). */
+function findRowsByColumnValue_(sheet, columnName, value) {
+  if (sheet.getLastRow() < 2) return [];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var colIdx = headers.indexOf(columnName);
+  if (colIdx === -1) return [];
+  var range = sheet.getRange(2, colIdx + 1, sheet.getLastRow() - 1, 1);
+  var matches = range.createTextFinder(String(value)).matchEntireCell(true).findAll();
+  return matches.map(function (m) {
+    var row = m.getRow();
+    return { row: row, headers: headers, values: sheet.getRange(row, 1, 1, lastCol).getValues()[0] };
+  });
+}
+
+/** Convierte una fila (headers + values paralelos) en un objeto {NombreColumna: valor}. */
+function rowToObject_(headers, values) {
+  var obj = {};
+  headers.forEach(function (h, i) { obj[h] = values[i]; });
+  return obj;
+}
+
+/** Un registro de INGRESOS por DNI, sin bajar el resto de trabajadores. */
+function getIngresoByDni(ss, data) {
+  var dni = String(data.dni || '').trim();
+  if (!dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+  var sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'ok', record: null });
+  var headers = sheet.getLastColumn() > 0 ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0] : [];
+  var dniColName = headers.indexOf('DNI') !== -1 ? 'DNI' : 'Id';
+  var matches = findRowsByColumnValue_(sheet, dniColName, dni);
+  if (matches.length === 0) return createResponse({ status: 'ok', record: null });
+  return createResponse({ status: 'ok', record: rowToObject_(matches[0].headers, matches[0].values) });
+}
+
+/** Los certificados (todas las columnas TopicId/LinkCertificado) de un DNI, sin bajar los de todos. */
+function getCertificadosByDni(ss, data) {
+  var dni = String(data.dni || '').trim();
+  if (!dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+  var sheet = ss.getSheetByName('CERTIFICADOS');
+  if (!sheet) return createResponse({ status: 'ok', certificados: [] });
+  var matches = findRowsByColumnValue_(sheet, 'DNI', dni);
+  return createResponse({ status: 'ok', certificados: matches.map(function (m) { return rowToObject_(m.headers, m.values); }) });
+}
+
+/** Intentos previos de un DNI en un programa PAC (chequeo "¿ya rendí?"), sin bajar todos los intentos de todos los programas. */
+function getPacResultadosByDni(ss, data) {
+  var dni = String(data.dni || '').trim();
+  var programaId = String(data.programaId || '').trim();
+  if (!dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+  var sheet = ss.getSheetByName(PAC_RESULTADOS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'ok', resultados: [] });
+  var matches = findRowsByColumnValue_(sheet, 'DNI', dni)
+    .map(function (m) { return rowToObject_(m.headers, m.values); })
+    .filter(function (r) { return !programaId || String(r.ProgramaId).trim() === programaId; });
+  return createResponse({ status: 'ok', resultados: matches });
+}
+
+/**
+ * Todos los resultados de UNA evaluación corta (no de todas). A diferencia de
+ * getPacResultadosByDni, aquí el cliente necesita el roster completo de esa
+ * evaluación (para reconocer el nombre mientras el trabajador escribe su DNI,
+ * sin ida y vuelta al servidor por cada dígito) — se acota por EvaluacionId,
+ * no por DNI.
+ */
+function getShortResultadosByEvaluacion(ss, data) {
+  var evaluacionId = String(data.evaluacionId || '').trim();
+  if (!evaluacionId) return createResponse({ status: 'error', message: 'EvaluacionId requerido' });
+  var sheet = ss.getSheetByName(SHORT_RESULTS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'ok', resultados: [] });
+  var matches = findRowsByColumnValue_(sheet, 'EvaluacionId', evaluacionId)
+    .map(function (m) { return rowToObject_(m.headers, m.values); });
+  return createResponse({ status: 'ok', resultados: matches });
 }
 
 function registerIngreso(sheet, ingreso) {
@@ -989,17 +1103,13 @@ function saveShortEvalResult(ss, data) {
   getOrCreateColumn(sheet, 'Guardia');
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
-  // Blindaje anti-duplicado: si ya existe (EvaluacionId + DNI), no volver a insertar
-  var values = sheet.getDataRange().getValues();
-  var evalIdx = headers.indexOf('EvaluacionId');
-  var dniIdx = headers.indexOf('DNI');
-  if (evalIdx !== -1 && dniIdx !== -1) {
-    for (var i = 1; i < values.length; i++) {
-      if (String(values[i][evalIdx]).trim() === String(data.evaluacionId).trim() &&
-          String(values[i][dniIdx]).trim() === String(data.dni).trim()) {
-        return createResponse({ status: 'ok', message: 'Ya registrado', duplicate: true });
-      }
-    }
+  // Blindaje anti-duplicado: si ya existe (EvaluacionId + DNI), no volver a insertar.
+  // Acotado por DNI (TextFinder de 1 columna) en vez de traer toda la hoja a memoria —
+  // una persona tiene a lo sumo un puñado de evaluaciones rendidas, no miles.
+  var dupExists = findRowsByColumnValue_(sheet, 'DNI', String(data.dni || '').trim())
+    .some(function (m) { return String(rowToObject_(m.headers, m.values).EvaluacionId).trim() === String(data.evaluacionId).trim(); });
+  if (dupExists) {
+    return createResponse({ status: 'ok', message: 'Ya registrado', duplicate: true });
   }
 
   var wrongJson = '';
@@ -1028,22 +1138,317 @@ function saveShortEvalResult(ss, data) {
 function deleteShortEvalResult(ss, data) {
   var sheet = ss.getSheetByName(SHORT_RESULTS_SHEET_NAME);
   if (!sheet) return createResponse({ status: 'error', message: 'Hoja SHORT_RESULTADOS no encontrada' });
+  // Acotado por DNI en vez de leer toda la hoja — una persona rinde a lo sumo
+  // un puñado de evaluaciones, no hace falta traer las de todos a memoria.
+  var rows = findRowsByColumnValue_(sheet, 'DNI', String(data.dni || '').trim())
+    .filter(function (m) { return String(rowToObject_(m.headers, m.values).EvaluacionId).trim() === String(data.evaluacionId).trim(); })
+    .map(function (m) { return m.row; })
+    .sort(function (a, b) { return b - a; }); // de atrás hacia adelante para que borrar no corra los índices restantes
+  rows.forEach(function (row) { sheet.deleteRow(row); });
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Resultado eliminado', deleted: rows.length });
+}
+
+// =============================================
+// PAC - PROGRAMA ANUAL DE CAPACITACIONES
+// =============================================
+
+var PAC_PROGRAMAS_HEADERS = ['Id', 'Nombre', 'Descripcion', 'Tema', 'Capacitador', 'FechaProgramada', 'HoraProgramada', 'MaterialUrl', 'MaterialNombre', 'Perfiles', 'DnisAsignados', 'NotaAprobatoria', 'MaxIntentos', 'Activo', 'FechaCreacion'];
+var PAC_PREGUNTAS_HEADERS = ['IdPregunta', 'ProgramaId', 'Pregunta', 'OpcionA', 'OpcionB', 'OpcionC', 'OpcionD', 'RespuestaCorrecta', 'Explicacion', 'Orden'];
+var PAC_RESULTADOS_HEADERS = ['Id', 'ProgramaId', 'ProgramaNombre', 'Tema', 'Intento', 'DNI', 'Apellidos', 'Nombres', 'Guardia', 'Empresa', 'Area', 'Nota', 'Aprobado', 'TotalPreguntas', 'Correctas', 'PreguntasErroneas', 'Encuesta', 'Consentimiento', 'FirmaUrl', 'SelfieUrl', 'ConstanciaPdfUrl', 'FechaHora', 'Dispositivo'];
+
+/**
+ * Sube el material de referencia (PDF/imagen/etc.) de un programa PAC a
+ * <RAÍZ>/PAC/MATERIAL. Es solo material de consulta del admin/capacitación
+ * presencial — nunca se muestra al trabajador en el flujo de evaluación.
+ */
+function uploadPacMaterial(data) {
+  if (!data.fileBase64) return createResponse({ status: 'error', message: 'Archivo requerido' });
+  var fileName = String(data.fileName || 'material').trim() || 'material';
+  var mimeType = String(data.mimeType || 'application/octet-stream');
+  var raw = data.fileBase64.indexOf(',') !== -1 ? data.fileBase64.split(',')[1] : data.fileBase64;
+  var blob = Utilities.newBlob(Utilities.base64Decode(raw), mimeType, fileName);
+  var folder = getOrCreateSubFolder(getPacFolder_(), 'MATERIAL');
+  var file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return createResponse({ status: 'ok', url: file.getUrl(), nombre: fileName });
+}
+
+/** Crea o actualiza (por Id) un programa del PAC — reemplaza la fila completa, igual que upsertActaDocumento. */
+function createPacPrograma(ss, data) {
+  return upsertPacPrograma_(ss, data, 'Programa creado');
+}
+function updatePacPrograma(ss, data) {
+  return upsertPacPrograma_(ss, data, 'Programa actualizado');
+}
+function upsertPacPrograma_(ss, data, okMessage) {
+  var sheet = getOrCreateSheetWithHeaders(ss, PAC_PROGRAMAS_SHEET_NAME, PAC_PROGRAMAS_HEADERS);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var idIdx = headers.indexOf('Id');
+  var perfiles = Array.isArray(data.perfiles) ? data.perfiles.join('|') : String(data.perfiles || '');
+  var dnis = Array.isArray(data.dnisAsignados) ? data.dnisAsignados.join('|') : String(data.dnisAsignados || '');
+  var valueMap = {
+    Id: String(data.id || '').trim(),
+    Nombre: String(data.nombre || '').trim(),
+    Descripcion: String(data.descripcion || '').trim(),
+    Tema: String(data.tema || '').trim(),
+    Capacitador: String(data.capacitador || '').trim(),
+    FechaProgramada: String(data.fechaProgramada || '').trim(),
+    HoraProgramada: String(data.horaProgramada || '').trim(),
+    MaterialUrl: String(data.materialUrl || '').trim(),
+    MaterialNombre: String(data.materialNombre || '').trim(),
+    Perfiles: perfiles,
+    DnisAsignados: dnis,
+    NotaAprobatoria: data.notaAprobatoria !== undefined && data.notaAprobatoria !== '' ? Number(data.notaAprobatoria) : 14,
+    MaxIntentos: data.maxIntentos !== undefined && data.maxIntentos !== '' ? Number(data.maxIntentos) : 3,
+    Activo: (data.activo === false || String(data.activo) === 'false') ? 'false' : 'true',
+    FechaCreacion: data.fechaCreacion ? String(data.fechaCreacion) : nowPeruString()
+  };
+
   var values = sheet.getDataRange().getValues();
-  if (values.length < 2) return createResponse({ status: 'ok', message: 'Sin registros', deleted: 0 });
-  var headers = values[0];
-  var evalIdx = headers.indexOf('EvaluacionId');
-  var dniIdx = headers.indexOf('DNI');
-  if (evalIdx === -1 || dniIdx === -1) return createResponse({ status: 'error', message: 'Columnas EvaluacionId/DNI no encontradas' });
-  var deleted = 0;
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][idIdx]).trim() === valueMap.Id && valueMap.Id !== '') {
+      var fcIdx = headers.indexOf('FechaCreacion');
+      if (fcIdx !== -1 && values[i][fcIdx]) valueMap.FechaCreacion = values[i][fcIdx];
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([buildRowFromObject(headers, valueMap)]);
+      SpreadsheetApp.flush();
+      return createResponse({ status: 'ok', message: okMessage });
+    }
+  }
+  sheet.appendRow(buildRowFromObject(headers, valueMap));
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: okMessage });
+}
+
+/** Elimina un programa PAC por Id. No borra en cascada sus preguntas/resultados (mismo criterio que deleteShortEval/deleteActaDocumento). */
+function deletePacPrograma(ss, data) {
+  var sheet = ss.getSheetByName(PAC_PROGRAMAS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja PAC_PROGRAMAS no encontrada' });
+  var values = sheet.getDataRange().getValues();
+  var idIdx = values[0].indexOf('Id');
+  if (idIdx === -1) return createResponse({ status: 'error', message: 'Columna Id no encontrada' });
   for (var i = values.length - 1; i >= 1; i--) {
-    if (String(values[i][evalIdx]).trim() === String(data.evaluacionId).trim() &&
-        String(values[i][dniIdx]).trim() === String(data.dni).trim()) {
+    if (String(values[i][idIdx]).trim() === String(data.id).trim()) {
       sheet.deleteRow(i + 1);
-      deleted++;
     }
   }
   SpreadsheetApp.flush();
-  return createResponse({ status: 'ok', message: 'Resultado eliminado', deleted: deleted });
+  return createResponse({ status: 'ok', message: 'Programa eliminado' });
+}
+
+/**
+ * Guarda en bloque el banco de preguntas de un programa: actualiza las que ya
+ * existen (por IdPregunta), agrega las nuevas, y borra las que ya no vienen en
+ * la lista (el cliente siempre manda el set completo de preguntas del programa).
+ */
+function upsertPacPreguntas(ss, data) {
+  var sheet = getOrCreateSheetWithHeaders(ss, PAC_PREGUNTAS_SHEET_NAME, PAC_PREGUNTAS_HEADERS);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var programaId = String(data.programaId || '').trim();
+  var preguntas = Array.isArray(data.preguntas) ? data.preguntas : [];
+
+  var values = sheet.getDataRange().getValues();
+  var idIdx = headers.indexOf('IdPregunta');
+  var progIdx = headers.indexOf('ProgramaId');
+
+  var incomingIds = {};
+  preguntas.forEach(function (p) { incomingIds[String(p.idPregunta || '').trim()] = true; });
+
+  // Borra (de atrás hacia adelante) las filas de este programa que ya no vienen en el set entrante
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (String(values[i][progIdx]).trim() === programaId && !incomingIds[String(values[i][idIdx]).trim()]) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+
+  // Re-lee tras los borrados para ubicar filas existentes a actualizar
+  values = sheet.getDataRange().getValues();
+  preguntas.forEach(function (p, idx) {
+    var valueMap = {
+      IdPregunta: String(p.idPregunta || '').trim(),
+      ProgramaId: programaId,
+      Pregunta: String(p.pregunta || '').trim(),
+      OpcionA: String(p.optionA || '').trim(),
+      OpcionB: String(p.optionB || '').trim(),
+      OpcionC: String(p.optionC || '').trim(),
+      OpcionD: String(p.optionD || '').trim(),
+      RespuestaCorrecta: String(p.correctAnswer || '').trim(),
+      Explicacion: String(p.explanation || '').trim(),
+      Orden: p.orden !== undefined ? p.orden : idx
+    };
+    var rowIndex = -1;
+    for (var i = 1; i < values.length; i++) {
+      if (String(values[i][idIdx]).trim() === valueMap.IdPregunta && valueMap.IdPregunta !== '') { rowIndex = i + 1; break; }
+    }
+    if (rowIndex > 0) {
+      sheet.getRange(rowIndex, 1, 1, headers.length).setValues([buildRowFromObject(headers, valueMap)]);
+    } else {
+      sheet.appendRow(buildRowFromObject(headers, valueMap));
+    }
+  });
+
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Preguntas guardadas' });
+}
+
+/**
+ * Registra un intento de evaluación PAC, aplicando server-side la regla de
+ * negocio (no confiar en el cliente): si el DNI ya aprobó este programa, se
+ * rechaza; si ya usó todos los intentos permitidos, se rechaza; si no, se
+ * asigna el número de intento y se suben constancia PDF + firma + selfie.
+ * Usa LockService porque el conteo de intentos debe ser atómico ante envíos
+ * concurrentes del mismo DNI (p.ej. doble clic o reintento de red).
+ */
+function savePacResultado(ss, data) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (eLock) {
+    return createResponse({ status: 'error', message: 'El sistema está ocupado, intenta nuevamente en unos segundos.' });
+  }
+  try {
+    if (!data.dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+    if (!data.programaId) return createResponse({ status: 'error', message: 'Programa requerido' });
+    var dni = String(data.dni).trim();
+    var programaId = String(data.programaId).trim();
+
+    var programasSheet = ss.getSheetByName(PAC_PROGRAMAS_SHEET_NAME);
+    if (!programasSheet) return createResponse({ status: 'error', message: 'Hoja PAC_PROGRAMAS no encontrada' });
+    var progValues = programasSheet.getDataRange().getValues();
+    var progHeaders = progValues[0];
+    var progIdIdx = progHeaders.indexOf('Id');
+    var maxIntentosIdx = progHeaders.indexOf('MaxIntentos');
+    var maxIntentos = 3;
+    var found = false;
+    for (var p = 1; p < progValues.length; p++) {
+      if (String(progValues[p][progIdIdx]).trim() === programaId) {
+        found = true;
+        var raw = progValues[p][maxIntentosIdx];
+        if (raw !== '' && raw !== undefined && raw !== null) maxIntentos = Number(raw);
+        break;
+      }
+    }
+    if (!found) return createResponse({ status: 'error', message: 'Programa no encontrado' });
+
+    var sheet = getOrCreateSheetWithHeaders(ss, PAC_RESULTADOS_SHEET_NAME, PAC_RESULTADOS_HEADERS);
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    // Acotado por DNI (TextFinder de 1 columna) en vez de sheet.getDataRange() completo:
+    // esta hoja crece con CADA intento de CADA trabajador en CADA programa, así que a
+    // diferencia de PAC_PROGRAMAS (catálogo chico) sí conviene no traerla entera.
+    var previos = findRowsByColumnValue_(sheet, 'DNI', dni)
+      .map(function (m) { return rowToObject_(m.headers, m.values); })
+      .filter(function (r) { return String(r.ProgramaId).trim() === programaId; });
+    var notaPrevia = null;
+    var intentosUsados = 0;
+    for (var pi = 0; pi < previos.length; pi++) {
+      intentosUsados++;
+      if (String(previos[pi].Aprobado).trim() === 'true') {
+        return createResponse({ status: 'error', code: 'ALREADY_PASSED', message: 'Ya aprobaste esta capacitación.', nota: previos[pi].Nota });
+      }
+      notaPrevia = previos[pi].Nota;
+    }
+    if (intentosUsados >= maxIntentos) {
+      return createResponse({ status: 'error', code: 'NO_ATTEMPTS_LEFT', message: 'Ya usaste tus ' + maxIntentos + ' intentos permitidos.', nota: notaPrevia });
+    }
+
+    var intento = intentosUsados + 1;
+    var nota = Number(data.nota) || 0;
+    var notaAprobatoriaIdx = progHeaders.indexOf('NotaAprobatoria');
+    var notaAprobatoria = 14;
+    for (var p2 = 1; p2 < progValues.length; p2++) {
+      if (String(progValues[p2][progIdIdx]).trim() === programaId) {
+        var rawNa = progValues[p2][notaAprobatoriaIdx];
+        if (rawNa !== '' && rawNa !== undefined && rawNa !== null) notaAprobatoria = Number(rawNa);
+        break;
+      }
+    }
+    var aprobado = nota >= notaAprobatoria;
+
+    var dniFolder = getOrCreateSubFolder(getOrCreateSubFolder(getPacFolder_(), 'RESULTADOS'), dni);
+    var now = new Date();
+    var slug = String(data.programaNombre || 'PAC').trim().toUpperCase().replace(/[^A-Z0-9ÁÉÍÓÚÜÑ]/gi, '_').replace(/_+/g, '_');
+
+    var pdfUrl = '';
+    if (data.pdfBase64) {
+      var rawPdf = data.pdfBase64.indexOf(',') !== -1 ? data.pdfBase64.split(',')[1] : data.pdfBase64;
+      var pdfBlob = Utilities.newBlob(Utilities.base64Decode(rawPdf), 'application/pdf', dni + '_' + slug + '_INTENTO' + intento + '_' + now.getTime() + '.pdf');
+      var pdfFile = dniFolder.createFile(pdfBlob);
+      pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      pdfUrl = pdfFile.getUrl();
+    }
+    var firmaUrl = '';
+    if (data.signatureBase64) {
+      var rawFirma = data.signatureBase64.indexOf(',') !== -1 ? data.signatureBase64.split(',')[1] : data.signatureBase64;
+      var firmaBlob = Utilities.newBlob(Utilities.base64Decode(rawFirma), 'image/png', dni + '_' + slug + '_FIRMA_INTENTO' + intento + '_' + now.getTime() + '.png');
+      var firmaFile = dniFolder.createFile(firmaBlob);
+      firmaFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      firmaUrl = firmaFile.getUrl();
+    }
+    var selfieUrl = '';
+    if (data.selfieBase64) {
+      var rawSelfie = data.selfieBase64.indexOf(',') !== -1 ? data.selfieBase64.split(',')[1] : data.selfieBase64;
+      var selfieBlob = Utilities.newBlob(Utilities.base64Decode(rawSelfie), 'image/jpeg', dni + '_' + slug + '_SELFIE_INTENTO' + intento + '_' + now.getTime() + '.jpg');
+      var selfieFile = dniFolder.createFile(selfieBlob);
+      selfieFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      selfieUrl = selfieFile.getUrl();
+    }
+
+    var wrongJson = '[]';
+    try { wrongJson = JSON.stringify(data.preguntasErroneas || []); } catch (e1) {}
+    var encuestaJson = '{}';
+    try { encuestaJson = JSON.stringify(data.encuesta || {}); } catch (e2) {}
+
+    var rowData = buildRowFromObject(headers, {
+      Id: dni + '-' + programaId + '-' + now.getTime(),
+      ProgramaId: programaId,
+      ProgramaNombre: String(data.programaNombre || '').trim(),
+      Tema: String(data.tema || '').trim(),
+      Intento: intento,
+      DNI: dni,
+      Apellidos: String(data.apellidos || '').trim(),
+      Nombres: String(data.nombres || '').trim(),
+      Guardia: String(data.guardia || '').trim(),
+      Empresa: String(data.empresa || '').trim(),
+      Area: String(data.area || '').trim(),
+      Nota: nota,
+      Aprobado: aprobado ? 'true' : 'false',
+      TotalPreguntas: data.totalPreguntas !== undefined ? data.totalPreguntas : '',
+      Correctas: data.correctas !== undefined ? data.correctas : '',
+      PreguntasErroneas: wrongJson,
+      Encuesta: encuestaJson,
+      Consentimiento: data.consentimiento ? 'true' : 'false',
+      FirmaUrl: firmaUrl,
+      SelfieUrl: selfieUrl,
+      ConstanciaPdfUrl: pdfUrl,
+      FechaHora: nowPeruString(),
+      Dispositivo: String(data.dispositivo || '').trim()
+    });
+    sheet.appendRow(rowData);
+    SpreadsheetApp.flush();
+    return createResponse({ status: 'ok', intento: intento, nota: nota, aprobado: aprobado, url: pdfUrl });
+  } catch (err) {
+    return createResponse({ status: 'error', message: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Borra un intento puntual (ProgramaId+DNI+Intento) — permite al admin "deshacer" un registro cargado por error. */
+function deletePacResultado(ss, data) {
+  var sheet = ss.getSheetByName(PAC_RESULTADOS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja PAC_RESULTADOS no encontrada' });
+  // Acotado por DNI en vez de leer toda la hoja — mismo motivo que savePacResultado.
+  var rows = findRowsByColumnValue_(sheet, 'DNI', String(data.dni || '').trim())
+    .filter(function (m) {
+      var r = rowToObject_(m.headers, m.values);
+      var matchesIntento = data.intento === undefined || data.intento === null || String(r.Intento) === String(data.intento);
+      return String(r.ProgramaId).trim() === String(data.programaId).trim() && matchesIntento;
+    })
+    .map(function (m) { return m.row; })
+    .sort(function (a, b) { return b - a; });
+  rows.forEach(function (row) { sheet.deleteRow(row); });
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Resultado eliminado', deleted: rows.length });
 }
 
 // =============================================
@@ -1157,27 +1562,25 @@ function saveActaFirma(ss, data) {
     var documentosNuevos = Array.isArray(data.documentos) ? data.documentos.map(function (x) { return String(x); }) : [];
     var documentosNuevosJson = JSON.stringify(documentosNuevos.slice().sort());
 
-    var values = sheet.getDataRange().getValues();
-    var docIdx = headers.indexOf('DocumentoId');
-    var dniIdx = headers.indexOf('DNI');
-    var documentosIdx = headers.indexOf('Documentos');
-    if (docIdx !== -1 && dniIdx !== -1) {
-      var esActaGeneral = String(data.documentoId).trim() === 'ACTA_GENERAL';
-      for (var i = 1; i < values.length; i++) {
-        if (String(values[i][docIdx]).trim() !== String(data.documentoId).trim() ||
-            String(values[i][dniIdx]).trim() !== String(data.dni).trim()) continue;
-        var urlIdx = headers.indexOf('ActaPdfUrl');
-        if (!esActaGeneral) {
-          // Modelo antiguo (firma por documento individual): una sola firma por documento+DNI.
-          return createResponse({ status: 'ok', message: 'Ya firmado', duplicate: true, url: urlIdx !== -1 ? values[i][urlIdx] : '' });
-        }
-        // Acta general: se permite volver a firmar cuando hay documentos nuevos que
-        // cubrir; solo se bloquea si el lote es idéntico a uno ya firmado (doble envío).
-        var existente = documentosIdx !== -1 ? String(values[i][documentosIdx] || '[]') : '[]';
-        var existenteOrdenado = JSON.stringify((function () { try { return JSON.parse(existente); } catch (e) { return []; } })().slice().sort());
-        if (existenteOrdenado === documentosNuevosJson) {
-          return createResponse({ status: 'ok', message: 'Ya firmado', duplicate: true, url: urlIdx !== -1 ? values[i][urlIdx] : '' });
-        }
+    // Acotado por DNI (TextFinder de 1 columna) en vez de sheet.getDataRange() completo:
+    // ACTAS_FIRMAS crece con cada firma de cada trabajador en cada documento — una
+    // persona firma a lo sumo un puñado de documentos, no hace falta traer todo.
+    var previas = findRowsByColumnValue_(sheet, 'DNI', String(data.dni || '').trim())
+      .map(function (m) { return rowToObject_(m.headers, m.values); })
+      .filter(function (r) { return String(r.DocumentoId).trim() === String(data.documentoId).trim(); });
+    var esActaGeneral = String(data.documentoId).trim() === 'ACTA_GENERAL';
+    for (var pfi = 0; pfi < previas.length; pfi++) {
+      var prevRow = previas[pfi];
+      if (!esActaGeneral) {
+        // Modelo antiguo (firma por documento individual): una sola firma por documento+DNI.
+        return createResponse({ status: 'ok', message: 'Ya firmado', duplicate: true, url: prevRow.ActaPdfUrl || '' });
+      }
+      // Acta general: se permite volver a firmar cuando hay documentos nuevos que
+      // cubrir; solo se bloquea si el lote es idéntico a uno ya firmado (doble envío).
+      var existente = String(prevRow.Documentos || '[]');
+      var existenteOrdenado = JSON.stringify((function () { try { return JSON.parse(existente); } catch (e) { return []; } })().slice().sort());
+      if (existenteOrdenado === documentosNuevosJson) {
+        return createResponse({ status: 'ok', message: 'Ya firmado', duplicate: true, url: prevRow.ActaPdfUrl || '' });
       }
     }
 
@@ -1473,6 +1876,91 @@ function buildActaEmailHtml(r) {
 }
 
 // =============================================
+// ARCHIVADO DE DATOS ANTIGUOS (mantenimiento manual, NO automático)
+// =============================================
+// Las hojas de intentos/firmas (PAC_RESULTADOS, SHORT_RESULTADOS, ACTAS_FIRMAS)
+// solo crecen — nunca se borran filas por el uso normal de la app. Con años de
+// uso pueden acercarse al límite de 10 millones de celdas por spreadsheet (límite
+// de Google, compartido entre TODAS las hojas del archivo). Esta utilidad MUEVE
+// (no borra) las filas de años anteriores al actual a una hoja "<NOMBRE>_ARCHIVO"
+// dentro del mismo spreadsheet, dejando la hoja "viva" liviana. Es 100% opcional
+// y se dispara a mano desde el menú — nunca se ejecuta sola.
+
+/** Extrae el año de una fecha en el formato "dd/MM/yyyy - (HH:mm:ss)" usado en toda la app. */
+function extractYearFromFechaString_(s) {
+  var m = String(s || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? Number(m[3]) : null;
+}
+
+/**
+ * Mueve a "<sheetName>_ARCHIVO" las filas de `sheetName` cuya columna `fechaColumnName`
+ * tenga un año menor a `anioLimite`. No borra nada: las filas quedan en el archivo,
+ * solo salen de la hoja viva. Devuelve cuántas filas se movieron.
+ */
+function archivarHojaPorAnio_(ss, sheetName, fechaColumnName, anioLimite) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var lastCol = sheet.getLastColumn();
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var fechaIdx = headers.indexOf(fechaColumnName);
+  if (fechaIdx === -1) return 0;
+
+  var filasAArchivar = [];
+  for (var i = 1; i < values.length; i++) {
+    var anio = extractYearFromFechaString_(values[i][fechaIdx]);
+    if (anio !== null && anio < anioLimite) filasAArchivar.push({ row: i + 1, values: values[i] });
+  }
+  if (filasAArchivar.length === 0) return 0;
+
+  var archivo = getOrCreateSheetWithHeaders(ss, sheetName + '_ARCHIVO', headers);
+  archivo.getRange(archivo.getLastRow() + 1, 1, filasAArchivar.length, lastCol)
+    .setValues(filasAArchivar.map(function (f) { return f.values; }));
+
+  // Borra de la hoja viva de atrás hacia adelante para no correr los índices restantes.
+  filasAArchivar.slice().reverse().forEach(function (f) { sheet.deleteRow(f.row); });
+
+  SpreadsheetApp.flush();
+  return filasAArchivar.length;
+}
+
+/**
+ * Archiva PAC_RESULTADOS, SHORT_RESULTADOS y ACTAS_FIRMAS: mueve todo lo de años
+ * anteriores al actual a hojas "_ARCHIVO", dejando en la hoja viva solo el año en
+ * curso. Pide confirmación antes de mover nada. Ejecutar desde el menú, a mano,
+ * cuando el admin decida que ya es momento (no hay una frecuencia obligatoria).
+ */
+function ArchivarDatosAntiguos() {
+  var ss = getSpreadsheet_();
+  var anioActual = new Date().getFullYear();
+  var ui = null;
+  try { ui = SpreadsheetApp.getUi(); } catch (e) { /* headless */ }
+
+  if (ui) {
+    var confirm = ui.alert(
+      '📦 Archivar datos antiguos',
+      'Se moverán (no se borrarán) a hojas "_ARCHIVO" todas las filas de PAC_RESULTADOS, ' +
+      'SHORT_RESULTADOS y ACTAS_FIRMAS con fecha anterior a ' + anioActual + '. ' +
+      'Los datos siguen disponibles en las hojas de archivo, solo salen de la hoja viva.\n\n¿Continuar?',
+      ui.ButtonSet.YES_NO
+    );
+    if (confirm !== ui.Button.YES) return;
+  }
+
+  var movidas = {
+    PAC_RESULTADOS: archivarHojaPorAnio_(ss, PAC_RESULTADOS_SHEET_NAME, 'FechaHora', anioActual),
+    SHORT_RESULTADOS: archivarHojaPorAnio_(ss, SHORT_RESULTS_SHEET_NAME, 'FechaHora', anioActual),
+    ACTAS_FIRMAS: archivarHojaPorAnio_(ss, ACTAS_FIRMAS_SHEET_NAME, 'FechaFirma', anioActual),
+  };
+  var mensaje = 'PAC_RESULTADOS: ' + movidas.PAC_RESULTADOS + ' fila(s) movida(s)\n' +
+    'SHORT_RESULTADOS: ' + movidas.SHORT_RESULTADOS + ' fila(s) movida(s)\n' +
+    'ACTAS_FIRMAS: ' + movidas.ACTAS_FIRMAS + ' fila(s) movida(s)';
+  if (ui) { ui.alert('✅ Archivado completo', mensaje, ui.ButtonSet.OK); }
+  else { Logger.log(mensaje); }
+  return movidas;
+}
+
+// =============================================
 // CONFIGURACIÓN / REPLICACIÓN DEL PROYECTO
 // (Crea en 1 clic todas las carpetas de Drive y las hojas necesarias)
 // =============================================
@@ -1485,6 +1973,7 @@ function onOpen() {
       .addItem('🚀 Crear carpetas y hojas', 'CrearCarpetas')
       .addItem('🔎 Ver IDs de carpetas', 'MostrarConfiguracion')
       .addItem('🩺 Diagnóstico del sistema', 'MostrarDiagnostico')
+      .addItem('📦 Archivar datos antiguos (PAC/Shorts/Actas)', 'ArchivarDatosAntiguos')
       .addToUi();
   } catch (e) { /* sin UI (ejecución headless) */ }
 }
@@ -1604,6 +2093,9 @@ function getSheetDefinitions() {
     'SHORT_RESULTADOS': SHORT_RESULTS_HEADERS,
     'ACTAS_DOCUMENTOS': ACTAS_DOCS_HEADERS,
     'ACTAS_FIRMAS': ACTAS_FIRMAS_HEADERS,
+    'PAC_PROGRAMAS': PAC_PROGRAMAS_HEADERS,
+    'PAC_PREGUNTAS': PAC_PREGUNTAS_HEADERS,
+    'PAC_RESULTADOS': PAC_RESULTADOS_HEADERS,
     'CONFIG_SISTEMA': ['Clave', 'Valor', 'Descripcion', 'Actualizado']
   };
 }

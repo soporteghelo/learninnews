@@ -23,12 +23,44 @@ function esc(s: string | undefined): string {
     .replace(/>/g, '&gt;');
 }
 
+// html2canvas (usado por html2pdf.js para generar el PDF) no respeta
+// `vertical-align` en celdas de tabla: en el navegador se ve centrado, pero en
+// el PDF exportado el texto queda pegado arriba. El workaround estándar es
+// centrar con flexbox dentro de la celda en vez de vertical-align — así el PDF
+// coincide con la vista previa. Se envuelve el contenido de cada <td>/<th> en
+// este div en vez de confiar en el `verticalAlign` de cellStyle/labelStyle.
+const vCenterStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%' };
+
+function Cell({ style, children, ...rest }: React.TdHTMLAttributes<HTMLTableCellElement>) {
+  return (
+    <td style={style} {...rest}>
+      <div style={vCenterStyle}>{children}</div>
+    </td>
+  );
+}
+
+function HeadCell({ style, children, ...rest }: React.ThHTMLAttributes<HTMLTableCellElement>) {
+  return (
+    <th style={style} {...rest}>
+      <div style={vCenterStyle}>{children}</div>
+    </th>
+  );
+}
+
 // Filas totales de la tabla: si hay menos firmantes que esto, se completa con
 // filas vacías (numeradas, con los bordes ya dibujados) para que la hoja se vea
 // como un formulario A4 completo en vez de una tabla recortada al contenido.
 // 28 es el máximo que cabe en una sola página A4 vertical incluso si TODAS las
 // filas tuvieran firma+foto (las más altas); con menos filas llenas sobra margen.
 const TOTAL_ROWS = 28;
+
+// Código/Versión/Fecha del FORMATO en sí (Sistema Integrado de Gestión), fijos
+// para todo documento — no confundir con el Código/Versión del documento que se
+// distribuye (esos sí son dinámicos y se muestran más abajo, en "Identificación
+// del documento").
+const FORMATO_CODIGO = 'FPG-CL-SIG-06-05';
+const FORMATO_VERSION = '00';
+const FORMATO_FECHA = '10/3/2025';
 
 /**
  * "Lista Maestra de Distribución de Documentos" — replica el formato físico
@@ -58,23 +90,23 @@ const ActaDistribucionTemplate = React.forwardRef<HTMLDivElement, ActaDistribuci
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px' }}>
         <tbody>
           <tr>
-            <td style={{ ...cellStyle, width: '18%', textAlign: 'center', verticalAlign: 'middle' }} rowSpan={2}>
+            <Cell style={{ ...cellStyle, width: '18%', textAlign: 'center', verticalAlign: 'middle' }} rowSpan={3}>
               {logo ? <img src={logo} alt="logo" style={{ maxWidth: '100%', maxHeight: '50px' }} /> : null}
-            </td>
-            <td style={{ ...cellStyle, textAlign: 'center', fontWeight: 800, fontSize: '10px' }} rowSpan={2}>
+            </Cell>
+            <Cell style={{ ...cellStyle, textAlign: 'center', fontWeight: 800, fontSize: '10px' }} rowSpan={3}>
               SISTEMA INTEGRADO DE GESTIÓN
               <div style={{ fontSize: '10.5px', marginTop: '4px' }}>LISTA MAESTRA DE DISTRIBUCIÓN DE DOCUMENTOS</div>
-            </td>
-            <td style={{ ...labelStyle, width: '10%' }}>Código:</td>
-            <td style={{ ...cellStyle, width: '14%' }}>{esc(item.codigo)}</td>
+            </Cell>
+            <Cell style={{ ...labelStyle, width: '10%' }}>Código:</Cell>
+            <Cell style={{ ...cellStyle, width: '14%' }}>{FORMATO_CODIGO}</Cell>
           </tr>
           <tr>
-            <td style={labelStyle}>Versión:</td>
-            <td style={cellStyle}>{esc(item.version)}</td>
+            <Cell style={labelStyle}>Versión:</Cell>
+            <Cell style={cellStyle}>{FORMATO_VERSION}</Cell>
           </tr>
           <tr>
-            <td style={labelStyle}>Fecha de Actualización:</td>
-            <td style={cellStyle} colSpan={3}>{esc(item.fechaVersion)}</td>
+            <Cell style={labelStyle}>Fecha de<br />Actualización:</Cell>
+            <Cell style={cellStyle}>{FORMATO_FECHA}</Cell>
           </tr>
         </tbody>
       </table>
@@ -83,14 +115,14 @@ const ActaDistribucionTemplate = React.forwardRef<HTMLDivElement, ActaDistribuci
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px' }}>
         <tbody>
           <tr>
-            <td style={labelStyle}>NOMBRE DEL DOCUMENTO:</td>
-            <td style={cellStyle} colSpan={3}>{esc(documentoTitulo !== item.nombre ? `${item.nombre} (${documentoTitulo})` : item.nombre)}</td>
+            <Cell style={labelStyle}>NOMBRE DEL DOCUMENTO:</Cell>
+            <Cell style={cellStyle} colSpan={3}>{esc(documentoTitulo !== item.nombre ? `${item.nombre} (${documentoTitulo})` : item.nombre)}</Cell>
           </tr>
           <tr>
-            <td style={labelStyle}>CÓDIGO:</td>
-            <td style={cellStyle}>{esc(item.codigo)}</td>
-            <td style={labelStyle}>VERSIÓN:</td>
-            <td style={cellStyle}>{esc(item.version)}</td>
+            <Cell style={labelStyle}>CÓDIGO:</Cell>
+            <Cell style={cellStyle}>{esc(item.codigo)}</Cell>
+            <Cell style={labelStyle}>VERSIÓN:</Cell>
+            <Cell style={cellStyle}>{esc(item.version)}</Cell>
           </tr>
         </tbody>
       </table>
@@ -99,42 +131,40 @@ const ActaDistribucionTemplate = React.forwardRef<HTMLDivElement, ActaDistribuci
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <colgroup>
           <col style={{ width: '4%' }} />
-          <col style={{ width: '23%' }} />
+          <col style={{ width: '27%' }} />
           <col style={{ width: '11%' }} />
-          <col style={{ width: '13%' }} />
-          <col style={{ width: '8%' }} />
-          <col style={{ width: '18%' }} />
+          <col style={{ width: '15%' }} />
+          <col style={{ width: '20%' }} />
           <col style={{ width: '12%' }} />
           <col style={{ width: '7%' }} />
           <col style={{ width: '4%' }} />
         </colgroup>
         <thead>
           <tr>
-            {['N°', 'APELLIDOS Y NOMBRES', 'DNI', 'ÁREA', 'CANTIDAD', 'FECHA', 'FIRMA', 'FOTO', 'CERT.'].map((h) => (
-              <th key={h} style={{ ...cellStyle, background: '#dbe3ef', fontWeight: 800, textAlign: 'center' }}>{h}</th>
+            {['N°', 'APELLIDOS Y NOMBRES', 'DNI', 'ÁREA', 'FECHA', 'FIRMA', 'FOTO', 'CERT.'].map((h) => (
+              <HeadCell key={h} style={{ ...cellStyle, background: '#dbe3ef', fontWeight: 800, textAlign: 'center' }}>{h}</HeadCell>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.dni}>
-              <td style={rowCellStyle}>{i + 1}</td>
-              <td style={{ ...rowCellStyle, overflowWrap: 'break-word' }}>{esc(r.nombre)}</td>
-              <td style={rowCellStyle}>{esc(r.dni)}</td>
-              <td style={{ ...rowCellStyle, overflowWrap: 'break-word' }}>{esc(r.area)}</td>
-              <td style={rowCellStyle}>1</td>
-              <td style={{ ...rowCellStyle, whiteSpace: 'nowrap' }}>{esc(r.firma?.fechaFirma)}</td>
-              <td style={rowCellStyle}>
+              <Cell style={rowCellStyle}>{i + 1}</Cell>
+              <Cell style={{ ...rowCellStyle, overflowWrap: 'break-word' }}>{esc(r.nombre)}</Cell>
+              <Cell style={rowCellStyle}>{esc(r.dni)}</Cell>
+              <Cell style={{ ...rowCellStyle, overflowWrap: 'break-word' }}>{esc(r.area)}</Cell>
+              <Cell style={{ ...rowCellStyle, whiteSpace: 'nowrap' }}>{esc(r.firma?.fechaFirma)}</Cell>
+              <Cell style={rowCellStyle}>
                 {r.firmaBase64
                   ? <img src={r.firmaBase64} alt="firma" style={{ display: 'block', margin: '0 auto', maxWidth: '38px', maxHeight: '18px' }} />
                   : (r.firma ? '✓' : '')}
-              </td>
-              <td style={rowCellStyle}>
+              </Cell>
+              <Cell style={rowCellStyle}>
                 {r.fotoBase64
                   ? <img src={r.fotoBase64} alt="foto" style={{ display: 'block', margin: '0 auto', width: '18px', height: '18px', objectFit: 'cover', borderRadius: '2px' }} />
                   : '—'}
-              </td>
-              <td style={rowCellStyle}>
+              </Cell>
+              <Cell style={rowCellStyle}>
                 {r.firma?.actaPdfUrl
                   ? (
                     <a href={r.firma.actaPdfUrl} target="_blank" rel="noopener noreferrer"
@@ -143,13 +173,12 @@ const ActaDistribucionTemplate = React.forwardRef<HTMLDivElement, ActaDistribuci
                     </a>
                   )
                   : '—'}
-              </td>
+              </Cell>
             </tr>
           ))}
           {Array.from({ length: emptyRowsCount }).map((_, i) => (
             <tr key={`empty-${i}`}>
               <td style={rowCellStyle}>{rows.length + i + 1}</td>
-              <td style={rowCellStyle}>&nbsp;</td>
               <td style={rowCellStyle}>&nbsp;</td>
               <td style={rowCellStyle}>&nbsp;</td>
               <td style={rowCellStyle}>&nbsp;</td>

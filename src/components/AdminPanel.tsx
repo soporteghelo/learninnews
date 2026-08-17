@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import RichContent from './RichContent';
 import * as XLSX from 'xlsx';
@@ -9,7 +9,7 @@ import {
   Wifi, WifiOff, ChevronDown, ChevronUp,
   FileText, Settings, Video, Link2, MessageSquare, Undo2,
   Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
-  ClipboardCheck, ClipboardList, ExternalLink, ToggleLeft, ToggleRight, Globe, ArrowUpDown, ArrowUp, ArrowDown,
+  ClipboardCheck, ClipboardList, ExternalLink, Globe, ArrowUpDown, ArrowUp, ArrowDown,
   FileSignature, Mail, Send, X, Menu, PanelLeftClose, GraduationCap, Upload
 } from 'lucide-react';
 import { ADMIN_CONFIG, AUDIENCE_CONFIG, getPublicBaseUrl } from '../config/app.config';
@@ -19,28 +19,62 @@ import {
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
   clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, deleteUsuario, updateIngresoProgress, updateAppDynamicConfig,
-  fetchShortEvals, createShortEval, updateShortEvalStatus, deleteShortEval, fetchAllShortResults,
-  deleteShortEvalResult,
+  fetchAllShortResults,
   fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo, uploadActaArchivo,
+  fetchPacProgramas, createPacPrograma, updatePacPrograma, deletePacPrograma, upsertPacPreguntas,
+  fetchPacPreguntas, fetchAllPacResultados, deletePacResultado, uploadPacMaterial,
 } from '../services/sheetsService';
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
-  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEval, ShortEvalWrongAnswer,
-  ActaDocumento, ActaFirma, ActaItem, AppDynamicConfig
+  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEvalWrongAnswer,
+  ActaDocumento, ActaFirma, ActaItem, AppDynamicConfig,
+  PacPrograma, PacPregunta, PacResultado,
 } from '../types';
 import { parseInicio, getISOWeek, isoWeekLabel, isoWeekKey } from '../lib/dateUtils';
 import { matchNumericFilter } from '../lib/filterUtils';
 import { buildFirmaRoster, buildItemRoster, type FirmaRosterRow } from '../lib/firmaRoster';
-import { BarChart, ProgressBar } from './AdminCharts';
+import { buildPacRoster, type PacRosterStatus } from '../lib/pacRoster';
+import { GUARDIAS } from '../lib/constants';
+import { BarChart, Donut, ProgressBar } from './AdminCharts';
 import html2pdf from 'html2pdf.js';
 import { fetchDriveImageAsBase64 } from '../lib/driveImage';
 import ActaDistribucionTemplate, { type DistribucionRow } from './ActaDistribucionTemplate';
 import ActaAsistenciaTemplate, { type AsistenciaRow } from './ActaAsistenciaTemplate';
+import PacAsistenciaTemplate, { type PacAsistenciaRow } from './PacAsistenciaTemplate';
 import { useQrDataUrl } from '../hooks/useQrDataUrl';
 import DiagnosticoPanel, { DiagnosticoButton } from './DiagnosticoPanel';
 
 const ADMIN_AUTH_KEY = 'learndrive_admin_auth';
+
+/**
+ * Genera el PDF y lo descarga a mano vía Blob + <a download>, en vez de
+ * confiar en html2pdf().save(): en documentos grandes (muchas filas con
+ * fotos/firmas embebidas) ese método puede caer a un fallback que abre el
+ * blob por navegación, y el navegador termina guardando el archivo con el
+ * UUID interno del blob como nombre y sin extensión, en vez del filename
+ * pedido.
+ */
+interface DownloadPdfOptions {
+  margin?: number;
+  filename: string;
+  image?: { type?: 'jpeg' | 'png' | 'webp'; quality?: number };
+  html2canvas?: object;
+  jsPDF?: { unit?: string; format?: string; orientation?: 'portrait' | 'landscape' };
+}
+
+async function downloadElementAsPdf(element: HTMLElement, opt: DownloadPdfOptions): Promise<void> {
+  const worker = html2pdf().from(element).set(opt);
+  const blob = (await worker.outputPdf('blob')) as Blob;
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = opt.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+}
 
 // Filas por página en tablas grandes (resultados de evals cortas y firmas de actas)
 const TABLE_PAGE_SIZE = 25;
@@ -370,30 +404,48 @@ export default function AdminPanel({
   const [deletingUser, setDeletingUser] = useState(false);
   const [resettingQuizKey, setResettingQuizKey] = useState<string | null>(null);
 
-  // Short Evaluaciones state
-  const [shortEvals, setShortEvals] = useState<ShortEval[]>([]);
-  const [shortEvalsLoading, setShortEvalsLoading] = useState(false);
+  // Resultados de evals cortas (legado): solo se usan hoy en la vista 360° por
+  // usuario dentro de la pestaña Usuarios — el CRUD de evaluaciones cortas en sí
+  // fue reemplazado por el módulo PAC, pero estos datos históricos se conservan.
   const [shortResults, setShortResults] = useState<Array<{ evaluacionId: string; dni: string; nombres: string; apellidos: string; guardia: string; nota: number; porcentaje: number; fechaHora: string; tema: string; preguntasErroneas: ShortEvalWrongAnswer[] }>>([]);
-  // New eval form
-  const [newEvalNombre, setNewEvalNombre] = useState('');
-  const [newEvalDesc, setNewEvalDesc] = useState('');
-  const [newEvalTopicId, setNewEvalTopicId] = useState('');
-  const [newEvalChunkIds, setNewEvalChunkIds] = useState<string[]>([]);
-  const [newEvalSaving, setNewEvalSaving] = useState(false);
-  const [showNewEvalForm, setShowNewEvalForm] = useState(false);
-  const [showResultsFor, setShowResultsFor] = useState<string | null>(null);
-  const [expandedResult, setExpandedResult] = useState<string | null>(null);
-  const [deletingResult, setDeletingResult] = useState<string | null>(null);
-  // Sort & filter for the short-eval results table (only one table is visible at a time)
-  type ResultsSortKey = 'dni' | 'nombre' | 'guardia' | 'nota' | 'porcentaje' | 'fecha' | 'fallo';
-  const [resultsSort, setResultsSort] = useState<{ key: ResultsSortKey; dir: 'asc' | 'desc' }>({ key: 'fecha', dir: 'asc' });
-  const [resultsFilters, setResultsFilters] = useState<{ dni: string; nombre: string; guardia: string; nota: string; porcentaje: string; fecha: string; fallo: string }>(
-    { dni: '', nombre: '', guardia: '', nota: '', porcentaje: '', fecha: '', fallo: '' }
+
+  // ===== PAC - Programa Anual de Capacitaciones =====
+  type PacSubTab = 'programacion' | 'resultados' | 'seguimiento' | 'dashboard';
+  const [pacSubTab, setPacSubTab] = useState<PacSubTab>('programacion');
+  const [pacProgramas, setPacProgramas] = useState<PacPrograma[]>([]);
+  const [pacResultados, setPacResultados] = useState<PacResultado[]>([]);
+  const [pacLoading, setPacLoading] = useState(false);
+  const [pacVistaCalendario, setPacVistaCalendario] = useState(false);
+  const [showNewPrograma, setShowNewPrograma] = useState(false);
+  const [editingProgramaId, setEditingProgramaId] = useState<string | null>(null);
+  const [programaSaving, setProgramaSaving] = useState(false);
+  const [programaForm, setProgramaForm] = useState<{
+    nombre: string; descripcion: string; tema: string; capacitador: string;
+    fechaProgramada: string; horaProgramada: string;
+    materialUrl: string; materialNombre: string;
+    perfiles: string[]; dnisAsignados: string;
+    notaAprobatoria: string; maxIntentos: string; activo: boolean;
+  }>({ nombre: '', descripcion: '', tema: '', capacitador: '', fechaProgramada: '', horaProgramada: '', materialUrl: '', materialNombre: '', perfiles: [], dnisAsignados: '', notaAprobatoria: '14', maxIntentos: '3', activo: true });
+  const [materialUploading, setMaterialUploading] = useState(false);
+  const materialFileInputRef = useRef<HTMLInputElement>(null);
+  const [editingPreguntasFor, setEditingPreguntasFor] = useState<string | null>(null);
+  const [preguntasDraft, setPreguntasDraft] = useState<PacPregunta[]>([]);
+  const [preguntasLoading, setPreguntasLoading] = useState(false);
+  const [preguntasSaving, setPreguntasSaving] = useState(false);
+  const [selectedProgramaId, setSelectedProgramaId] = useState<string | null>(null);
+  const [deletingPacResultado, setDeletingPacResultado] = useState<string | null>(null);
+  const [pacAsistenciaData, setPacAsistenciaData] = useState<{ programa: PacPrograma; rows: PacAsistenciaRow[] } | null>(null);
+  const [downloadingPacAsistencia, setDownloadingPacAsistencia] = useState(false);
+  // Sort & filter for the PAC results table
+  type PacResultsSortKey = 'dni' | 'nombre' | 'guardia' | 'nota' | 'intento' | 'fecha';
+  const [pacResultsSort, setPacResultsSort] = useState<{ key: PacResultsSortKey; dir: 'asc' | 'desc' }>({ key: 'fecha', dir: 'desc' });
+  const [pacResultsFilters, setPacResultsFilters] = useState<{ dni: string; nombre: string; guardia: string; nota: string; aprobado: string }>(
+    { dni: '', nombre: '', guardia: '', nota: '', aprobado: '' }
   );
-  const toggleResultsSort = (key: ResultsSortKey) => {
-    setResultsSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  const togglePacResultsSort = (key: PacResultsSortKey) => {
+    setPacResultsSort(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
   };
-  const [resultsPage, setResultsPage] = useState(1);
+  const [pacResultsPage, setPacResultsPage] = useState(1);
   // ===== Actas de Entrega / Compromisos =====
   const [actaDocs, setActaDocs] = useState<ActaDocumento[]>([]);
   const [actaFirmas, setActaFirmas] = useState<ActaFirma[]>([]);
@@ -468,13 +520,12 @@ export default function AdminPanel({
     const opt = {
       margin: 5,
       filename: `LISTA_DISTRIBUCION_${slug}_${new Date().toISOString().split('T')[0]}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
+      image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
     };
     try {
-      // @ts-ignore
-      await html2pdf().from(element).set(opt).save();
+      await downloadElementAsPdf(element, opt);
       setDistribucionData(null);
     } catch {
       showToast('Error al generar el PDF', 'error');
@@ -487,6 +538,7 @@ export default function AdminPanel({
   const [asistenciaData, setAsistenciaData] = useState<{ doc: ActaDocumento; item: ActaItem; rows: AsistenciaRow[] } | null>(null);
   const asistenciaRef = useRef<HTMLDivElement>(null);
   const [downloadingAsistencia, setDownloadingAsistencia] = useState(false);
+  const pacAsistenciaRef = useRef<HTMLDivElement>(null);
 
   const handleGenerateAsistencia = async (doc: ActaDocumento, item: ActaItem, key: string) => {
     setGeneratingPdfKey(key);
@@ -521,13 +573,12 @@ export default function AdminPanel({
     const opt = {
       margin: 5,
       filename: `LISTA_ASISTENCIA_${slug}_${new Date().toISOString().split('T')[0]}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
+      image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
     };
     try {
-      // @ts-ignore
-      await html2pdf().from(element).set(opt).save();
+      await downloadElementAsPdf(element, opt);
       setAsistenciaData(null);
     } catch {
       showToast('Error al generar el PDF', 'error');
@@ -559,24 +610,23 @@ export default function AdminPanel({
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab !== 'shortEvals') return;
-    if (shortEvals.length > 0) return;
-    setShortEvalsLoading(true);
-    Promise.all([fetchShortEvals(), fetchAllShortResults()]).then(([evs, results]) => {
-      setShortEvals(evs);
-      setShortResults(results);
-      setShortEvalsLoading(false);
-    }).catch(() => setShortEvalsLoading(false));
+    if (activeTab !== 'pac') return;
+    if (pacProgramas.length > 0) return;
+    setPacLoading(true);
+    Promise.all([fetchPacProgramas(), fetchAllPacResultados()]).then(([programas, resultados]) => {
+      setPacProgramas(programas);
+      setPacResultados(resultados);
+      setPacLoading(false);
+    }).catch(() => setPacLoading(false));
   }, [activeTab]);
 
-  const handleRefreshShortEvals = () => {
-    setShortEvalsLoading(true);
-    setShortEvals([]);
-    Promise.all([fetchShortEvals(), fetchAllShortResults()]).then(([evs, results]) => {
-      setShortEvals(evs);
-      setShortResults(results);
-      setShortEvalsLoading(false);
-    }).catch(() => setShortEvalsLoading(false));
+  const handleRefreshPac = () => {
+    setPacLoading(true);
+    Promise.all([fetchPacProgramas(true), fetchAllPacResultados(true)]).then(([programas, resultados]) => {
+      setPacProgramas(programas);
+      setPacResultados(resultados);
+      setPacLoading(false);
+    }).catch(() => setPacLoading(false));
   };
 
   // ===== Actas: carga y handlers =====
@@ -597,7 +647,7 @@ export default function AdminPanel({
 
   const handleRefreshActas = () => {
     setActasLoading(true);
-    Promise.all([fetchActaDocumentos(), fetchActaFirmas()]).then(([docs, firmas]) => {
+    Promise.all([fetchActaDocumentos(true), fetchActaFirmas(true)]).then(([docs, firmas]) => {
       setActaDocs(docs);
       setActaFirmas(firmas);
       setActasLoading(false);
@@ -761,65 +811,231 @@ export default function AdminPanel({
     return map;
   }, [actaDocs, actaFirmas, ingresoRecords]);
 
-  const handleCreateShortEval = async () => {
-    if (!newEvalNombre.trim() || !newEvalTopicId) return;
-    const topic = topics.find(t => t.id === newEvalTopicId);
-    if (!topic) return;
-    const id = `eval_${Date.now()}`;
-    const newEval: ShortEval = {
-      id,
-      nombre: newEvalNombre.trim(),
-      descripcion: newEvalDesc.trim(),
-      topicId: newEvalTopicId,
-      topicTitle: topic.title,
-      chunkIds: newEvalChunkIds,
-      activo: true,
-      fechaCreacion: new Date().toLocaleString('es-PE'),
-    };
-    setNewEvalSaving(true);
+  const getPacEvalLink = (id: string) => `${getPublicBaseUrl()}#/pac/${id}`;
+
+  const resetProgramaForm = () => {
+    setProgramaForm({ nombre: '', descripcion: '', tema: '', capacitador: '', fechaProgramada: '', horaProgramada: '', materialUrl: '', materialNombre: '', perfiles: [], dnisAsignados: '', notaAprobatoria: '14', maxIntentos: '3', activo: true });
+  };
+
+  const handleOpenNewPrograma = () => {
+    resetProgramaForm();
+    setEditingProgramaId(null);
+    setShowNewPrograma(true);
+  };
+
+  const handleOpenEditPrograma = (p: PacPrograma) => {
+    setProgramaForm({
+      nombre: p.nombre, descripcion: p.descripcion, tema: p.tema, capacitador: p.capacitador,
+      fechaProgramada: p.fechaProgramada, horaProgramada: p.horaProgramada || '',
+      materialUrl: p.materialUrl || '', materialNombre: p.materialNombre || '',
+      perfiles: p.perfiles, dnisAsignados: p.dnisAsignados.join(', '),
+      notaAprobatoria: String(p.notaAprobatoria), maxIntentos: String(p.maxIntentos), activo: p.activo,
+    });
+    setEditingProgramaId(p.id);
+    setShowNewPrograma(true);
+  };
+
+  const handleUploadMaterial = async (file: File) => {
+    setMaterialUploading(true);
     try {
-      await createShortEval(newEval);
-      setShortEvals(prev => [newEval, ...prev]);
-      setNewEvalNombre(''); setNewEvalDesc(''); setNewEvalTopicId(''); setNewEvalChunkIds([]);
-      setShowNewEvalForm(false);
-      showToast('Evaluación creada exitosamente');
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const result = await uploadPacMaterial(base64, file.name, file.type || 'application/octet-stream');
+      if (result.status === 'ok' && result.url) {
+        setProgramaForm(f => ({ ...f, materialUrl: result.url!, materialNombre: result.nombre || file.name }));
+        showToast('Material subido');
+      } else {
+        showToast(result.message || 'Error al subir el material', 'error');
+      }
     } catch {
-      showToast('Error al crear la evaluación. Verifica el Apps Script.', 'error');
+      showToast('Error al subir el material', 'error');
+    } finally {
+      setMaterialUploading(false);
+      if (materialFileInputRef.current) materialFileInputRef.current.value = '';
     }
-    setNewEvalSaving(false);
   };
 
-  const handleToggleEvalActive = async (ev: ShortEval) => {
+  const handleSavePrograma = async () => {
+    if (!programaForm.nombre.trim() || !programaForm.fechaProgramada) {
+      showToast('Nombre y fecha programada son obligatorios', 'error');
+      return;
+    }
+    setProgramaSaving(true);
     try {
-      await updateShortEvalStatus(ev.id, !ev.activo);
-      setShortEvals(prev => prev.map(e => e.id === ev.id ? { ...e, activo: !e.activo } : e));
-    } catch { showToast('Error al actualizar estado', 'error'); }
+      const id = editingProgramaId || `pac_${Date.now()}`;
+      const payload = {
+        id,
+        nombre: programaForm.nombre.trim(),
+        descripcion: programaForm.descripcion.trim(),
+        tema: programaForm.tema.trim(),
+        capacitador: programaForm.capacitador.trim(),
+        fechaProgramada: programaForm.fechaProgramada,
+        horaProgramada: programaForm.horaProgramada,
+        materialUrl: programaForm.materialUrl,
+        materialNombre: programaForm.materialNombre,
+        perfiles: programaForm.perfiles,
+        dnisAsignados: programaForm.dnisAsignados.split(',').map(s => s.trim()).filter(Boolean),
+        notaAprobatoria: Number(programaForm.notaAprobatoria) || 14,
+        maxIntentos: Number(programaForm.maxIntentos) || 3,
+        activo: programaForm.activo,
+      };
+      const result = editingProgramaId ? await updatePacPrograma(payload) : await createPacPrograma(payload);
+      if (result.status === 'ok') {
+        setPacProgramas(prev => editingProgramaId
+          ? prev.map(p => p.id === id ? { ...p, ...payload } : p)
+          : [{ ...payload, fechaCreacion: new Date().toLocaleString('es-PE') }, ...prev]);
+        setShowNewPrograma(false);
+        setEditingProgramaId(null);
+        showToast(editingProgramaId ? 'Capacitación actualizada' : 'Capacitación creada');
+      } else {
+        showToast(result.message || 'Error al guardar', 'error');
+      }
+    } catch {
+      showToast('Error al guardar. Verifica el Apps Script.', 'error');
+    } finally {
+      setProgramaSaving(false);
+    }
   };
 
-  const handleDeleteShortEval = async (id: string) => {
-    if (!confirm('¿Eliminar esta evaluación?')) return;
+  const handleDeletePrograma = async (id: string) => {
+    if (!confirm('¿Eliminar esta capacitación? Las preguntas y resultados ya registrados no se borran.')) return;
     try {
-      await deleteShortEval(id);
-      setShortEvals(prev => prev.filter(e => e.id !== id));
-      showToast('Evaluación eliminada');
+      await deletePacPrograma(id);
+      setPacProgramas(prev => prev.filter(p => p.id !== id));
+      showToast('Capacitación eliminada');
     } catch { showToast('Error al eliminar', 'error'); }
   };
 
-  const handleDeleteShortResult = async (evaluacionId: string, dni: string) => {
-    if (!confirm('¿Eliminar este registro de resultado? Podrá volver a rendir la evaluación.')) return;
-    const key = `${evaluacionId}__${dni}`;
-    setDeletingResult(key);
+  const createEmptyPregunta = (programaId: string): PacPregunta => ({
+    idPregunta: `preg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    programaId, pregunta: '', optionA: '', optionB: '', optionC: '', optionD: '', correctAnswer: 'A', explanation: '', orden: 0,
+  });
+
+  const handleOpenPreguntas = async (programaId: string) => {
+    setEditingPreguntasFor(programaId);
+    setPreguntasLoading(true);
     try {
-      await deleteShortEvalResult(evaluacionId, dni);
-      setShortResults(prev => prev.filter(r => !(r.evaluacionId === evaluacionId && r.dni === dni)));
-      if (expandedResult === key) setExpandedResult(null);
-      showToast('Registro eliminado');
-    } catch { showToast('Error al eliminar registro', 'error'); }
-    finally { setDeletingResult(null); }
+      const qs = await fetchPacPreguntas(programaId);
+      setPreguntasDraft(qs.length > 0 ? qs : [createEmptyPregunta(programaId)]);
+    } catch {
+      setPreguntasDraft([createEmptyPregunta(programaId)]);
+    } finally {
+      setPreguntasLoading(false);
+    }
   };
 
-  const getEvalLink = (id: string) =>
-    `${getPublicBaseUrl()}#/eval/${id}`;
+  const handleAddPregunta = () => {
+    if (!editingPreguntasFor) return;
+    setPreguntasDraft(prev => [...prev, createEmptyPregunta(editingPreguntasFor)]);
+  };
+  const handleRemovePregunta = (idPregunta: string) => {
+    setPreguntasDraft(prev => prev.filter(p => p.idPregunta !== idPregunta));
+  };
+  const handleUpdatePreguntaField = (idPregunta: string, field: keyof PacPregunta, value: string) => {
+    setPreguntasDraft(prev => prev.map(p => p.idPregunta === idPregunta ? { ...p, [field]: value } : p));
+  };
+  const handleSavePreguntas = async () => {
+    if (!editingPreguntasFor) return;
+    const validas = preguntasDraft.filter(p => p.pregunta.trim() && p.optionA.trim() && p.optionB.trim());
+    if (validas.length === 0) {
+      showToast('Agrega al menos una pregunta completa (enunciado + opción A y B)', 'error');
+      return;
+    }
+    setPreguntasSaving(true);
+    try {
+      const result = await upsertPacPreguntas(editingPreguntasFor, validas.map((p, i) => ({ ...p, orden: i })));
+      if (result.status === 'ok') {
+        showToast('Preguntas guardadas');
+        setEditingPreguntasFor(null);
+      } else {
+        showToast(result.message || 'Error al guardar preguntas', 'error');
+      }
+    } catch {
+      showToast('Error al guardar preguntas', 'error');
+    } finally {
+      setPreguntasSaving(false);
+    }
+  };
+
+  const handleDeletePacResultadoRow = async (programaId: string, dni: string, intento: number) => {
+    if (!confirm('¿Eliminar este intento? La persona podrá volver a rendir si le quedan intentos disponibles.')) return;
+    const key = `${programaId}__${dni}__${intento}`;
+    setDeletingPacResultado(key);
+    try {
+      await deletePacResultado(programaId, dni, intento);
+      setPacResultados(prev => prev.filter(r => !(r.programaId === programaId && r.dni === dni && r.intento === intento)));
+      showToast('Intento eliminado');
+    } catch { showToast('Error al eliminar', 'error'); }
+    finally { setDeletingPacResultado(null); }
+  };
+
+  const handleExportPacResultados = (resultados: PacResultado[]) => {
+    const rows = resultados.map(r => ({
+      'DNI': r.dni, 'APELLIDOS': r.apellidos, 'NOMBRES': r.nombres, 'GUARDIA': r.guardia,
+      'EMPRESA': r.empresa, 'AREA': r.area, 'CAPACITACION': r.programaNombre, 'INTENTO': r.intento,
+      'NOTA': r.nota, 'APROBADO': r.aprobado ? 'SI' : 'NO', 'FECHA': r.fechaHora, 'CONSTANCIA': r.constanciaPdfUrl,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'PAC');
+    XLSX.writeFile(wb, `pac_resultados_${new Date().toISOString().split('T')[0]}.xlsx`);
+    showToast('✓ Resultados exportados');
+  };
+
+  const handleGeneratePacAsistencia = async (programa: PacPrograma) => {
+    const roster = buildPacRoster(programa, pacResultados, ingresoRecords);
+    if (roster.length === 0) {
+      showToast('No hay personas asignadas a esta capacitación', 'error');
+      return;
+    }
+    setGeneratingPdfKey(`pac-asistencia-${programa.id}`);
+    try {
+      const rows: PacAsistenciaRow[] = await Promise.all(roster.map(async (r): Promise<PacAsistenciaRow> => {
+        const ultimo = r.ultimoIntento;
+        const [firmaBase64, fotoBase64] = await Promise.all([
+          fetchDriveImageAsBase64(ultimo?.firmaUrl),
+          fetchDriveImageAsBase64(ultimo?.selfieUrl),
+        ]);
+        return {
+          dni: r.dni, nombre: r.nombre, empresa: r.empresa, area: r.area, guardia: ultimo?.guardia || '',
+          nota: r.mejorNota, aprobado: r.status === 'aprobado',
+          firmaBase64: firmaBase64 || undefined, fotoBase64: fotoBase64 || undefined,
+        };
+      }));
+      setPacAsistenciaData({ programa, rows });
+    } catch {
+      showToast('Error al generar el acta de asistentes', 'error');
+    } finally {
+      setGeneratingPdfKey(null);
+    }
+  };
+
+  const handleDownloadPacAsistenciaPdf = async () => {
+    if (!pacAsistenciaData) return;
+    const element = pacAsistenciaRef.current;
+    if (!element) return;
+    setDownloadingPacAsistencia(true);
+    const slug = (pacAsistenciaData.programa.nombre || 'PAC').toUpperCase().replace(/[^A-Z0-9]/gi, '_').replace(/_+/g, '_').slice(0, 40);
+    const opt = {
+      margin: 5,
+      filename: `PAC_ASISTENTES_${slug}_${new Date().toISOString().split('T')[0]}.pdf`,
+      image: { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
+    };
+    try {
+      await downloadElementAsPdf(element, opt);
+      setPacAsistenciaData(null);
+    } catch {
+      showToast('Error al generar el PDF', 'error');
+    } finally {
+      setDownloadingPacAsistencia(false);
+    }
+  };
 
   const handleRefreshProgress = () => {
     setProgressLoading(true);
@@ -1927,7 +2143,7 @@ ${text}`;
 
   const otherTabItems = ([
     { key: 'progress', label: 'Usuarios', icon: Users, badge: ingresoRecords.length > 0 ? ingresoRecords.length : null },
-    { key: 'shortEvals', label: 'Shorts', icon: ClipboardCheck, badge: shortEvals.length > 0 ? shortEvals.length : null },
+    { key: 'pac', label: 'PAC', icon: GraduationCap, badge: pacProgramas.filter(p => p.activo).length || null },
     { key: 'actas', label: 'Documentos y Capacitaciones', icon: FileSignature, badge: actaDocs.length > 0 ? actaDocs.length : null },
     { key: 'config', label: 'Configuración', icon: Settings, badge: null },
   ] as { key: AdminTab; label: string; icon: typeof BookOpen; badge: number | null }[]);
@@ -2459,7 +2675,7 @@ ${text}`;
           </div>
         )}
 
-        {selectedTopicId && activeTab !== 'topics' && activeTab !== 'progress' && activeTab !== 'shortEvals' && (
+        {selectedTopicId && activeTab !== 'topics' && activeTab !== 'progress' && activeTab !== 'pac' && (
           <>
 
 
@@ -3098,7 +3314,7 @@ ${text}`;
           </>
         )}
 
-        {!selectedTopicId && activeTab !== 'progress' && activeTab !== 'shortEvals' && activeTab !== 'actas' && activeTab !== 'config' && (
+        {!selectedTopicId && activeTab !== 'progress' && activeTab !== 'pac' && activeTab !== 'actas' && activeTab !== 'config' && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-20 h-20 rounded-full bg-[#e1e3e4] flex items-center justify-center mb-4">
               <Search className="w-10 h-10 text-[#737781]" />
@@ -3506,347 +3722,609 @@ ${text}`;
           </div>
         )}
 
-        {/* ====== TAB: SHORT EVALUACIONES ====== */}
-        {activeTab === 'shortEvals' && (
+        {/* ====== TAB: PAC (PROGRAMA ANUAL DE CAPACITACIONES) ====== */}
+        {activeTab === 'pac' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h2 className="text-base font-black text-[#00366b] flex items-center gap-2">
-                  <ClipboardCheck className="w-5 h-5 text-[#1b4d89]" />
-                  Evaluaciones Cortas
+                  <GraduationCap className="w-5 h-5 text-[#1b4d89]" />
+                  Programa Anual de Capacitaciones
                 </h2>
-                <p className="text-xs text-[#737781] mt-0.5">Crea evaluaciones con enlace directo — un intento por usuario</p>
+                <p className="text-xs text-[#737781] mt-0.5">Programa capacitaciones, evalúa con firma/foto y haz seguimiento de cumplimiento</p>
               </div>
-              <div className="flex gap-2">
-                <button onClick={handleRefreshShortEvals} disabled={shortEvalsLoading}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#e1e3e4] text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] transition-all disabled:opacity-50">
-                  {shortEvalsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                  Actualizar
-                </button>
-                <button onClick={() => setShowNewEvalForm(v => !v)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1b4d89] text-white text-xs font-bold hover:bg-[#00366b] transition-all">
-                  <Plus className="w-3.5 h-3.5" />
-                  Nueva
-                </button>
-              </div>
+              <button onClick={handleRefreshPac} disabled={pacLoading}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#e1e3e4] text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] transition-all disabled:opacity-50">
+                {pacLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                Actualizar
+              </button>
             </div>
 
-            {/* Create form */}
+            {/* Sub-tabs */}
+            <div className="flex gap-1.5 bg-[#f3f4f5] p-1 rounded-xl w-fit overflow-x-auto">
+              {([
+                { key: 'programacion', label: 'Programación' },
+                { key: 'resultados', label: 'Resultados' },
+                { key: 'seguimiento', label: 'Seguimiento' },
+                { key: 'dashboard', label: 'Dashboard' },
+              ] as { key: PacSubTab; label: string }[]).map(t => (
+                <button key={t.key} onClick={() => setPacSubTab(t.key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${pacSubTab === t.key ? 'bg-white text-[#1b4d89] shadow-sm' : 'text-[#737781] hover:text-[#424750]'}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {pacLoading && pacProgramas.length === 0 ? (
+              <div className="flex flex-col items-center py-12 gap-2">
+                <Loader2 className="w-8 h-8 text-[#1b4d89] animate-spin" />
+                <p className="text-xs text-[#737781]">Cargando programa de capacitaciones...</p>
+              </div>
+            ) : (
+              <>
+                {/* ===== PROGRAMACIÓN ===== */}
+                {pacSubTab === 'programacion' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => setPacVistaCalendario(v => !v)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#e1e3e4] text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] transition-all">
+                        {pacVistaCalendario ? 'Ver lista' : 'Ver calendario'}
+                      </button>
+                      <button onClick={handleOpenNewPrograma}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1b4d89] text-white text-xs font-bold hover:bg-[#00366b] transition-all">
+                        <Plus className="w-3.5 h-3.5" /> Nueva capacitación
+                      </button>
+                    </div>
+
+                    {pacProgramas.length === 0 ? (
+                      <div className="flex flex-col items-center py-12 text-center">
+                        <GraduationCap className="w-12 h-12 text-[#e1e3e4] mb-3" />
+                        <p className="text-sm font-bold text-[#737781]">Sin capacitaciones programadas</p>
+                        <p className="text-xs text-[#737781] mt-1">Haz clic en "Nueva capacitación" para programar la primera</p>
+                      </div>
+                    ) : pacVistaCalendario ? (() => {
+                      const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                      const anio = new Date().getFullYear();
+                      const porMes = new Map<number, PacPrograma[]>();
+                      pacProgramas.forEach(p => {
+                        const d = p.fechaProgramada ? new Date(p.fechaProgramada + 'T00:00:00') : null;
+                        if (!d || isNaN(d.getTime())) return;
+                        const mes = d.getMonth();
+                        if (!porMes.has(mes)) porMes.set(mes, []);
+                        porMes.get(mes)!.push(p);
+                      });
+                      return (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {meses.map((nombreMes, idx) => {
+                            const items = (porMes.get(idx) || []).sort((a, b) => a.fechaProgramada.localeCompare(b.fechaProgramada));
+                            return (
+                              <div key={idx} className="bg-white rounded-2xl border border-[#e1e3e4] p-3">
+                                <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-2">{nombreMes} {anio}</p>
+                                {items.length === 0 ? (
+                                  <p className="text-[10px] text-[#c3c6d1] italic">Sin capacitaciones</p>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {items.map(p => {
+                                      const dia = p.fechaProgramada ? new Date(p.fechaProgramada + 'T00:00:00').getDate() : '';
+                                      return (
+                                        <button key={p.id} onClick={() => handleOpenEditPrograma(p)}
+                                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-[#f8f9fa] transition-colors text-left">
+                                          <span className="flex-shrink-0 w-6 h-6 rounded-md bg-[#1b4d89]/10 text-[#1b4d89] text-[10px] font-black flex items-center justify-center">{dia}</span>
+                                          <span className="text-xs font-semibold text-[#424750] truncate">{p.nombre}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })() : (
+                      <div className="space-y-3">
+                        {pacProgramas.slice().sort((a, b) => (b.fechaProgramada || '').localeCompare(a.fechaProgramada || '')).map(p => {
+                          const link = getPacEvalLink(p.id);
+                          const roster = buildPacRoster(p, pacResultados, ingresoRecords);
+                          const aprobadosCount = roster.filter(r => r.status === 'aprobado').length;
+                          return (
+                            <div key={p.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
+                              <div className="px-4 py-3.5 flex items-start gap-3">
+                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${p.activo ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                                  <GraduationCap className={`w-5 h-5 ${p.activo ? 'text-emerald-600' : 'text-slate-400'}`} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-bold text-[#00366b] text-sm truncate">{p.nombre}</p>
+                                    <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${p.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                      {p.activo ? 'ACTIVO' : 'INACTIVO'}
+                                    </span>
+                                  </div>
+                                  {p.descripcion && <p className="text-xs text-[#737781] mt-0.5">{p.descripcion}</p>}
+                                  <p className="text-[10px] text-[#737781] mt-1">
+                                    {p.fechaProgramada && <>Fecha: <span className="font-semibold">{p.fechaProgramada}</span><span className="mx-1">·</span></>}
+                                    Nota aprob.: <span className="font-semibold">{p.notaAprobatoria}/20</span>
+                                    <span className="mx-1">·</span>
+                                    Máx. intentos: <span className="font-semibold">{p.maxIntentos}</span>
+                                    <span className="mx-1">·</span>
+                                    <span className="font-semibold text-emerald-600">{aprobadosCount}</span>/{roster.length} aprobados
+                                  </p>
+                                  <div className="mt-2 flex items-center gap-2 bg-[#f8f9fa] rounded-lg px-3 py-2 border border-[#e1e3e4]">
+                                    <Globe className="w-3.5 h-3.5 text-[#737781] flex-shrink-0" />
+                                    <span className="text-[10px] text-[#737781] truncate flex-1 font-mono">{link}</span>
+                                    <button
+                                      onClick={() => { navigator.clipboard.writeText(link); showToast('Enlace copiado'); }}
+                                      className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-[#1b4d89]/10 text-[#1b4d89] hover:bg-[#1b4d89]/20 transition-colors text-[10px] font-bold">
+                                      <Copy className="w-3 h-3" />Copiar
+                                    </button>
+                                    <a href={link} target="_blank" rel="noopener noreferrer"
+                                      className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors text-[10px] font-bold">
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                  </div>
+                                </div>
+                                <div className="flex flex-col gap-1.5 flex-shrink-0">
+                                  <button onClick={() => handleOpenPreguntas(p.id)} title="Preguntas de la evaluación"
+                                    className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
+                                    <HelpCircle className="w-4 h-4 text-[#1b4d89]" />
+                                  </button>
+                                  <button onClick={() => handleOpenEditPrograma(p)} title="Editar"
+                                    className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
+                                    <Edit3 className="w-4 h-4 text-[#424750]" />
+                                  </button>
+                                  <button onClick={() => handleDeletePrograma(p.id)} title="Eliminar"
+                                    className="p-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                                    <Trash2 className="w-4 h-4 text-red-400" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ===== RESULTADOS ===== */}
+                {pacSubTab === 'resultados' && (() => {
+                  const programaFiltro = selectedProgramaId ? pacProgramas.find(p => p.id === selectedProgramaId) : null;
+                  const baseResultados = programaFiltro ? pacResultados.filter(r => r.programaId === programaFiltro.id) : pacResultados;
+                  const activeFilters = pacResultsFilters;
+                  const displayResults = baseResultados
+                    .filter(r => {
+                      if (activeFilters.dni && !r.dni.toLowerCase().includes(activeFilters.dni.toLowerCase())) return false;
+                      if (activeFilters.nombre && !`${r.apellidos} ${r.nombres}`.toLowerCase().includes(activeFilters.nombre.toLowerCase())) return false;
+                      if (activeFilters.guardia && r.guardia !== activeFilters.guardia) return false;
+                      if (activeFilters.nota && !matchNumericFilter(r.nota, activeFilters.nota, r.nota.toFixed(1))) return false;
+                      if (activeFilters.aprobado && (activeFilters.aprobado === 'si' ? !r.aprobado : r.aprobado)) return false;
+                      return true;
+                    })
+                    .sort((a, b) => {
+                      const dir = pacResultsSort.dir === 'asc' ? 1 : -1;
+                      switch (pacResultsSort.key) {
+                        case 'dni': return a.dni.localeCompare(b.dni, 'es', { numeric: true }) * dir;
+                        case 'nombre': return `${a.apellidos} ${a.nombres}`.localeCompare(`${b.apellidos} ${b.nombres}`, 'es', { sensitivity: 'base' }) * dir;
+                        case 'guardia': return a.guardia.localeCompare(b.guardia, 'es') * dir;
+                        case 'nota': return (a.nota - b.nota) * dir;
+                        case 'intento': return (a.intento - b.intento) * dir;
+                        case 'fecha': return a.fechaHora.localeCompare(b.fechaHora, 'es') * dir;
+                        default: return 0;
+                      }
+                    });
+                  const SortIcon = ({ col }: { col: PacResultsSortKey }) => (
+                    pacResultsSort.key === col
+                      ? (pacResultsSort.dir === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />)
+                      : <ArrowUpDown className="w-2.5 h-2.5 opacity-30" />
+                  );
+                  const rTotalPages = Math.max(1, Math.ceil(displayResults.length / TABLE_PAGE_SIZE));
+                  const rPage = Math.min(pacResultsPage, rTotalPages);
+                  const pageResults = displayResults.slice((rPage - 1) * TABLE_PAGE_SIZE, rPage * TABLE_PAGE_SIZE);
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <select value={selectedProgramaId || ''} onChange={e => { setSelectedProgramaId(e.target.value || null); setPacResultsPage(1); }}
+                          className="px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:outline-none focus:border-[#1b4d89]">
+                          <option value="">Todas las capacitaciones</option>
+                          {pacProgramas.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                        </select>
+                        <button onClick={() => handleExportPacResultados(displayResults)} disabled={displayResults.length === 0}
+                          className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#006d36] hover:bg-emerald-50 transition-all disabled:opacity-40">
+                          <FileSpreadsheet className="w-4 h-4" /> Excel
+                        </button>
+                        {programaFiltro && (
+                          <button onClick={() => handleGeneratePacAsistencia(programaFiltro)}
+                            disabled={generatingPdfKey === `pac-asistencia-${programaFiltro.id}`}
+                            className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#1b4d89] hover:bg-blue-50 transition-all disabled:opacity-40">
+                            {generatingPdfKey === `pac-asistencia-${programaFiltro.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSignature className="w-4 h-4" />}
+                            Acta de asistentes (PDF)
+                          </button>
+                        )}
+                      </div>
+
+                      {displayResults.length === 0 ? (
+                        <div className="flex flex-col items-center py-12 text-center">
+                          <ClipboardList className="w-12 h-12 text-[#e1e3e4] mb-3" />
+                          <p className="text-sm font-bold text-[#737781]">Sin resultados</p>
+                        </div>
+                      ) : (
+                        <div className="bg-white rounded-2xl border border-[#e1e3e4] p-4 overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-[9px] text-[#737781] uppercase">
+                                <th className="text-left pb-1 pr-3"><button onClick={() => togglePacResultsSort('dni')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">DNI <SortIcon col="dni" /></button></th>
+                                <th className="text-left pb-1 pr-3"><button onClick={() => togglePacResultsSort('nombre')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Apellidos y Nombres <SortIcon col="nombre" /></button></th>
+                                <th className="text-left pb-1 pr-3">Capacitación</th>
+                                <th className="text-center pb-1 pr-3"><button onClick={() => togglePacResultsSort('guardia')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Gdia <SortIcon col="guardia" /></button></th>
+                                <th className="text-center pb-1 pr-3"><button onClick={() => togglePacResultsSort('intento')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Int. <SortIcon col="intento" /></button></th>
+                                <th className="text-center pb-1 pr-3"><button onClick={() => togglePacResultsSort('nota')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Nota <SortIcon col="nota" /></button></th>
+                                <th className="text-left pb-1 pl-3"><button onClick={() => togglePacResultsSort('fecha')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] uppercase font-bold">Fecha <SortIcon col="fecha" /></button></th>
+                                <th className="pb-1"></th>
+                              </tr>
+                              <tr className="align-top">
+                                <th className="pb-2 pr-3"><input value={pacResultsFilters.dni} onChange={e => setPacResultsFilters(f => ({ ...f, dni: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                <th className="pb-2 pr-3"><input value={pacResultsFilters.nombre} onChange={e => setPacResultsFilters(f => ({ ...f, nombre: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                <th className="pb-2 pr-3"></th>
+                                <th className="pb-2 pr-3">
+                                  <select value={pacResultsFilters.guardia} onChange={e => setPacResultsFilters(f => ({ ...f, guardia: e.target.value }))}
+                                    className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center focus:outline-none focus:border-[#1b4d89]">
+                                    <option value="">Todas</option>
+                                    {GUARDIAS.map(g => <option key={g} value={g}>{g}</option>)}
+                                  </select>
+                                </th>
+                                <th className="pb-2 pr-3"></th>
+                                <th className="pb-2 pr-3"><input value={pacResultsFilters.nota} onChange={e => setPacResultsFilters(f => ({ ...f, nota: e.target.value }))} placeholder=">14" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
+                                <th className="pb-2 pl-3"></th>
+                                <th className="pb-2"></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#f3f4f5]">
+                              {pageResults.map(r => {
+                                const key = `${r.programaId}__${r.dni}__${r.intento}`;
+                                const isDeleting = deletingPacResultado === key;
+                                return (
+                                  <tr key={key}>
+                                    <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
+                                    <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.apellidos} {r.nombres}</td>
+                                    <td className="py-1.5 pr-3 text-[#737781] truncate max-w-[140px]">{r.programaNombre}</td>
+                                    <td className="py-1.5 pr-3 text-center font-bold text-[#424750]">{r.guardia || '—'}</td>
+                                    <td className="py-1.5 pr-3 text-center text-[#737781]">{r.intento}</td>
+                                    <td className={`py-1.5 pr-3 text-center font-bold ${r.aprobado ? 'text-emerald-600' : 'text-red-500'}`}>{r.nota.toFixed(1)}/20</td>
+                                    <td className="py-1.5 pl-3 text-[#737781] whitespace-nowrap">{r.fechaHora}</td>
+                                    <td className="py-1.5 pl-2 text-center">
+                                      <button onClick={() => handleDeletePacResultadoRow(r.programaId, r.dni, r.intento)} disabled={isDeleting}
+                                        title="Eliminar intento" className="p-1 rounded-md hover:bg-red-50 transition-colors disabled:opacity-40">
+                                        {isDeleting ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-400" />}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                          <Pager page={rPage} totalPages={rTotalPages} total={displayResults.length} onPage={setPacResultsPage} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ===== SEGUIMIENTO ===== */}
+                {pacSubTab === 'seguimiento' && (() => {
+                  const programa = pacProgramas.find(p => p.id === selectedProgramaId) || pacProgramas[0] || null;
+                  if (!programa) return <p className="text-sm text-[#737781] py-8 text-center">No hay capacitaciones programadas todavía.</p>;
+                  const roster = buildPacRoster(programa, pacResultados, ingresoRecords);
+                  const counts = {
+                    aprobado: roster.filter(r => r.status === 'aprobado').length,
+                    en_progreso: roster.filter(r => r.status === 'en_progreso').length,
+                    agotado: roster.filter(r => r.status === 'agotado').length,
+                    sin_intentos: roster.filter(r => r.status === 'sin_intentos').length,
+                  };
+                  const statusLabel: Record<PacRosterStatus, string> = { aprobado: 'Aprobado', en_progreso: 'En progreso', agotado: 'Agotó intentos', sin_intentos: 'Sin rendir' };
+                  const statusColor: Record<PacRosterStatus, string> = {
+                    aprobado: 'bg-emerald-100 text-emerald-700', en_progreso: 'bg-amber-100 text-amber-700',
+                    agotado: 'bg-red-100 text-red-600', sin_intentos: 'bg-slate-100 text-slate-500',
+                  };
+                  return (
+                    <div className="space-y-4">
+                      <select value={programa.id} onChange={e => setSelectedProgramaId(e.target.value)}
+                        className="px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:outline-none focus:border-[#1b4d89]">
+                        {pacProgramas.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                      </select>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] text-center">
+                          <p className="text-2xl font-bold text-emerald-600">{counts.aprobado}</p>
+                          <p className="text-[10px] text-[#737781] uppercase font-bold tracking-wider mt-1">Aprobados</p>
+                        </div>
+                        <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] text-center">
+                          <p className="text-2xl font-bold text-amber-600">{counts.en_progreso}</p>
+                          <p className="text-[10px] text-[#737781] uppercase font-bold tracking-wider mt-1">En progreso</p>
+                        </div>
+                        <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] text-center">
+                          <p className="text-2xl font-bold text-red-500">{counts.agotado}</p>
+                          <p className="text-[10px] text-[#737781] uppercase font-bold tracking-wider mt-1">Agotaron intentos</p>
+                        </div>
+                        <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] text-center">
+                          <p className="text-2xl font-bold text-slate-500">{counts.sin_intentos}</p>
+                          <p className="text-[10px] text-[#737781] uppercase font-bold tracking-wider mt-1">Sin rendir</p>
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-2xl border border-[#e1e3e4] p-4 overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-[9px] text-[#737781] uppercase text-left">
+                              <th className="pb-2 pr-3">DNI</th>
+                              <th className="pb-2 pr-3">Apellidos y Nombres</th>
+                              <th className="pb-2 pr-3">Empresa</th>
+                              <th className="pb-2 pr-3 text-center">Intentos</th>
+                              <th className="pb-2 pr-3 text-center">Mejor nota</th>
+                              <th className="pb-2">Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#f3f4f5]">
+                            {roster.length === 0 ? (
+                              <tr><td colSpan={6} className="py-6 text-center text-[#737781] italic">Sin personas asignadas a esta capacitación (revisa perfiles/DNIs)</td></tr>
+                            ) : roster.map(r => (
+                              <tr key={r.dni}>
+                                <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
+                                <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.nombre}</td>
+                                <td className="py-1.5 pr-3 text-[#737781]">{r.empresa || '—'}</td>
+                                <td className="py-1.5 pr-3 text-center">{r.intentosUsados}/{programa.maxIntentos}</td>
+                                <td className="py-1.5 pr-3 text-center font-bold text-[#424750]">{r.mejorNota !== null ? `${r.mejorNota.toFixed(1)}/20` : '—'}</td>
+                                <td className="py-1.5">
+                                  <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${statusColor[r.status]}`}>{statusLabel[r.status]}</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ===== DASHBOARD ===== */}
+                {pacSubTab === 'dashboard' && (() => {
+                  const total = pacResultados.length;
+                  const aprobados = pacResultados.filter(r => r.aprobado).length;
+                  const buckets = [
+                    { label: '0–10', color: '#ef4444', value: 0 },
+                    { label: '11–13', color: '#f59e0b', value: 0 },
+                    { label: '14–15', color: '#3b82f6', value: 0 },
+                    { label: '16–17', color: '#14b8a6', value: 0 },
+                    { label: '18–20', color: '#10b981', value: 0 },
+                  ];
+                  pacResultados.forEach(r => {
+                    const idx = r.nota >= 18 ? 4 : r.nota >= 16 ? 3 : r.nota >= 14 ? 2 : r.nota >= 11 ? 1 : 0;
+                    buckets[idx].value++;
+                  });
+                  const porPrograma = pacProgramas.map(p => {
+                    const resultadosP = pacResultados.filter(r => r.programaId === p.id);
+                    const aprobadosP = resultadosP.filter(r => r.aprobado).length;
+                    const roster = buildPacRoster(p, pacResultados, ingresoRecords);
+                    const pct = roster.length > 0 ? Math.round((aprobadosP / roster.length) * 100) : 0;
+                    return { label: p.nombre.slice(0, 14), value: pct, color: '#1b4d89' };
+                  });
+                  return (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                      <div className="bg-white rounded-xl p-4 border border-[#e1e3e4] flex flex-col justify-center">
+                        <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-3">Aprobación general</p>
+                        {total === 0 ? <p className="text-xs text-[#737781] italic">Sin intentos registrados todavía</p> : (
+                          <Donut
+                            segments={[
+                              { label: 'Aprobados', value: aprobados, color: '#10b981' },
+                              { label: 'Desaprob.', value: total - aprobados, color: '#f59e0b' },
+                            ]}
+                            centerLabel={`${Math.round((aprobados / Math.max(1, total)) * 100)}%`}
+                            centerSub="APROB."
+                          />
+                        )}
+                      </div>
+                      <div className="bg-white rounded-xl p-4 border border-[#e1e3e4]">
+                        <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-3">Distribución de notas</p>
+                        {total === 0 ? <p className="text-xs text-[#737781] italic">Sin datos</p> : <BarChart data={buckets} />}
+                      </div>
+                      <div className="bg-white rounded-xl p-4 border border-[#e1e3e4]">
+                        <p className="text-[10px] font-black text-[#737781] uppercase tracking-wider mb-3">% Aprobación por capacitación</p>
+                        {porPrograma.length === 0 ? <p className="text-xs text-[#737781] italic">Sin capacitaciones</p> : <BarChart data={porPrograma} unit="%" />}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+
+            {/* Modal: Nueva/Editar capacitación */}
             <AnimatePresence>
-              {showNewEvalForm && (
-                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-                  className="bg-white rounded-2xl border border-[#1b4d89]/30 p-5 space-y-3">
-                  <p className="text-xs font-bold text-[#1b4d89] uppercase tracking-wider">Nueva evaluación corta</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {showNewPrograma && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4">
+                  <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                    className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 space-y-3">
+                    <p className="text-sm font-black text-[#00366b]">{editingProgramaId ? 'Editar capacitación' : 'Nueva capacitación'}</p>
                     <div>
                       <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Nombre *</label>
-                      <input value={newEvalNombre} onChange={e => setNewEvalNombre(e.target.value)}
-                        placeholder="Ej: Evaluación SSMA - Semana 26"
-                        className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium placeholder:text-[#9ca3af] border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                      <input value={programaForm.nombre} onChange={e => setProgramaForm(f => ({ ...f, nombre: e.target.value }))}
+                        placeholder="Ej: Prevención de accidentes por caída de rocas"
+                        className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Descripción</label>
-                      <input value={newEvalDesc} onChange={e => setNewEvalDesc(e.target.value)}
-                        placeholder="Descripción opcional"
-                        className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium placeholder:text-[#9ca3af] border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                      <input value={programaForm.descripcion} onChange={e => setProgramaForm(f => ({ ...f, descripcion: e.target.value }))}
+                        className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Módulo *</label>
-                    <select value={newEvalTopicId} onChange={e => { setNewEvalTopicId(e.target.value); setNewEvalChunkIds([]); }}
-                      className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]">
-                      <option value="">— Seleccionar módulo —</option>
-                      {topics.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
-                    </select>
-                  </div>
-                  {newEvalTopicId && (() => {
-                    const chunks = allChunks.filter(c => c.idMain === newEvalTopicId);
-                    if (chunks.length === 0) return null;
-                    return (
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">
-                          Secciones (dejar vacío = todas las preguntas del módulo)
-                        </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto">
-                          {chunks.map(c => (
-                            <label key={c.cod} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e1e3e4] cursor-pointer hover:bg-[#f8f9fa] text-xs">
-                              <input type="checkbox" checked={newEvalChunkIds.includes(c.cod)}
-                                onChange={e => setNewEvalChunkIds(prev => e.target.checked ? [...prev, c.cod] : prev.filter(id => id !== c.cod))}
-                                className="accent-[#1b4d89]" />
-                              <span className="font-medium text-[#424750] truncate">{c.tema}</span>
-                            </label>
-                          ))}
-                        </div>
+                        <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Tema</label>
+                        <input value={programaForm.tema} onChange={e => setProgramaForm(f => ({ ...f, tema: e.target.value }))}
+                          className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
                       </div>
-                    );
-                  })()}
-                  <div className="flex gap-2 pt-1">
-                    <button onClick={() => setShowNewEvalForm(false)}
-                      className="flex-1 py-2.5 rounded-xl border border-[#e1e3e4] text-xs font-bold text-[#737781] hover:bg-[#f3f4f5]">
-                      Cancelar
-                    </button>
-                    <button onClick={handleCreateShortEval} disabled={!newEvalNombre.trim() || !newEvalTopicId || newEvalSaving}
-                      className="flex-1 py-2.5 rounded-xl bg-[#1b4d89] text-white text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5">
-                      {newEvalSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                      Crear evaluación
-                    </button>
-                  </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Capacitador</label>
+                        <input value={programaForm.capacitador} onChange={e => setProgramaForm(f => ({ ...f, capacitador: e.target.value }))}
+                          className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Fecha programada *</label>
+                        <input type="date" value={programaForm.fechaProgramada} onChange={e => setProgramaForm(f => ({ ...f, fechaProgramada: e.target.value }))}
+                          className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Hora</label>
+                        <input type="time" value={programaForm.horaProgramada} onChange={e => setProgramaForm(f => ({ ...f, horaProgramada: e.target.value }))}
+                          className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Nota aprobatoria</label>
+                        <input type="number" value={programaForm.notaAprobatoria} onChange={e => setProgramaForm(f => ({ ...f, notaAprobatoria: e.target.value }))}
+                          className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Máx. intentos</label>
+                        <input type="number" value={programaForm.maxIntentos} onChange={e => setProgramaForm(f => ({ ...f, maxIntentos: e.target.value }))}
+                          className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Perfiles asignados</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {AUDIENCE_CONFIG.profiles.map(a => (
+                          <button key={a.id} type="button" onClick={() => setProgramaForm(f => ({ ...f, perfiles: f.perfiles.includes(a.id) ? f.perfiles.filter(x => x !== a.id) : [...f.perfiles, a.id] }))}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${programaForm.perfiles.includes(a.id) ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-white text-[#424750] border-[#e1e3e4]'}`}>
+                            {a.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">DNIs adicionales (separados por coma)</label>
+                      <input value={programaForm.dnisAsignados} onChange={e => setProgramaForm(f => ({ ...f, dnisAsignados: e.target.value }))}
+                        placeholder="12345678, 87654321"
+                        className="w-full px-3 py-2.5 text-sm text-[#111827] font-medium border border-[#e1e3e4] rounded-xl focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#737781] uppercase mb-1">Material de referencia (no se muestra al trabajador)</label>
+                      <input ref={materialFileInputRef} type="file" onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadMaterial(f); }} className="hidden" id="pac-material-input" />
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="pac-material-input" className="flex items-center gap-1.5 px-3 py-2 bg-[#f8f9fa] border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#424750] hover:bg-[#f3f4f5] cursor-pointer">
+                          {materialUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                          Subir archivo
+                        </label>
+                        {programaForm.materialNombre && <span className="text-[10px] text-[#737781] truncate">{programaForm.materialNombre}</span>}
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={programaForm.activo} onChange={e => setProgramaForm(f => ({ ...f, activo: e.target.checked }))} className="accent-[#1b4d89]" />
+                      <span className="text-xs font-semibold text-[#424750]">Activo (visible para los trabajadores)</span>
+                    </label>
+                    <div className="flex gap-2 pt-2">
+                      <button onClick={() => { setShowNewPrograma(false); setEditingProgramaId(null); }}
+                        className="flex-1 py-2.5 rounded-xl border border-[#e1e3e4] text-xs font-bold text-[#737781] hover:bg-[#f3f4f5]">
+                        Cancelar
+                      </button>
+                      <button onClick={handleSavePrograma} disabled={programaSaving}
+                        className="flex-1 py-2.5 rounded-xl bg-[#1b4d89] text-white text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5">
+                        {programaSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        {editingProgramaId ? 'Guardar cambios' : 'Crear capacitación'}
+                      </button>
+                    </div>
+                  </motion.div>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* List */}
-            {shortEvalsLoading ? (
-              <div className="flex flex-col items-center py-12 gap-2">
-                <Loader2 className="w-8 h-8 text-[#1b4d89] animate-spin" />
-                <p className="text-xs text-[#737781]">Cargando evaluaciones...</p>
-              </div>
-            ) : shortEvals.length === 0 ? (
-              <div className="flex flex-col items-center py-12 text-center">
-                <ClipboardCheck className="w-12 h-12 text-[#e1e3e4] mb-3" />
-                <p className="text-sm font-bold text-[#737781]">Sin evaluaciones</p>
-                <p className="text-xs text-[#737781] mt-1">Haz clic en "Nueva" para crear la primera evaluación corta</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {shortEvals.map(ev => {
-                  const evalResults = shortResults.filter(r => r.evaluacionId === ev.id);
-                  const link = getEvalLink(ev.id);
-                  const showResults = showResultsFor === ev.id;
-                  const avgNota = evalResults.length > 0
-                    ? (evalResults.reduce((s, r) => s + r.nota, 0) / evalResults.length).toFixed(1)
-                    : null;
-                  return (
-                    <div key={ev.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
-                      <div className="px-4 py-3.5 flex items-start gap-3">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${ev.activo ? 'bg-emerald-100' : 'bg-slate-100'}`}>
-                          <ClipboardCheck className={`w-5 h-5 ${ev.activo ? 'text-emerald-600' : 'text-slate-400'}`} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-bold text-[#00366b] text-sm truncate">{ev.nombre}</p>
-                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${ev.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                              {ev.activo ? 'ACTIVO' : 'INACTIVO'}
-                            </span>
-                          </div>
-                          {ev.descripcion && <p className="text-xs text-[#737781] mt-0.5">{ev.descripcion}</p>}
-                          <p className="text-[10px] text-[#737781] mt-1">
-                            Módulo: <span className="font-semibold">{ev.topicTitle}</span>
-                            {ev.chunkIds.length > 0 && ` · ${ev.chunkIds.length} sección(es)`}
-                            <span className="mx-1">·</span>
-                            <span className="font-semibold">{evalResults.length}</span> respuestas
-                            {avgNota && <span> · Nota prom: <span className="font-semibold text-amber-600">{avgNota}/20</span></span>}
-                          </p>
-                          {/* Link box */}
-                          <div className="mt-2 flex items-center gap-2 bg-[#f8f9fa] rounded-lg px-3 py-2 border border-[#e1e3e4]">
-                            <Globe className="w-3.5 h-3.5 text-[#737781] flex-shrink-0" />
-                            <span className="text-[10px] text-[#737781] truncate flex-1 font-mono">{link}</span>
-                            <button
-                              onClick={() => { navigator.clipboard.writeText(link); showToast('Enlace copiado'); }}
-                              className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-[#1b4d89]/10 text-[#1b4d89] hover:bg-[#1b4d89]/20 transition-colors text-[10px] font-bold">
-                              <Copy className="w-3 h-3" />Copiar
-                            </button>
-                            <a href={link} target="_blank" rel="noopener noreferrer"
-                              className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors text-[10px] font-bold">
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-1.5 flex-shrink-0">
-                          <button onClick={() => handleToggleEvalActive(ev)} title={ev.activo ? 'Desactivar' : 'Activar'}
-                            className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
-                            {ev.activo
-                              ? <ToggleRight className="w-5 h-5 text-emerald-500" />
-                              : <ToggleLeft className="w-5 h-5 text-slate-400" />}
-                          </button>
-                          <button onClick={() => {
-                              setShowResultsFor(showResults ? null : ev.id);
-                              setResultsSort({ key: 'fecha', dir: 'asc' });
-                              setResultsFilters({ dni: '', nombre: '', guardia: '', nota: '', porcentaje: '', fecha: '', fallo: '' });
-                              setResultsPage(1);
-                            }} title="Ver resultados"
-                            className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
-                            <TrendingUp className="w-4 h-4 text-[#1b4d89]" />
-                          </button>
-                          <button onClick={() => handleDeleteShortEval(ev.id)} title="Eliminar"
-                            className="p-1.5 rounded-lg hover:bg-red-50 transition-colors">
-                            <Trash2 className="w-4 h-4 text-red-400" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Results table */}
-                      {showResults && (() => {
-                        const activeFilters = resultsFilters;
-                        const displayResults = evalResults
-                          .filter(r => {
-                            if (activeFilters.dni && !r.dni.toLowerCase().includes(activeFilters.dni.toLowerCase())) return false;
-                            if (activeFilters.nombre && !`${r.apellidos} ${r.nombres}`.toLowerCase().includes(activeFilters.nombre.toLowerCase())) return false;
-                            if (activeFilters.guardia && r.guardia !== activeFilters.guardia) return false;
-                            if (activeFilters.nota && !matchNumericFilter(r.nota, activeFilters.nota, r.nota.toFixed(1))) return false;
-                            if (activeFilters.porcentaje && !matchNumericFilter(r.porcentaje, activeFilters.porcentaje, String(r.porcentaje))) return false;
-                            if (activeFilters.fecha && !r.fechaHora.toLowerCase().includes(activeFilters.fecha.toLowerCase())) return false;
-                            if (activeFilters.fallo && !String((r.preguntasErroneas || []).length).includes(activeFilters.fallo.trim())) return false;
-                            return true;
-                          })
-                          .sort((a, b) => {
-                            const dir = resultsSort.dir === 'asc' ? 1 : -1;
-                            switch (resultsSort.key) {
-                              case 'dni': return a.dni.localeCompare(b.dni, 'es', { numeric: true }) * dir;
-                              case 'nombre': return `${a.apellidos} ${a.nombres}`.localeCompare(`${b.apellidos} ${b.nombres}`, 'es', { sensitivity: 'base' }) * dir;
-                              case 'guardia': return a.guardia.localeCompare(b.guardia, 'es') * dir;
-                              case 'nota': return (a.nota - b.nota) * dir;
-                              case 'porcentaje': return (a.porcentaje - b.porcentaje) * dir;
-                              case 'fecha': return a.fechaHora.localeCompare(b.fechaHora, 'es') * dir;
-                              case 'fallo': return ((a.preguntasErroneas || []).length - (b.preguntasErroneas || []).length) * dir;
-                              default: return 0;
-                            }
-                          });
-                        const SortIcon = ({ col }: { col: ResultsSortKey }) => (
-                          resultsSort.key === col
-                            ? (resultsSort.dir === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />)
-                            : <ArrowUpDown className="w-2.5 h-2.5 opacity-30" />
-                        );
-                        const rTotalPages = Math.max(1, Math.ceil(displayResults.length / TABLE_PAGE_SIZE));
-                        const rPage = Math.min(resultsPage, rTotalPages);
-                        const pageResults = displayResults.slice((rPage - 1) * TABLE_PAGE_SIZE, rPage * TABLE_PAGE_SIZE);
-                        return (
-                        <div className="border-t border-[#f3f4f5] px-4 py-3 bg-[#f8f9fa]">
-                          <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">
-                            Resultados ({displayResults.length}{displayResults.length !== evalResults.length ? ` / ${evalResults.length}` : ''})
-                          </p>
-                          {evalResults.length === 0 ? (
-                            <p className="text-xs text-[#737781] italic">Sin respuestas aún</p>
-                          ) : (
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-xs">
-                                <thead>
-                                  <tr className="text-[9px] text-[#737781] uppercase">
-                                    <th className="text-left pb-1 pr-3">
-                                      <button onClick={() => toggleResultsSort('dni')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">DNI <SortIcon col="dni" /></button>
-                                    </th>
-                                    <th className="text-left pb-1 pr-3">
-                                      <button onClick={() => toggleResultsSort('nombre')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Apellidos y Nombres <SortIcon col="nombre" /></button>
-                                    </th>
-                                    <th className="text-center pb-1 pr-3">
-                                      <button onClick={() => toggleResultsSort('guardia')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Guardia <SortIcon col="guardia" /></button>
-                                    </th>
-                                    <th className="text-center pb-1 pr-3">
-                                      <button onClick={() => toggleResultsSort('nota')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Nota <SortIcon col="nota" /></button>
-                                    </th>
-                                    <th className="text-center pb-1">
-                                      <button onClick={() => toggleResultsSort('porcentaje')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">% <SortIcon col="porcentaje" /></button>
-                                    </th>
-                                    <th className="text-left pb-1 pl-3">
-                                      <button onClick={() => toggleResultsSort('fecha')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Fecha <SortIcon col="fecha" /></button>
-                                    </th>
-                                    <th className="text-center pb-1 pl-3">
-                                      <button onClick={() => toggleResultsSort('fallo')} className="inline-flex items-center gap-1 hover:text-[#1b4d89] transition-colors uppercase font-bold">Falló <SortIcon col="fallo" /></button>
-                                    </th>
-                                    <th className="pb-1"></th>
-                                  </tr>
-                                  <tr className="align-top">
-                                    <th className="pb-2 pr-3"><input value={resultsFilters.dni} onChange={e => setResultsFilters(f => ({ ...f, dni: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
-                                    <th className="pb-2 pr-3"><input value={resultsFilters.nombre} onChange={e => setResultsFilters(f => ({ ...f, nombre: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
-                                    <th className="pb-2 pr-3">
-                                      <select value={resultsFilters.guardia} onChange={e => setResultsFilters(f => ({ ...f, guardia: e.target.value }))}
-                                        className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center focus:outline-none focus:border-[#1b4d89]">
-                                        <option value="">Todas</option>
-                                        <option value="A">A</option>
-                                        <option value="B">B</option>
-                                        <option value="C">C</option>
-                                      </select>
-                                    </th>
-                                    <th className="pb-2 pr-3"><input value={resultsFilters.nota} onChange={e => setResultsFilters(f => ({ ...f, nota: e.target.value }))} placeholder=">14" title="Usa >, <, >=, <=, = o un número. Ej: >14, <=10" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
-                                    <th className="pb-2"><input value={resultsFilters.porcentaje} onChange={e => setResultsFilters(f => ({ ...f, porcentaje: e.target.value }))} placeholder=">70" title="Usa >, <, >=, <=, = o un número. Ej: >70, <=50" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
-                                    <th className="pb-2 pl-3"><input value={resultsFilters.fecha} onChange={e => setResultsFilters(f => ({ ...f, fecha: e.target.value }))} placeholder="Filtrar…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
-                                    <th className="pb-2 pl-3"><input value={resultsFilters.fallo} onChange={e => setResultsFilters(f => ({ ...f, fallo: e.target.value }))} placeholder="…" className="w-full font-normal normal-case bg-white border border-[#e1e3e4] rounded-md px-1.5 py-1 text-[10px] text-[#424750] text-center placeholder:text-[#b0b3b8] focus:outline-none focus:border-[#1b4d89]" /></th>
-                                    <th className="pb-2"></th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-[#f3f4f5]">
-                                  {displayResults.length === 0 ? (
-                                    <tr><td colSpan={8} className="py-3 text-center text-[#737781] italic text-[11px]">Sin resultados para los filtros aplicados</td></tr>
-                                  ) : pageResults.map((r) => {
-                                    const rowKey = `${r.evaluacionId}__${r.dni}`;
-                                    const wrong = r.preguntasErroneas || [];
-                                    const isExpanded = expandedResult === rowKey;
-                                    const isDeleting = deletingResult === rowKey;
-                                    return (
-                                      <Fragment key={rowKey}>
-                                        <tr>
-                                          <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
-                                          <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.apellidos} {r.nombres}</td>
-                                          <td className="py-1.5 pr-3 text-center font-bold text-[#424750]">{r.guardia || '—'}</td>
-                                          <td className={`py-1.5 pr-3 text-center font-bold ${r.nota >= 16 ? 'text-emerald-600' : r.nota >= 12 ? 'text-amber-600' : 'text-red-500'}`}>
-                                            {r.nota.toFixed(1)}/20
-                                          </td>
-                                          <td className="py-1.5 text-center font-bold text-[#424750]">{r.porcentaje}%</td>
-                                          <td className="py-1.5 pl-3 text-[#737781] whitespace-nowrap">{r.fechaHora}</td>
-                                          <td className="py-1.5 pl-3 text-center">
-                                            {wrong.length > 0 ? (
-                                              <button
-                                                onClick={() => setExpandedResult(isExpanded ? null : rowKey)}
-                                                title="Ver preguntas falladas"
-                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 text-red-600 hover:bg-red-100 transition-colors font-bold text-[10px]"
-                                              >
-                                                {wrong.length}
-                                                <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                                              </button>
-                                            ) : (
-                                              <span className="text-emerald-500 font-bold text-[10px]">0</span>
-                                            )}
-                                          </td>
-                                          <td className="py-1.5 pl-2 text-center">
-                                            <button
-                                              onClick={() => handleDeleteShortResult(r.evaluacionId, r.dni)}
-                                              disabled={isDeleting}
-                                              title="Eliminar registro"
-                                              className="p-1 rounded-md hover:bg-red-50 transition-colors disabled:opacity-40"
-                                            >
-                                              {isDeleting
-                                                ? <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" />
-                                                : <Trash2 className="w-3.5 h-3.5 text-red-400" />}
-                                            </button>
-                                          </td>
-                                        </tr>
-                                        {isExpanded && wrong.length > 0 && (
-                                          <tr>
-                                            <td colSpan={8} className="py-2 px-2 bg-white">
-                                              <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2">
-                                                Preguntas falladas ({wrong.length})
-                                              </p>
-                                              <div className="space-y-2">
-                                                {wrong.map((w, wi) => (
-                                                  <div key={wi} className="rounded-lg border border-red-100 bg-red-50/60 p-2.5">
-                                                    <p className="text-[11px] font-semibold text-[#191c1d] mb-1">{wi + 1}. {w.question}</p>
-                                                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px]">
-                                                      <span className="text-red-600">Respondió: <strong>{w.selected || '—'}</strong></span>
-                                                      <span className="text-emerald-600">Correcta: <strong>{w.correct}</strong></span>
-                                                    </div>
-                                                    {w.explanation && <p className="text-[10px] text-[#737781] italic mt-1">{w.explanation}</p>}
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        )}
-                                      </Fragment>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                              <Pager page={rPage} totalPages={rTotalPages} total={displayResults.length} onPage={setResultsPage} />
-                            </div>
-                          )}
-                        </div>
-                        );
-                      })()}
+            {/* Modal: Preguntas */}
+            <AnimatePresence>
+              {editingPreguntasFor && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4">
+                  <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                    className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-black text-[#00366b]">Preguntas de la evaluación</p>
+                      <button onClick={() => setEditingPreguntasFor(null)} className="p-1.5 rounded-lg hover:bg-[#f3f4f5]"><X className="w-4 h-4 text-[#737781]" /></button>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                    {preguntasLoading ? (
+                      <div className="flex flex-col items-center py-10 gap-2"><Loader2 className="w-6 h-6 text-[#1b4d89] animate-spin" /></div>
+                    ) : (
+                      <>
+                        <div className="space-y-4">
+                          {preguntasDraft.map((p, i) => (
+                            <div key={p.idPregunta} className="bg-[#f8f9fa] rounded-xl p-3 border border-[#e1e3e4] space-y-2">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-bold text-[#1b4d89] uppercase">Pregunta {i + 1}</p>
+                                <button onClick={() => handleRemovePregunta(p.idPregunta)} className="p-1 rounded-md hover:bg-red-50"><Trash2 className="w-3.5 h-3.5 text-red-400" /></button>
+                              </div>
+                              <input value={p.pregunta} onChange={e => handleUpdatePreguntaField(p.idPregunta, 'pregunta', e.target.value)}
+                                placeholder="Enunciado de la pregunta"
+                                className="w-full px-3 py-2 text-sm border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {(['A', 'B', 'C', 'D'] as const).map(opt => (
+                                  <div key={opt} className="flex items-center gap-2">
+                                    <button onClick={() => handleUpdatePreguntaField(p.idPregunta, 'correctAnswer', opt)}
+                                      title="Marcar como correcta"
+                                      className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-[10px] font-black ${p.correctAnswer === opt ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-[#c3c6d1] text-[#737781]'}`}>
+                                      {opt}
+                                    </button>
+                                    <input value={p[`option${opt}` as 'optionA']} onChange={e => handleUpdatePreguntaField(p.idPregunta, `option${opt}` as 'optionA', e.target.value)}
+                                      placeholder={`Opción ${opt}`}
+                                      className="flex-1 px-2.5 py-1.5 text-xs border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
+                                  </div>
+                                ))}
+                              </div>
+                              <input value={p.explanation || ''} onChange={e => handleUpdatePreguntaField(p.idPregunta, 'explanation', e.target.value)}
+                                placeholder="Explicación (opcional, se muestra tras responder)"
+                                className="w-full px-3 py-1.5 text-xs border border-[#e1e3e4] rounded-lg focus:outline-none focus:border-[#1b4d89] bg-white" />
+                            </div>
+                          ))}
+                        </div>
+                        <button onClick={handleAddPregunta} className="w-full py-2.5 rounded-xl border-2 border-dashed border-[#e1e3e4] text-xs font-bold text-[#737781] hover:border-[#1b4d89]/40 hover:text-[#1b4d89] flex items-center justify-center gap-1.5">
+                          <Plus className="w-3.5 h-3.5" /> Agregar pregunta
+                        </button>
+                        <div className="flex gap-2 pt-2">
+                          <button onClick={() => setEditingPreguntasFor(null)} className="flex-1 py-2.5 rounded-xl border border-[#e1e3e4] text-xs font-bold text-[#737781] hover:bg-[#f3f4f5]">Cancelar</button>
+                          <button onClick={handleSavePreguntas} disabled={preguntasSaving}
+                            className="flex-1 py-2.5 rounded-xl bg-[#1b4d89] text-white text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5">
+                            {preguntasSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                            Guardar preguntas
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Modal: Vista previa acta de asistentes (PDF) */}
+            <AnimatePresence>
+              {pacAsistenciaData && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/60 z-[150] flex items-center justify-center p-4">
+                  <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                    className="bg-white rounded-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden">
+                    <div className="flex items-center justify-between px-5 py-3 border-b border-[#e1e3e4] flex-shrink-0">
+                      <p className="text-sm font-black text-[#00366b]">Vista previa — Acta de asistentes</p>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setPacAsistenciaData(null)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-[#737781] hover:bg-[#f3f4f5]">Cancelar</button>
+                        <button onClick={handleDownloadPacAsistenciaPdf} disabled={downloadingPacAsistencia}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1b4d89] text-white text-xs font-bold disabled:opacity-50">
+                          {downloadingPacAsistencia ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                          Descargar PDF
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-auto p-4 bg-[#f3f4f5]">
+                      <PacAsistenciaTemplate ref={pacAsistenciaRef} programa={pacAsistenciaData.programa} rows={pacAsistenciaData.rows} appConfig={appConfig ?? null} />
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
 

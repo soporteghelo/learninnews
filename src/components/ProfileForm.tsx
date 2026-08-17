@@ -5,18 +5,7 @@ import {
   Users, ArrowRight, AlertCircle, User,
 } from 'lucide-react';
 import type { UserSession } from '../types';
-
-const EMPRESAS = ['AESA', 'FERREYROS', 'TH', 'LUCARBAL', 'OTROS'];
-
-const AREAS = [
-  'AVANCES',
-  'SERVICIOS',
-  'ADMINISTRACIÓN',
-  'LOGÍSTICA',
-  'MANTENIMIENTO',
-  'SEGURIDAD',
-  'OFICINA TÉCNICA',
-];
+import { EMPRESAS, AREAS } from '../lib/constants';
 
 const PARENTESCOS = ['ESPOSA(O)', 'PADRE', 'MADRE', 'HIJO(A)', 'OTROS'];
 

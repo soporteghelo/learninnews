@@ -150,7 +150,7 @@ export interface ConnectionTestResult {
   geminiApi: { ok: boolean; error?: string };
 }
 
-export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'shortEvals' | 'actas' | 'config';
+export type AdminTab = 'topics' | 'overview' | 'content' | 'quiz' | 'progress' | 'pac' | 'actas' | 'config';
 
 export type AppView =
   | 'login'
@@ -164,6 +164,7 @@ export type AppView =
   | 'admin'
   | 'certificateClaim'
   | 'shortEval'
+  | 'pacEval'
   | 'actas';
 
 export interface ShortEval {
@@ -175,6 +176,78 @@ export interface ShortEval {
   chunkIds: string[];   // empty = todas las preguntas del topicId
   activo: boolean;
   fechaCreacion: string;
+}
+
+// =============================================
+// PAC - PROGRAMA ANUAL DE CAPACITACIONES
+// =============================================
+
+/** Una capacitación programada del PAC: material de referencia + banco de preguntas propio. */
+export interface PacPrograma {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  tema: string;
+  capacitador: string;
+  fechaProgramada: string;   // yyyy-MM-dd
+  horaProgramada?: string;
+  materialUrl?: string;
+  materialNombre?: string;
+  perfiles: string[];        // audiencia asignada (igual convención que ActaDocumento.perfiles)
+  dnisAsignados: string[];
+  notaAprobatoria: number;   // default 14
+  maxIntentos: number;       // default 3
+  activo: boolean;
+  fechaCreacion: string;
+}
+
+export interface PacPregunta {
+  idPregunta: string;
+  programaId: string;
+  pregunta: string;
+  optionA: string;
+  optionB: string;
+  optionC: string;
+  optionD: string;
+  correctAnswer: 'A' | 'B' | 'C' | 'D';
+  explanation?: string;
+  orden?: number;
+}
+
+export type PacWrongAnswer = ShortEvalWrongAnswer;
+
+export type SatisfaccionRating = 'Excelente' | 'Bueno' | 'Regular' | 'Malo';
+
+export interface PacEncuesta {
+  respuestas: SatisfaccionRating[]; // longitud fija: una por pregunta de escala
+  sugerencia: string;               // campo abierto
+}
+
+/** Un intento de evaluación PAC (se registra apruebe o no; firma+foto se piden en cada intento). */
+export interface PacResultado {
+  id: string;
+  programaId: string;
+  programaNombre: string;
+  tema: string;
+  intento: number;           // 1..maxIntentos, asignado por el servidor
+  dni: string;
+  apellidos: string;
+  nombres: string;
+  guardia: string;
+  empresa: string;
+  area: string;
+  nota: number;
+  aprobado: boolean;
+  totalPreguntas: number;
+  correctas: number;
+  preguntasErroneas: PacWrongAnswer[];
+  encuesta: PacEncuesta;
+  consentimiento: boolean;
+  firmaUrl: string;
+  selfieUrl: string;
+  constanciaPdfUrl: string;
+  fechaHora: string;
+  dispositivo?: string;
 }
 
 export interface ShortEvalWrongAnswer {

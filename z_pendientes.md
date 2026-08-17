@@ -1,1 +1,0 @@
-### Optimizacion por cantidad de informacion, cuando haya muchos datos, para que no se lageeAN

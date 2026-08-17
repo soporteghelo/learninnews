@@ -24,6 +24,9 @@ export const SHEETS_CONFIG = {
     shortResults: 'SHORT_RESULTADOS',
     actasDocs: 'ACTAS_DOCUMENTOS',
     actasFirmas: 'ACTAS_FIRMAS',
+    pacProgramas: 'PAC_PROGRAMAS',
+    pacPreguntas: 'PAC_PREGUNTAS',
+    pacResultados: 'PAC_RESULTADOS',
   },
   useMockDataOnError: true,
 } as const;
