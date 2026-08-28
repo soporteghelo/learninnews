@@ -983,11 +983,21 @@ async function getIngresosDataset(force = false): Promise<IngresoRecord[]> {
 export async function fetchIngresoByDni(dni: string): Promise<IngresoRecord | null> {
   try {
     const result = (await postToAppsScript({ action: 'getIngresoByDni', dni })) as { status: string; record?: any };
-    if (result.status !== 'ok' || !result.record) return null;
-    return mapIngresoRow(result.record);
+    if (result.status === 'ok') {
+      return result.record ? mapIngresoRow(result.record) : null;
+    }
+    // status !== 'ok' (p. ej. "Acción no reconocida" si el Apps Script desplegado
+    // aún no tiene esta acción) NO significa que el usuario sea nuevo — a
+    // diferencia de un `record: null` con status 'ok'. Tratarlo como "nuevo"
+    // manda a un usuario ya registrado de vuelta al formulario de perfil en
+    // cada login. Hacemos fallback al método completo (mismo dataset que usa
+    // el panel admin) para no perder el reconocimiento mientras el backend
+    // esté desactualizado.
   } catch {
-    return null;
+    // Fallo de red: mismo fallback.
   }
+  const all = await getIngresosDataset(true);
+  return all.find(r => r.dni === dni) || null;
 }
 
 /** Fetch ALL rows from INGRESOS sheet, one best record per DNI (uses the shared cached dataset). */

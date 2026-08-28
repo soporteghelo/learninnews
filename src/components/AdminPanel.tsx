@@ -3461,9 +3461,15 @@ ${text}`;
                   </div>
                 )}
 
-                {/* Filters */}
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="relative flex-1">
+                {/* Filters.
+                    Los <select> toman su ancho intrínseco del <option> más largo y, como
+                    ítems flex, por defecto no pueden encogerse por debajo de él
+                    (min-width:auto). Con una empresa o público de nombre largo la fila
+                    se desbordaba fuera de la tarjeta. De ahí el min-w-0 + ancho acotado
+                    en cada control, y el flex-wrap para que los botones bajen de línea
+                    en vez de empujar hacia afuera. */}
+                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
+                  <div className="relative flex-1 min-w-0 sm:min-w-[12rem]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#737781]" />
                     <input
                       value={progressSearch}
@@ -3476,7 +3482,7 @@ ${text}`;
                     <select
                       value={progressWeekFilter}
                       onChange={e => setProgressWeekFilter(e.target.value)}
-                      className="px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                      className="w-full sm:w-44 min-w-0 truncate px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
                     >
                       <option value="">Todas las semanas</option>
                       {weekOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
@@ -3486,7 +3492,7 @@ ${text}`;
                     <select
                       value={progressEmpresaFilter}
                       onChange={e => setProgressEmpresaFilter(e.target.value)}
-                      className="px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                      className="w-full sm:w-44 min-w-0 truncate px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
                     >
                       <option value="">Todas las empresas</option>
                       {empresasOptions.map(e => <option key={e} value={e}>{e}</option>)}
@@ -3496,7 +3502,7 @@ ${text}`;
                     <select
                       value={progressPublicoFilter}
                       onChange={e => setProgressPublicoFilter(e.target.value)}
-                      className="px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                      className="w-full sm:w-44 min-w-0 truncate px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
                     >
                       <option value="">Todos los públicos</option>
                       {publicoOptions.map(p => <option key={p} value={p}>{p}</option>)}
