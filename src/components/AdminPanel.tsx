@@ -3590,17 +3590,11 @@ ${text}`;
                               }}
                               className="w-full flex items-center gap-3 px-4 py-3.5 text-left cursor-pointer hover:bg-[#f8f9fa] transition-all"
                             >
-                              {/* Avatar */}
-                              <div className="w-9 h-9 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm">
-                                {(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}
-                              </div>
-                              {/* Info */}
-                              <div className="flex-1 min-w-0">
-                                <p className="font-bold text-[#00366b] text-sm truncate">{record.nombres} {record.apellidos}</p>
-                                <p className="text-[10px] text-[#737781] truncate">{record.dni} · {record.empresa || '—'} · {record.publico || '—'}</p>
-                              </div>
-                              {/* WhatsApp */}
-                              {waHref && (
+                              {/* Avatar: si el usuario tiene celular, es el disparador de
+                                  WhatsApp. Se puso aquí (y no en un botón aparte a la derecha)
+                                  porque en móvil esa zona compite con las estadísticas y el
+                                  botón quedaba fuera de vista. */}
+                              {waHref ? (
                                 <a
                                   href={waHref}
                                   target="_blank"
@@ -3608,11 +3602,28 @@ ${text}`;
                                   onClick={(e) => e.stopPropagation()}
                                   title={`Escribir por WhatsApp a ${record.celular}`}
                                   aria-label={`Escribir por WhatsApp a ${record.nombres} ${record.apellidos}`}
-                                  className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-[#25D366]/10 text-[#128C7E] hover:bg-[#25D366] hover:text-white transition-all"
+                                  className="group relative w-9 h-9 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm hover:bg-[#25D366] hover:text-white transition-all"
                                 >
-                                  <MessageCircle className="w-4 h-4" />
+                                  <span className="group-hover:opacity-0 transition-opacity">
+                                    {(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}
+                                  </span>
+                                  <MessageCircle className="w-4 h-4 absolute opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  {/* Indicador permanente: en móvil no hay hover, así que el
+                                      punto verde es lo que revela que el avatar es accionable. */}
+                                  <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-[#25D366] border-2 border-white flex items-center justify-center group-hover:opacity-0 transition-opacity">
+                                    <MessageCircle className="w-2 h-2 text-white" />
+                                  </span>
                                 </a>
+                              ) : (
+                                <div className="w-9 h-9 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm">
+                                  {(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}
+                                </div>
                               )}
+                              {/* Info */}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-[#00366b] text-sm truncate">{record.nombres} {record.apellidos}</p>
+                                <p className="text-[10px] text-[#737781] truncate">{record.dni} · {record.empresa || '—'} · {record.publico || '—'}</p>
+                              </div>
                               {/* Stats */}
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 <div className="text-center hidden sm:block">
