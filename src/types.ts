@@ -92,12 +92,26 @@ export interface Quiz {
   questions: QuizQuestion[];
 }
 
+/**
+ * Una pregunta fallada en el cuestionario de un módulo. Se guarda en formato
+ * compacto (solo el id y las letras) porque viaja dentro de ProgressJSON, una
+ * sola celda de la hoja INGRESOS; el texto de la pregunta y de las alternativas
+ * se resuelve contra el banco de preguntas al mostrarla en el panel admin.
+ */
+export interface QuizWrongAnswer {
+  idQuiz: string;
+  selected: string;   // 'A' | 'B' | 'C' | 'D', o '' si se agotó el tiempo
+  correct: string;    // letra correcta
+}
+
 export interface UserProgress {
   topicId: string;
   completed: boolean;
   currentChunk?: number;
   quizScore?: number;
   lastAccessed: number;
+  /** Preguntas erradas del último intento del cuestionario de este módulo. */
+  wrongAnswers?: QuizWrongAnswer[];
 }
 
 /** Nivel de confianza autoreportado antes de revelar el feedback (metacognición) */

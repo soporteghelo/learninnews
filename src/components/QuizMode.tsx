@@ -9,7 +9,7 @@ import { shuffleArray } from '../lib/utils';
 import { fetchQuizProgressFromSheets, saveQuizProgressToSheets } from '../services/sheetsService';
 import { useDistractionMonitor } from '../hooks/useDistractionMonitor';
 import QuizOptions from './QuizOptions';
-import type { QuizQuestion, LearnTopic, QuizSavedProgress, Confidence } from '../types';
+import type { QuizQuestion, LearnTopic, QuizSavedProgress, Confidence, QuizWrongAnswer } from '../types';
 
 const MAX_DISTRACTIONS = 5;
 
@@ -19,8 +19,8 @@ const QUESTION_TIME = 30;
 interface QuizModeProps {
   topic: LearnTopic;
   questions: QuizQuestion[];
-  onBack: (partialScore?: number) => void;
-  onComplete: (score: number) => void;
+  onBack: (partialScore?: number, wrongAnswers?: QuizWrongAnswer[]) => void;
+  onComplete: (score: number, wrongAnswers: QuizWrongAnswer[]) => void;
   userDni?: string;
 }
 
@@ -149,9 +149,23 @@ export default function QuizMode({
     distraction.setDistractionCount(0);
   };
 
+  /**
+   * Preguntas erradas del intento actual, en formato compacto para el panel admin.
+   * `answeredMap` está indexado por posición dentro de `activeQuestions`, así que
+   * la posición es la que identifica a qué pregunta corresponde cada respuesta.
+   */
+  const collectWrongAnswers = (mapOverride?: typeof answeredMap): QuizWrongAnswer[] =>
+    Object.entries(mapOverride ?? answeredMap)
+      .filter(([, a]) => !a.correct)
+      .map(([idx, a]) => {
+        const q = activeQuestions[Number(idx)];
+        return q ? { idQuiz: q.idQuiz, selected: a.selected, correct: q.correctAnswer } : null;
+      })
+      .filter(Boolean) as QuizWrongAnswer[];
+
   const handleBack = () => {
     saveProgress();
-    onBack(answeredCount > 0 ? runningScore : undefined);
+    onBack(answeredCount > 0 ? runningScore : undefined, answeredCount > 0 ? collectWrongAnswers() : undefined);
   };
 
   // Monitoreo de distracción (cámara + cambio de pestaña) durante la evaluación activa.
@@ -185,13 +199,16 @@ export default function QuizMode({
     revealAnswer(selectedOption);
   };
 
-  const handleNext = () => {
+  // `mapOverride` cubre el caso del timeout: `setAnsweredMap` aún no se refleja
+  // en `answeredMap` cuando se avanza en la misma tanda de renderizado.
+  const handleNext = (mapOverride?: typeof answeredMap) => {
+    const map = mapOverride ?? answeredMap;
     if (currentIdx < totalQuestions - 1) {
       const nextIdx = currentIdx + 1;
       try {
         const data: QuizSavedProgress = {
           shuffledIds: activeQuestions.map(q => q.idQuiz),
-          answeredMap,
+          answeredMap: map,
           currentIdx: nextIdx,
           score,
           distractionCount: distraction.distractionCount,
@@ -205,15 +222,16 @@ export default function QuizMode({
     } else {
       clearProgress();
       setIsFinished(true);
-      onComplete(parseFloat(((score / totalQuestions) * 20).toFixed(1)));
+      onComplete(parseFloat(((score / totalQuestions) * 20).toFixed(1)), collectWrongAnswers(map));
     }
   };
 
   // Se agotó el tiempo: la pregunta cuenta como no respondida (incorrecta) y avanza.
   const handleTimeout = () => {
     if (showFeedback || selectedOption) return;
-    setAnsweredMap(prev => ({ ...prev, [currentIdx]: { selected: '', correct: false } }));
-    handleNext();
+    const map = { ...answeredMap, [currentIdx]: { selected: '', correct: false } };
+    setAnsweredMap(map);
+    handleNext(map);
   };
 
   // Cuenta regresiva por pregunta. Se reinicia al cambiar de pregunta y se detiene
@@ -442,7 +460,7 @@ export default function QuizMode({
               </button>
             ) : (
               <button
-                onClick={handleNext}
+                onClick={() => handleNext()}
                 className={`
                   w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-3 shadow-2xl transition-all
                   ${currentIdx === totalQuestions - 1 ? 'bg-emerald-600 text-white shadow-emerald-600/30' : 'btn-primary'}

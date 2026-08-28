@@ -24,6 +24,7 @@ import type {
   DataChunk,
   QuizQuestion,
   UserProgress,
+  QuizWrongAnswer,
   UserSession,
   AudienceType,
   AppView,
@@ -94,10 +95,12 @@ function driveEmbedUrl(url: string): string {
   return '';
 }
 
-/** Elimina quizSavedProgress y otros campos pesados antes de guardar en Sheets */
+/** Elimina quizSavedProgress y otros campos pesados antes de guardar en Sheets.
+ *  `wrongAnswers` sí se conserva: es lo que el panel admin usa para mostrar en
+ *  qué preguntas falló cada trabajador, y va en formato compacto (ids + letras). */
 function slimProgress(prog: UserProgress[]): UserProgress[] {
-  return prog.map(({ topicId, completed, currentChunk, quizScore, lastAccessed }) => ({
-    topicId, completed, currentChunk, quizScore, lastAccessed,
+  return prog.map(({ topicId, completed, currentChunk, quizScore, lastAccessed, wrongAnswers }) => ({
+    topicId, completed, currentChunk, quizScore, lastAccessed, wrongAnswers,
   }));
 }
 
@@ -690,14 +693,14 @@ export default function App() {
     setView('courseDetail');
   }, [userSession, topics, audience]);
 
-  const handleQuizComplete = useCallback((topicId: string, score: number) => {
+  const handleQuizComplete = useCallback((topicId: string, score: number, wrongAnswers: QuizWrongAnswer[]) => {
     setProgress(prev => {
       const idx = prev.findIndex(p => p.topicId === topicId);
       const newProg = [...prev];
       if (idx >= 0) {
-        newProg[idx] = { ...newProg[idx], quizScore: score, lastAccessed: Date.now() };
+        newProg[idx] = { ...newProg[idx], quizScore: score, wrongAnswers, lastAccessed: Date.now() };
       } else {
-        newProg.push({ topicId, completed: false, quizScore: score, lastAccessed: Date.now() });
+        newProg.push({ topicId, completed: false, quizScore: score, wrongAnswers, lastAccessed: Date.now() });
       }
       localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(newProg));
       if (userSession?.dni) localStorage.setItem(dniProgressKey(userSession.dni), JSON.stringify(newProg));
@@ -996,15 +999,15 @@ export default function App() {
               <QuizMode
                 topic={selectedTopic}
                 questions={quizQuestions}
-                onBack={(partialScore) => {
+                onBack={(partialScore, wrongAnswers) => {
                   if (partialScore !== undefined) {
                     setProgress(prev => {
                       const idx = prev.findIndex(p => p.topicId === selectedTopic.id);
                       const newProg = [...prev];
                       if (idx >= 0) {
-                        newProg[idx] = { ...newProg[idx], quizScore: partialScore, lastAccessed: Date.now() };
+                        newProg[idx] = { ...newProg[idx], quizScore: partialScore, wrongAnswers, lastAccessed: Date.now() };
                       } else {
-                        newProg.push({ topicId: selectedTopic.id, completed: false, quizScore: partialScore, lastAccessed: Date.now() });
+                        newProg.push({ topicId: selectedTopic.id, completed: false, quizScore: partialScore, wrongAnswers, lastAccessed: Date.now() });
                       }
                       localStorage.setItem(getStorageKey(APP_CONFIG.storage.keys.progress), JSON.stringify(newProg));
                       return newProg;
@@ -1012,7 +1015,7 @@ export default function App() {
                   }
                   setView('courseDetail');
                 }}
-                onComplete={(score) => handleQuizComplete(selectedTopic.id, score)}
+                onComplete={(score, wrongAnswers) => handleQuizComplete(selectedTopic.id, score, wrongAnswers)}
                 userDni={userSession?.dni}
               />
             </Suspense>

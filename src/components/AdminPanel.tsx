@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import RichContent from './RichContent';
 import * as XLSX from 'xlsx';
@@ -7,7 +7,7 @@ import {
   Plus, Copy, Search, BookOpen, HelpCircle,
   CheckCircle2, Loader2, Lock, Eye, EyeOff, RefreshCw,
   Wifi, WifiOff, ChevronDown, ChevronUp,
-  FileText, Settings, Video, Link2, MessageSquare, Undo2,
+  FileText, Settings, Video, Link2, MessageSquare, MessageCircle, Undo2,
   Wand2, Filter, FileSpreadsheet, LogOut, Printer, Users, TrendingUp, Award,
   ClipboardCheck, ClipboardList, ExternalLink, Globe, ArrowUpDown, ArrowUp, ArrowDown,
   FileSignature, Mail, Send, X, Menu, PanelLeftClose, GraduationCap, Upload
@@ -19,7 +19,6 @@ import {
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
   clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, deleteUsuario, updateIngresoProgress, updateAppDynamicConfig,
-  fetchAllShortResults,
   fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo, uploadActaArchivo,
   fetchPacProgramas, createPacPrograma, updatePacPrograma, deletePacPrograma, upsertPacPreguntas,
   fetchPacPreguntas, fetchAllPacResultados, deletePacResultado, uploadPacMaterial,
@@ -27,7 +26,7 @@ import {
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
-  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress, ShortEvalWrongAnswer,
+  ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress,
   ActaDocumento, ActaFirma, ActaItem, AppDynamicConfig,
   PacPrograma, PacPregunta, PacResultado,
 } from '../types';
@@ -123,6 +122,67 @@ function drivePreviewUrl(url?: string): string {
   const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   const id = m ? m[1] : '';
   return id ? `https://drive.google.com/file/d/${id}/preview` : url;
+}
+
+/**
+ * Una pregunta fallada, ya normalizada para mostrarse: los cuestionarios de
+ * módulo guardan solo ids y letras (ver QuizWrongAnswer) mientras que las evals
+ * cortas y el PAC guardan el texto completo, así que ambos orígenes se traen a
+ * esta forma antes de renderizar.
+ */
+interface WrongAnswerRow {
+  question: string;
+  selected: string;
+  correct: string;
+  explanation?: string;
+}
+
+/** Alternativas de una pregunta, sea del banco general o de un programa PAC. */
+type OptionBearer = Pick<QuizQuestion, 'optionA' | 'optionB' | 'optionC' | 'optionD'>;
+
+/** Texto legible de una alternativa ('A'..'D'); cae a la sola letra si no hay banco. */
+function optionLabel(q: OptionBearer | undefined, letter: string): string {
+  const clean = String(letter || '').trim().toUpperCase();
+  if (!clean) return 'Sin responder (se agotó el tiempo)';
+  if (!q) return clean;
+  const text = { A: q.optionA, B: q.optionB, C: q.optionC, D: q.optionD }[clean as 'A' | 'B' | 'C' | 'D'];
+  return text ? `${clean}) ${text}` : clean;
+}
+
+/** Código de país por defecto para los celulares de perfil (Perú). */
+const WHATSAPP_COUNTRY_CODE = '51';
+
+/**
+ * Arma el enlace wa.me para escribirle a un usuario. Los perfiles guardan el
+ * celular en 9 dígitos (formato móvil peruano), así que le anteponemos el
+ * código de país; si el número ya vino con código (10+ dígitos) se respeta.
+ * Devuelve null cuando no hay un número utilizable, para poder ocultar el botón.
+ */
+function buildWhatsAppLink(celular: string | undefined, mensaje: string): string | null {
+  const digits = String(celular || '').replace(/\D/g, '');
+  if (digits.length < 9) return null;
+  const numero = digits.length === 9 ? `${WHATSAPP_COUNTRY_CODE}${digits}` : digits;
+  return `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
+}
+
+function WrongAnswersList({ rows }: { rows: WrongAnswerRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-2">
+      {rows.map((w, i) => (
+        <div key={i} className="bg-red-50 border border-red-100 rounded-lg p-2.5">
+          <p className="text-[11px] font-semibold text-[#191c1d] leading-snug mb-1.5">{i + 1}. {w.question}</p>
+          <p className="text-[10px] text-red-600 leading-snug">
+            <span className="font-bold uppercase tracking-wide">Marcó:</span> {w.selected}
+          </p>
+          <p className="text-[10px] text-emerald-700 leading-snug">
+            <span className="font-bold uppercase tracking-wide">Correcta:</span> {w.correct}
+          </p>
+          {w.explanation && <p className="text-[10px] text-[#737781] italic mt-1 leading-snug">{w.explanation}</p>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // Variables disponibles para interpolar en el cuerpo del acta
@@ -403,11 +463,12 @@ export default function AdminPanel({
   const [savingProfile, setSavingProfile] = useState(false);
   const [deletingUser, setDeletingUser] = useState(false);
   const [resettingQuizKey, setResettingQuizKey] = useState<string | null>(null);
-
-  // Resultados de evals cortas (legado): solo se usan hoy en la vista 360° por
-  // usuario dentro de la pestaña Usuarios — el CRUD de evaluaciones cortas en sí
-  // fue reemplazado por el módulo PAC, pero estos datos históricos se conservan.
-  const [shortResults, setShortResults] = useState<Array<{ evaluacionId: string; dni: string; nombres: string; apellidos: string; guardia: string; nota: number; porcentaje: number; fechaHora: string; tema: string; preguntasErroneas: ShortEvalWrongAnswer[] }>>([]);
+  // Detalle de preguntas falladas abierto en cada vista (una sola a la vez).
+  const [openWrongModuleKey, setOpenWrongModuleKey] = useState<string | null>(null);
+  const [openWrongPacKey, setOpenWrongPacKey] = useState<string | null>(null);
+  // Banco de preguntas PAC por programa, traído solo al abrir el detalle de un
+  // intento (los resultados guardan la letra marcada, no el texto de la opción).
+  const [pacPreguntasCache, setPacPreguntasCache] = useState<Record<string, PacPregunta[]>>({});
 
   // ===== PAC - Programa Anual de Capacitaciones =====
   type PacSubTab = 'programacion' | 'resultados' | 'seguimiento' | 'dashboard';
@@ -604,9 +665,8 @@ export default function AdminPanel({
       setAllCertificates(certs);
       setProgressLoading(false);
     }).catch(() => setProgressLoading(false));
-    // Vista 360°: precargar evals cortas y firmas de actas para el detalle por usuario
-    if (shortResults.length === 0) fetchAllShortResults().then(setShortResults).catch(() => {});
-    if (actaFirmas.length === 0) fetchActaFirmas().then(setActaFirmas).catch(() => {});
+    // El detalle por usuario muestra sus intentos PAC y las preguntas que falló
+    if (pacResultados.length === 0) fetchAllPacResultados().then(setPacResultados).catch(() => {});
   }, [activeTab]);
 
   useEffect(() => {
@@ -928,6 +988,19 @@ export default function AdminPanel({
     }
   };
 
+  /** Abre/cierra el detalle de fallos de un intento PAC, cargando su banco si hace falta. */
+  const handleTogglePacWrong = async (key: string, programaId: string) => {
+    const next = openWrongPacKey === key ? null : key;
+    setOpenWrongPacKey(next);
+    if (!next || pacPreguntasCache[programaId]) return;
+    try {
+      const qs = await fetchPacPreguntas(programaId);
+      setPacPreguntasCache(prev => ({ ...prev, [programaId]: qs }));
+    } catch {
+      setPacPreguntasCache(prev => ({ ...prev, [programaId]: [] }));
+    }
+  };
+
   const handleAddPregunta = () => {
     if (!editingPreguntasFor) return;
     setPreguntasDraft(prev => [...prev, createEmptyPregunta(editingPreguntasFor)]);
@@ -1151,10 +1224,13 @@ export default function AdminPanel({
     setResettingQuizKey(key);
     try {
       const currentProgress = parseUserProgress(record.progressJson);
-      const newProgress = currentProgress.map((p: any) => {
-        if (p.topicId !== topic.id) return p;
-        const { quizScore, quizSavedProgress, ...rest } = p;
-        return rest;
+      // Se borran nota, detalle de fallos y el cuestionario a medias; el avance de
+      // las lecciones (completed / currentChunk) se conserva intacto.
+      const newProgress: UserProgress[] = currentProgress.map(p => p.topicId !== topic.id ? p : {
+        topicId: p.topicId,
+        completed: p.completed,
+        currentChunk: p.currentChunk,
+        lastAccessed: p.lastAccessed,
       });
       const quizScores = newProgress.filter(p => p.quizScore !== undefined).map(p => p.quizScore!);
       const avgNotaOutOf20 = quizScores.length > 0 ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : 0;
@@ -3497,12 +3573,22 @@ ${text}`;
                               return sum + (tp?.quizScore ?? 0);
                             }, 0) / userTopics.length
                           : null;
+                        const primerNombre = record.nombres.trim().split(/\s+/)[0] || record.nombres;
+                        const waHref = buildWhatsAppLink(record.celular, `Buen día ${primerNombre}`);
+                        const toggleExpand = () => setProgressExpandedDni(isExpanded ? null : record.dni);
 
                         return (
                           <div key={record.dni} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
-                            <button
-                              onClick={() => setProgressExpandedDni(isExpanded ? null : record.dni)}
-                              className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-[#f8f9fa] transition-all"
+                            {/* Fila cabecera: es un div (no button) porque contiene el enlace de
+                                WhatsApp, y un <a> dentro de un <button> es HTML inválido. */}
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={toggleExpand}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(); }
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-3.5 text-left cursor-pointer hover:bg-[#f8f9fa] transition-all"
                             >
                               {/* Avatar */}
                               <div className="w-9 h-9 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm">
@@ -3513,6 +3599,20 @@ ${text}`;
                                 <p className="font-bold text-[#00366b] text-sm truncate">{record.nombres} {record.apellidos}</p>
                                 <p className="text-[10px] text-[#737781] truncate">{record.dni} · {record.empresa || '—'} · {record.publico || '—'}</p>
                               </div>
+                              {/* WhatsApp */}
+                              {waHref && (
+                                <a
+                                  href={waHref}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title={`Escribir por WhatsApp a ${record.celular}`}
+                                  aria-label={`Escribir por WhatsApp a ${record.nombres} ${record.apellidos}`}
+                                  className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-[#25D366]/10 text-[#128C7E] hover:bg-[#25D366] hover:text-white transition-all"
+                                >
+                                  <MessageCircle className="w-4 h-4" />
+                                </a>
+                              )}
                               {/* Stats */}
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 <div className="text-center hidden sm:block">
@@ -3529,7 +3629,7 @@ ${text}`;
                                 </div>
                                 {isExpanded ? <ChevronUp className="w-4 h-4 text-[#737781]" /> : <ChevronDown className="w-4 h-4 text-[#737781]" />}
                               </div>
-                            </button>
+                            </div>
 
                             {/* Expanded detail */}
                             {isExpanded && (
@@ -3587,55 +3687,88 @@ ${text}`;
                                         const score = tp?.quizScore;
                                         const notStarted = !tp;
                                         const certUrl = allCertificates[record.dni]?.[topic.id];
+                                        // Preguntas falladas del último intento. Solo existen para
+                                        // intentos rendidos después de que se empezó a registrarlas.
+                                        const wrongKey = `${record.dni}:${topic.id}`;
+                                        const wrongRows: WrongAnswerRow[] = (tp?.wrongAnswers || []).map(w => {
+                                          const q = allQuizQuestions.find(qq => qq.idQuiz === w.idQuiz);
+                                          return {
+                                            question: q?.question || `Pregunta ${w.idQuiz}`,
+                                            selected: optionLabel(q, w.selected),
+                                            correct: optionLabel(q, w.correct),
+                                            explanation: q?.explanation,
+                                          };
+                                        });
+                                        const wrongOpen = openWrongModuleKey === wrongKey;
                                         return (
-                                          <div key={topic.id} className="flex items-center gap-2">
-                                            <div className="flex-1 min-w-0">
-                                              <div className="flex items-center justify-between gap-2 mb-1">
-                                                <p className={`text-xs font-semibold truncate ${notStarted ? 'text-[#737781]' : 'text-[#191c1d]'}`}>{topic.title}</p>
-                                                <span className="text-[10px] font-bold text-[#424750] flex-shrink-0">{pct}%</span>
+                                          <div key={topic.id}>
+                                            <div className="flex items-center gap-2">
+                                              <div className="flex-1 min-w-0">
+                                                <div className="flex items-center justify-between gap-2 mb-1">
+                                                  <p className={`text-xs font-semibold truncate ${notStarted ? 'text-[#737781]' : 'text-[#191c1d]'}`}>{topic.title}</p>
+                                                  <span className="text-[10px] font-bold text-[#424750] flex-shrink-0">{pct}%</span>
+                                                </div>
+                                                <div className="h-1.5 bg-[#e1e3e4] rounded-full overflow-hidden">
+                                                  <div
+                                                    className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'bg-[#1b4d89]'}`}
+                                                    style={{ width: `${pct}%` }}
+                                                  />
+                                                </div>
                                               </div>
-                                              <div className="h-1.5 bg-[#e1e3e4] rounded-full overflow-hidden">
-                                                <div
-                                                  className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'bg-[#1b4d89]'}`}
-                                                  style={{ width: `${pct}%` }}
-                                                />
-                                              </div>
-                                            </div>
-                                            {score !== undefined ? (
-                                              <>
-                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 ${score >= 14 ? 'bg-emerald-100 text-emerald-700' : score >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
-                                                  {score.toFixed(1)}/20
+                                              {score !== undefined ? (
+                                                <>
+                                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 ${score >= 14 ? 'bg-emerald-100 text-emerald-700' : score >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
+                                                    {score.toFixed(1)}/20
+                                                  </span>
+                                                  {wrongRows.length > 0 ? (
+                                                    <button
+                                                      onClick={() => setOpenWrongModuleKey(wrongOpen ? null : wrongKey)}
+                                                      title="Ver las preguntas que falló"
+                                                      className={`flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold transition-colors ${wrongOpen ? 'bg-red-500 text-white' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
+                                                    >
+                                                      <HelpCircle className="w-3 h-3" />
+                                                      {wrongRows.length} {wrongRows.length === 1 ? 'fallo' : 'fallos'}
+                                                    </button>
+                                                  ) : score < 20 ? (
+                                                    <span
+                                                      title="Este intento se rindió antes de que la app registrara el detalle de respuestas. El próximo intento sí lo mostrará."
+                                                      className="flex-shrink-0 px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-slate-100 text-slate-400"
+                                                    >
+                                                      sin detalle
+                                                    </span>
+                                                  ) : null}
+                                                  <button
+                                                    onClick={() => handleResetQuiz(record, topic)}
+                                                    disabled={resettingQuizKey === `${record.dni}:${topic.id}`}
+                                                    title="Reiniciar cuestionario desde 0"
+                                                    className="flex-shrink-0 p-1 rounded-md bg-red-50 text-red-500 hover:bg-red-100 transition-colors disabled:opacity-50"
+                                                  >
+                                                    {resettingQuizKey === `${record.dni}:${topic.id}`
+                                                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                      : <RefreshCw className="w-3 h-3" />}
+                                                  </button>
+                                                </>
+                                              ) : notStarted ? (
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 bg-slate-100 text-slate-400">
+                                                  0.0/20
                                                 </span>
-                                                <button
-                                                  onClick={() => handleResetQuiz(record, topic)}
-                                                  disabled={resettingQuizKey === `${record.dni}:${topic.id}`}
-                                                  title="Reiniciar cuestionario desde 0"
-                                                  className="flex-shrink-0 p-1 rounded-md bg-red-50 text-red-500 hover:bg-red-100 transition-colors disabled:opacity-50"
+                                              ) : tp?.completed ? (
+                                                <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                                              ) : null}
+                                              {certUrl && (
+                                                <a
+                                                  href={certUrl}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  title="Ver certificado"
+                                                  className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#1b4d89]/10 text-[#1b4d89] hover:bg-[#1b4d89]/20 transition-colors"
                                                 >
-                                                  {resettingQuizKey === `${record.dni}:${topic.id}`
-                                                    ? <Loader2 className="w-3 h-3 animate-spin" />
-                                                    : <RefreshCw className="w-3 h-3" />}
-                                                </button>
-                                              </>
-                                            ) : notStarted ? (
-                                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 bg-slate-100 text-slate-400">
-                                                0.0/20
-                                              </span>
-                                            ) : tp?.completed ? (
-                                              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                                            ) : null}
-                                            {certUrl && (
-                                              <a
-                                                href={certUrl}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                title="Ver certificado"
-                                                className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#1b4d89]/10 text-[#1b4d89] hover:bg-[#1b4d89]/20 transition-colors"
-                                              >
-                                                <Award className="w-3 h-3" />
-                                                <span className="text-[9px] font-bold">Cert.</span>
-                                              </a>
-                                            )}
+                                                  <Award className="w-3 h-3" />
+                                                  <span className="text-[9px] font-bold">Cert.</span>
+                                                </a>
+                                              )}
+                                            </div>
+                                            {wrongOpen && <WrongAnswersList rows={wrongRows} />}
                                           </div>
                                         );
                                       })}
@@ -3643,57 +3776,67 @@ ${text}`;
                                   )}
                                 </div>
 
-                                {/* Vista 360°: evaluaciones cortas, certificados y actas */}
+                                {/* Evaluaciones PAC del trabajador, con el detalle de lo que falló */}
                                 {(() => {
-                                  const userEvals = shortResults.filter(r => String(r.dni).trim() === String(record.dni).trim());
-                                  const userFirmas = actaFirmas.filter(f => String(f.dni).trim() === String(record.dni).trim());
-                                  const userCerts = allCertificates[record.dni] ? Object.entries(allCertificates[record.dni]) : [];
+                                  // Más reciente primero. fechaHora es "dd/MM/yyyy - (HH:mm:ss)",
+                                  // así que hay que parsearla: comparar el texto ordenaría por día.
+                                  const userPac = pacResultados
+                                    .filter(r => String(r.dni).trim() === String(record.dni).trim())
+                                    .sort((a, b) =>
+                                      (parseInicio(b.fechaHora)?.getTime() ?? 0) - (parseInicio(a.fechaHora)?.getTime() ?? 0)
+                                      || b.intento - a.intento
+                                    );
                                   return (
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                      {/* Evals cortas */}
-                                      <div className="bg-white rounded-lg border border-[#e1e3e4] p-3">
-                                        <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Evals cortas ({userEvals.length})</p>
-                                        {userEvals.length === 0 ? <p className="text-[10px] text-[#a0a4ab] italic">Sin registros</p> : (
-                                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                            {userEvals.map((e, i) => (
-                                              <div key={i} className="flex items-center justify-between gap-2">
-                                                <span className="text-[10px] text-[#424750] truncate" title={e.tema}>{e.tema || 'Eval'}</span>
-                                                <span className={`text-[10px] font-bold flex-shrink-0 ${e.nota >= 16 ? 'text-emerald-600' : e.nota >= 12 ? 'text-amber-600' : 'text-red-500'}`}>{e.nota.toFixed(1)}</span>
+                                    <div className="bg-white rounded-lg border border-[#e1e3e4] p-3">
+                                      <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2 flex items-center gap-1">
+                                        <ClipboardCheck className="w-3 h-3" /> PAC — respuestas erróneas ({userPac.length} {userPac.length === 1 ? 'intento' : 'intentos'})
+                                      </p>
+                                      {userPac.length === 0 ? (
+                                        <p className="text-[10px] text-[#a0a4ab] italic">Sin evaluaciones PAC rendidas</p>
+                                      ) : (
+                                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                                          {userPac.map(r => {
+                                            const pacKey = `ficha:${r.programaId}__${r.dni}__${r.intento}`;
+                                            const pacOpen = openWrongPacKey === pacKey;
+                                            const wrong = r.preguntasErroneas || [];
+                                            return (
+                                              <div key={pacKey} className="border-b border-[#f3f4f5] last:border-b-0 pb-2 last:pb-0">
+                                                <button
+                                                  onClick={() => wrong.length > 0 && handleTogglePacWrong(pacKey, r.programaId)}
+                                                  title={wrong.length > 0 ? 'Ver las preguntas que falló' : 'No falló ninguna pregunta'}
+                                                  className={`w-full flex items-center justify-between gap-2 text-left rounded px-1 -mx-1 py-0.5 ${wrong.length > 0 ? 'hover:bg-[#f8f9fa] cursor-pointer' : 'cursor-default'}`}
+                                                >
+                                                  <span className="min-w-0">
+                                                    <span className="block text-[11px] font-semibold text-[#424750] truncate" title={r.programaNombre}>{r.programaNombre}</span>
+                                                    <span className="block text-[9px] text-[#a0a4ab]">Intento {r.intento} · {r.fechaHora}</span>
+                                                  </span>
+                                                  <span className="flex items-center gap-1.5 flex-shrink-0">
+                                                    {wrong.length > 0 ? (
+                                                      <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${pacOpen ? 'bg-red-500 text-white' : 'bg-red-50 text-red-600'}`}>
+                                                        {wrong.length} {wrong.length === 1 ? 'fallo' : 'fallos'}
+                                                      </span>
+                                                    ) : (
+                                                      <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-600">sin fallos</span>
+                                                    )}
+                                                    <span className={`text-[10px] font-bold ${r.aprobado ? 'text-emerald-600' : 'text-red-500'}`}>{r.nota.toFixed(1)}/20</span>
+                                                  </span>
+                                                </button>
+                                                {pacOpen && (
+                                                  <WrongAnswersList rows={wrong.map(w => {
+                                                    const q = (pacPreguntasCache[r.programaId] || []).find(pq => pq.idPregunta === w.idQuiz);
+                                                    return {
+                                                      question: w.question || q?.pregunta || `Pregunta ${w.idQuiz}`,
+                                                      selected: optionLabel(q, w.selected),
+                                                      correct: optionLabel(q, w.correct),
+                                                      explanation: w.explanation || q?.explanation,
+                                                    };
+                                                  })} />
+                                                )}
                                               </div>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                      {/* Certificados */}
-                                      <div className="bg-white rounded-lg border border-[#e1e3e4] p-3">
-                                        <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2 flex items-center gap-1"><Award className="w-3 h-3" /> Certificados ({userCerts.length})</p>
-                                        {userCerts.length === 0 ? <p className="text-[10px] text-[#a0a4ab] italic">Sin certificados</p> : (
-                                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                            {userCerts.map(([tid, url]) => {
-                                              const t = topics.find(tp => tp.id === tid);
-                                              return (
-                                                <a key={tid} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] text-[#1b4d89] hover:underline truncate">
-                                                  <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" /> <span className="truncate">{t?.title || tid}</span>
-                                                </a>
-                                              );
-                                            })}
-                                          </div>
-                                        )}
-                                      </div>
-                                      {/* Actas firmadas */}
-                                      <div className="bg-white rounded-lg border border-[#e1e3e4] p-3">
-                                        <p className="text-[9px] font-bold text-[#737781] uppercase tracking-wider mb-2 flex items-center gap-1"><FileSignature className="w-3 h-3" /> Actas firmadas ({userFirmas.length})</p>
-                                        {userFirmas.length === 0 ? <p className="text-[10px] text-[#a0a4ab] italic">Sin actas</p> : (
-                                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                            {userFirmas.map((f, i) => (
-                                              <div key={i} className="flex items-center justify-between gap-2">
-                                                <span className="text-[10px] text-[#424750] truncate" title={f.documentoTitulo}>{f.documentoTitulo}</span>
-                                                {f.actaPdfUrl && <a href={f.actaPdfUrl} target="_blank" rel="noopener noreferrer" className="text-[#1b4d89] flex-shrink-0" title="Ver acta"><ExternalLink className="w-3 h-3" /></a>}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
                                     </div>
                                   );
                                 })()}
@@ -3982,14 +4125,28 @@ ${text}`;
                               {pageResults.map(r => {
                                 const key = `${r.programaId}__${r.dni}__${r.intento}`;
                                 const isDeleting = deletingPacResultado === key;
+                                const wrong = r.preguntasErroneas || [];
+                                const wrongOpen = openWrongPacKey === key;
                                 return (
-                                  <tr key={key}>
+                                  <Fragment key={key}>
+                                  <tr>
                                     <td className="py-1.5 pr-3 font-mono text-[#737781]">{r.dni}</td>
                                     <td className="py-1.5 pr-3 font-semibold text-[#424750]">{r.apellidos} {r.nombres}</td>
                                     <td className="py-1.5 pr-3 text-[#737781] truncate max-w-[140px]">{r.programaNombre}</td>
                                     <td className="py-1.5 pr-3 text-center font-bold text-[#424750]">{r.guardia || '—'}</td>
                                     <td className="py-1.5 pr-3 text-center text-[#737781]">{r.intento}</td>
-                                    <td className={`py-1.5 pr-3 text-center font-bold ${r.aprobado ? 'text-emerald-600' : 'text-red-500'}`}>{r.nota.toFixed(1)}/20</td>
+                                    <td className={`py-1.5 pr-3 text-center font-bold ${r.aprobado ? 'text-emerald-600' : 'text-red-500'}`}>
+                                      <span className="inline-flex items-center gap-1.5">
+                                        {r.nota.toFixed(1)}/20
+                                        {wrong.length > 0 && (
+                                          <button onClick={() => handleTogglePacWrong(key, r.programaId)}
+                                            title="Ver las preguntas que falló"
+                                            className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${wrongOpen ? 'bg-red-500 text-white' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}>
+                                            {wrong.length} {wrong.length === 1 ? 'fallo' : 'fallos'}
+                                          </button>
+                                        )}
+                                      </span>
+                                    </td>
                                     <td className="py-1.5 pl-3 text-[#737781] whitespace-nowrap">{r.fechaHora}</td>
                                     <td className="py-1.5 pl-2 text-center">
                                       <button onClick={() => handleDeletePacResultadoRow(r.programaId, r.dni, r.intento)} disabled={isDeleting}
@@ -3998,6 +4155,22 @@ ${text}`;
                                       </button>
                                     </td>
                                   </tr>
+                                  {wrongOpen && (
+                                    <tr>
+                                      <td colSpan={8} className="pb-3 px-3">
+                                        <WrongAnswersList rows={wrong.map(w => {
+                                          const q = (pacPreguntasCache[r.programaId] || []).find(pq => pq.idPregunta === w.idQuiz);
+                                          return {
+                                            question: w.question || q?.pregunta || `Pregunta ${w.idQuiz}`,
+                                            selected: optionLabel(q, w.selected),
+                                            correct: optionLabel(q, w.correct),
+                                            explanation: w.explanation || q?.explanation,
+                                          };
+                                        })} />
+                                      </td>
+                                    </tr>
+                                  )}
+                                  </Fragment>
                                 );
                               })}
                             </tbody>
