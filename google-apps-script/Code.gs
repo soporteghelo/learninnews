@@ -239,6 +239,8 @@ function doPost(e) {
       return getShortResultadosByEvaluacion(ss, data);
     } else if (data.action === 'updateUserProfile') {
       return updateUserProfile(ss, data);
+    } else if (data.action === 'updateUserSelfie') {
+      return updateUserSelfie(ss, data);
     } else if (data.action === 'deleteUsuario') {
       return deleteUsuario(ss, data);
     } else if (data.action === 'updateConfig') {
@@ -612,7 +614,56 @@ function getIngresoByDni(ss, data) {
   var dniColName = headers.indexOf('DNI') !== -1 ? 'DNI' : 'Id';
   var matches = findRowsByColumnValue_(sheet, dniColName, dni);
   if (matches.length === 0) return createResponse({ status: 'ok', record: null });
-  return createResponse({ status: 'ok', record: rowToObject_(matches[0].headers, matches[0].values) });
+  var record = rowToObject_(matches[0].headers, matches[0].values);
+
+  // Backfill de CONSENTIMIENTO_OK para quienes ya autorizaron su firma digital
+  // antes de que existiera esta columna: una vez marcado, sirve para que el
+  // admin pueda borrar/reemplazar la foto después (updateUserSelfie) sin que
+  // el login vuelva a exigirle la autorización — ver handleLogin en App.tsx.
+  if (String(record.CONSENTIMIENTO_OK || '').trim() !== 'true' && record.FOTOGRAFIA && record.SELFIE) {
+    var consentCol = getOrCreateColumn(sheet, 'CONSENTIMIENTO_OK');
+    sheet.getRange(matches[0].row, consentCol + 1).setValue('true');
+    record.CONSENTIMIENTO_OK = 'true';
+  }
+
+  return createResponse({ status: 'ok', record: record });
+}
+
+/**
+ * Permite al admin reemplazar o borrar la selfie de un usuario sin afectar
+ * CONSENTIMIENTO_OK: una vez que el trabajador autorizó su firma digital una
+ * vez, eso queda registrado para siempre — limpiar/reemplazar la foto después
+ * no debe mandarlo de nuevo a la pantalla de autorización en su próximo login.
+ */
+function updateUserSelfie(ss, data) {
+  var dni = String(data.dni || '').trim();
+  if (!dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+
+  var sheet = ss.getSheetByName(INGRESOS_SHEET_NAME);
+  if (!sheet) return createResponse({ status: 'error', message: 'Hoja INGRESOS no encontrada' });
+
+  var matches = findRowsByColumnValue_(sheet, 'DNI', dni);
+  if (matches.length === 0) return createResponse({ status: 'error', message: 'No se encontró ningún usuario con el DNI ' + dni });
+  var rowIndex = matches[0].row;
+  var selfieCol = getOrCreateColumn(sheet, 'SELFIE');
+
+  if (data.clear) {
+    sheet.getRange(rowIndex, selfieCol + 1).setValue('');
+    SpreadsheetApp.flush();
+    return createResponse({ status: 'ok', message: 'Foto eliminada', url: '' });
+  }
+
+  if (!data.selfieBase64) return createResponse({ status: 'error', message: 'Foto requerida' });
+  var raw = data.selfieBase64.indexOf(',') !== -1 ? data.selfieBase64.split(',')[1] : data.selfieBase64;
+  var blob = Utilities.newBlob(Utilities.base64Decode(raw), 'image/jpeg', dni + '_SELFIE_ADMIN_' + Date.now() + '.jpg');
+  var folder = getOrCreateSubFolder(getUsuariosFolder_(), dni);
+  var file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  var url = file.getUrl();
+
+  sheet.getRange(rowIndex, selfieCol + 1).setValue(url);
+  SpreadsheetApp.flush();
+  return createResponse({ status: 'ok', message: 'Foto actualizada', url: url });
 }
 
 /** Los certificados (todas las columnas TopicId/LinkCertificado) de un DNI, sin bajar los de todos. */
@@ -1775,11 +1826,16 @@ function saveOnboardingConsent(ss, data) {
     var fotoCol = getOrCreateColumn(sheet, 'FOTOGRAFIA');
     var selfieCol = getOrCreateColumn(sheet, 'SELFIE');
     var certUsoCol = getOrCreateColumn(sheet, 'CERTIFICADO_USO');
+    var consentCol = getOrCreateColumn(sheet, 'CONSENTIMIENTO_OK');
     for (var i = 1; i < ingData.length; i++) {
       if (String(ingData[i][dniCol] || '').trim() === dni) {
         if (firmaUrl) sheet.getRange(i + 1, fotoCol + 1).setValue(firmaUrl);
         if (selfieUrl) sheet.getRange(i + 1, selfieCol + 1).setValue(selfieUrl);
         if (pdfUrl) sheet.getRange(i + 1, certUsoCol + 1).setValue(pdfUrl);
+        // Marca de que este trabajador YA autorizó su firma digital — sirve
+        // para que el admin pueda borrar/reemplazar la foto después sin que
+        // se le vuelva a pedir esta autorización en su próximo login.
+        if (firmaUrl && selfieUrl) sheet.getRange(i + 1, consentCol + 1).setValue('true');
         break;
       }
     }
@@ -2086,7 +2142,7 @@ function getSheetDefinitions() {
     'LEARN': ['Id', 'Titulo', 'Publico', 'Detalles', 'Resumen', 'PuntosClave', 'Orden', 'Activo'],
     'DATA': ['Cod', 'IdMain', 'Tema', 'Contenido', 'Video_1', 'Video_2', 'Video_3', 'ComentarioVideo', 'PDF', 'Contexto', 'Orden'],
     'QUIZ': ['IdQuiz', 'IdMain', 'Pregunta', 'OpcionA', 'OpcionB', 'OpcionC', 'OpcionD', 'RespuestaCorrecta', 'Explicacion', 'Dificultad', 'Categoria_contenido'],
-    'INGRESOS': ['Id', 'Apellidos', 'Nombres', 'DNI', 'Inicio', 'Avance', 'Publico', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON', 'CertificadoUrl', 'EMPRESA', 'AREA', 'CARGO', 'FOTOGRAFIA', 'SELFIE', 'CERTIFICADO_USO', 'FECHA_INGRESO', 'FECHA_NACIMIENTO', 'CORREO', 'CELULAR', 'NUMERO_CONTACTO_1', 'PARENTESCO_CONTACTO_1', 'NUMERO_CONTACTO_2', 'PARENTESCO_CONTACTO_2'],
+    'INGRESOS': ['Id', 'Apellidos', 'Nombres', 'DNI', 'Inicio', 'Avance', 'Publico', 'Nota', 'UltimoAcceso', 'Dispositivo', 'ModulosCompletados', 'IntentosQuiz', 'TiempoTotal', 'ProgressJSON', 'CertificadoUrl', 'EMPRESA', 'AREA', 'CARGO', 'FOTOGRAFIA', 'SELFIE', 'CERTIFICADO_USO', 'FECHA_INGRESO', 'FECHA_NACIMIENTO', 'CORREO', 'CELULAR', 'NUMERO_CONTACTO_1', 'PARENTESCO_CONTACTO_1', 'NUMERO_CONTACTO_2', 'PARENTESCO_CONTACTO_2', 'CONSENTIMIENTO_OK'],
     'CONFIG': ['Titulo', 'Mensaje', 'Contacto', 'PassAdmin', 'Estatus', 'LogoCertificado', 'FirmaRepresentante', 'NombreRepresentante', 'CargoRepresentante', 'Lugar', 'Contratista', 'Tutorial', 'Actas', 'RUC', 'ActividadEconomica', 'Domicilio'],
     'CERTIFICADOS': ['Id', 'DNI', 'APELLIDOS', 'NOMBRES', 'CARGO', 'NOTA', 'CELULAR', 'FOTO', 'TITULO_CERTIFICADO', 'LinkCertificado', 'Fecha', 'FIRMA', 'TopicId'],
     'SHORT_EVALUACIONES': SHORT_EVALS_HEADERS,

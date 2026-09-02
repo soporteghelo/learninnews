@@ -840,6 +840,10 @@ export interface IngresoRecord {
   // Autorización de firma digital (onboarding)
   fotografiaUrl?: string;  // firma dibujada — columna FOTOGRAFIA
   selfieUrl?: string;      // selfie de verificación — columna SELFIE
+  // 'true' una vez que el trabajador autorizó su firma digital, para siempre —
+  // a diferencia de fotografiaUrl/selfieUrl, el admin puede borrar o reemplazar
+  // la foto después (updateUserSelfie) sin que esto se resetee.
+  consentimientoOk?: string;
 }
 
 /**
@@ -925,6 +929,7 @@ function mapIngresoRow(row: any): IngresoRecord {
     contacto2Parentesco: row.PARENTESCO_CONTACTO_2 || '',
     fotografiaUrl: row.FOTOGRAFIA || '',
     selfieUrl: row.SELFIE || '',
+    consentimientoOk: row.CONSENTIMIENTO_OK || '',
   };
 }
 
@@ -1138,6 +1143,22 @@ export async function updateUserProfile(data: {
       message: result.message || 'Perfil actualizado correctamente',
       dni: result.dni,
     };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
+  }
+}
+
+/**
+ * Reemplaza (selfieBase64) o borra (clear:true) la selfie de un usuario. No
+ * afecta el consentimiento ya registrado — ver `CONSENTIMIENTO_OK` en
+ * Code.gs: una vez autorizada la firma digital, borrar/reemplazar la foto
+ * después no hace que el próximo login le vuelva a pedir esa autorización.
+ */
+export async function updateUserSelfie(data: { dni: string; selfieBase64?: string; clear?: boolean }): Promise<{ success: boolean; message?: string; url?: string }> {
+  try {
+    const result = await postToAppsScript({ action: 'updateUserSelfie', ...data }) as any;
+    if (result.status === 'ok') clearSheetCache('ingresos');
+    return { success: result.status === 'ok', message: result.message, url: result.url };
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Error desconocido' };
   }

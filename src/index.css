@@ -631,6 +631,16 @@ html.light-mode .text-slate-300 { color: #475569 !important; }
 html.light-mode .text-slate-400 { color: #64748b !important; }
 html.light-mode .text-slate-500 { color: #94a3b8 !important; }
 
+/* El overlay de video/PDF es negro en ambos temas, así que invertir sus textos
+   claros los volvía ilegibles (el botón SALIR y su ícono quedaban casi negros
+   sobre el fondo oscuro). Aquí se restauran los valores del tema oscuro. */
+html.light-mode .media-overlay .text-white { color: #ffffff !important; }
+html.light-mode .media-overlay .text-slate-100 { color: #f1f5f9 !important; }
+html.light-mode .media-overlay .text-slate-200 { color: #e2e8f0 !important; }
+html.light-mode .media-overlay .text-slate-300 { color: #cbd5e1 !important; }
+html.light-mode .media-overlay .text-slate-400 { color: #94a3b8 !important; }
+html.light-mode .media-overlay .text-slate-500 { color: #64748b !important; }
+
 /* Backgrounds */
 html.light-mode .bg-slate-950 { background-color: #f1f5f9 !important; }
 html.light-mode .bg-slate-900 { background-color: #e2e8f0 !important; }
@@ -719,6 +729,35 @@ html.light-mode .quiz-category-badge {
   background: #0f172a;
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* ============================================ */
+/* RECORRIDO GUIADO (visita del primer ingreso) */
+/* ============================================ */
+
+/* La tarjeta del recorrido flota sobre un fondo oscurecido en ambos temas, así
+   que mantiene su superficie oscura y sus textos claros también en modo claro
+   (mismo criterio que .media-overlay). */
+.tour-card {
+  background: rgba(15, 23, 42, 0.97);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+html.light-mode .tour-card .text-white { color: #ffffff !important; }
+html.light-mode .tour-card .text-slate-100 { color: #f1f5f9 !important; }
+html.light-mode .tour-card .text-slate-200 { color: #e2e8f0 !important; }
+html.light-mode .tour-card .text-slate-300 { color: #cbd5e1 !important; }
+html.light-mode .tour-card .text-slate-400 { color: #94a3b8 !important; }
+html.light-mode .tour-card .text-slate-500 { color: #64748b !important; }
+html.light-mode .tour-card .bg-slate-900 { background-color: #0f172a !important; }
+html.light-mode .tour-card .bg-slate-800 { background-color: #1e293b !important; }
+html.light-mode .tour-card .bg-white\/5 { background-color: rgba(255, 255, 255, 0.05) !important; }
+html.light-mode .tour-card .bg-white\/10 { background-color: rgba(255, 255, 255, 0.1) !important; }
+html.light-mode .tour-card .border-white\/10,
+html.light-mode .tour-card .border-white\/5 {
+  border-color: rgba(255, 255, 255, 0.1) !important;
 }
 
 /* ============================================ */

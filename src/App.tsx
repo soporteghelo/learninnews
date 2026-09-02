@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Suspense, lazy } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Sun, Moon, Settings, X, AlertCircle, LogOut, Loader2, ExternalLink } from 'lucide-react';
 import {
@@ -19,6 +19,8 @@ import {
 } from './services/sheetsService';
 import { getStorageKey, APP_CONFIG } from './config/app.config';
 import { getAssignedDocs, getGeneralActaDocuments, isGeneralRowSigned } from './lib/actaAssignment';
+import { buildUserTourSteps } from './lib/tourSteps';
+import { markTourDone, shouldShowTour } from './lib/tourStorage';
 import type {
   LearnTopic,
   DataChunk,
@@ -39,6 +41,8 @@ import ProfileForm from './components/ProfileForm';
 import type { ProfileFormData } from './components/ProfileForm';
 import Onboarding from './components/Onboarding';
 import Dashboard from './components/Dashboard';
+import GuidedTour from './components/GuidedTour';
+import type { TourStage } from './components/GuidedTour';
 import CourseDetail from './components/CourseDetail';
 import DriveVideoPlayer from './components/DriveVideoPlayer';
 import InstallAppButton from './components/InstallAppButton';
@@ -166,6 +170,8 @@ export default function App() {
   });
   const [mediaOverlay, setMediaOverlay] = useState<{ url: string; type: 'video' | 'pdf' } | null>(null);
   const [globalKnownUsers, setGlobalKnownUsers] = useState<Record<string, { apellidos: string, nombres: string }>>({});
+  // Recorrido guiado del trabajador recién registrado (nunca para el admin)
+  const [showTour, setShowTour] = useState(false);
   const [actaDocumentos, setActaDocumentos] = useState<ActaDocumento[]>([]);
   const [actaFirmas, setActaFirmas] = useState<ActaFirma[]>([]);
 
@@ -409,6 +415,70 @@ export default function App() {
     return () => clearInterval(id);
   }, [userSession?.dni]);
 
+  // ---- Recorrido guiado ----
+  // Se abre la primera vez que el trabajador llega al dashboard en este navegador
+  // (tras registrarse, y también si más adelante entra desde otro celular, otra PC
+  // u otro navegador: el "ya lo vi" se guarda en cada equipo). `shouldShowTour`
+  // descarta las sesiones de administrador. El retraso deja terminar las animaciones
+  // de entrada del dashboard, para medir los elementos en su posición final.
+
+  /** Primer curso del trabajador: el que abre el recorrido para mostrar la ficha
+   *  y la lección por dentro. Mismo criterio que Dashboard (activo, de su perfil). */
+  const tourTopic = useMemo(() => {
+    const auds = (audience || []).map(a => a.toLowerCase());
+    if (auds.length === 0) return null;
+    return topics
+      .filter(t => t.active !== false)
+      .filter(t => {
+        const topicAuds = t.audience.split(',').map(a => a.trim().toLowerCase());
+        return auds.some(ua => topicAuds.includes(ua));
+      })
+      .sort((a, b) => (a.order || 999) - (b.order || 999))[0] ?? null;
+  }, [topics, audience]);
+
+  const tourSteps = useMemo(() => {
+    const asignados = userSession ? getAssignedDocs(actaDocumentos, userSession) : [];
+    const generales = userSession ? getGeneralActaDocuments(asignados, userSession) : [];
+    const pendientes = userSession
+      ? generales.filter(d => !isGeneralRowSigned(actaFirmas, userSession.dni, d.id)).length
+      : 0;
+    return buildUserTourSteps({
+      nombres: userSession?.nombres,
+      tieneTutorial: !!appConfig?.tutorialUrl,
+      tieneCursos: !!tourTopic,
+      tieneQuiz: !!tourTopic && quizQuestions.some(q => q.idMain === tourTopic.id),
+      tieneActas: appConfig?.actasHabilitado !== false && asignados.length > 0,
+      tieneActasPendientes: pendientes > 0,
+    });
+  }, [userSession, actaDocumentos, actaFirmas, appConfig, tourTopic, quizQuestions]);
+
+  const tourShownRef = useRef(false);
+
+  useEffect(() => {
+    if (view !== 'dashboard' || isLoading || !userSession?.dni) return;
+    if (tourShownRef.current || !shouldShowTour(userSession.dni)) return;
+    const id = setTimeout(() => {
+      tourShownRef.current = true;
+      setShowTour(true);
+    }, 700);
+    return () => clearTimeout(id);
+  }, [view, isLoading, userSession?.dni]);
+
+  /** El recorrido pide abrir un módulo: se navega igual que lo haría el trabajador. */
+  const handleTourStage = useCallback((stage: TourStage) => {
+    if (stage === 'dashboard') { setView('dashboard'); return; }
+    if (stage === 'actas') { setView('actas'); return; }
+    if (!tourTopic) { setView('dashboard'); return; }
+    setSelectedTopic(tourTopic);
+    setView(stage === 'learning' ? 'learning' : 'courseDetail');
+  }, [tourTopic]);
+
+  const handleTourClose = useCallback(() => {
+    setShowTour(false);
+    if (userSession?.dni) markTourDone(userSession.dni);
+    setView('dashboard');
+  }, [userSession?.dni]);
+
   // --- Handlers ---
   const handleLogin = async (dni: string, apellidos: string, nombres: string) => {
     setIsRegistering(true);
@@ -483,9 +553,18 @@ export default function App() {
         // If profile is complete but the digital-signature authorization is still
         // missing (new column, or user dropped off mid-flow), require it before
         // letting them into the rest of the app.
+        // El consentimiento, una vez dado, es para siempre: si el admin borra o
+        // reemplaza la foto después (panel de Usuarios), CONSENTIMIENTO_OK sigue
+        // en 'true' y no se le vuelve a pedir. Para cuentas de antes de que
+        // existiera esa columna, se cae al chequeo antiguo (¿tiene firma+selfie
+        // ahora mismo?) — el backend además la va marcando sola en el primer
+        // login de cada quien (ver Code.gs:getIngresoByDni).
+        const yaConsintio = existingRecord.consentimientoOk
+          ? existingRecord.consentimientoOk === 'true'
+          : !!(existingRecord.fotografiaUrl && existingRecord.selfieUrl);
         if (!existingRecord.area) {
           setView('profileForm');
-        } else if (!existingRecord.fotografiaUrl || !existingRecord.selfieUrl) {
+        } else if (!yaConsintio) {
           setView('consent');
         } else if (restoredAudience.length > 0) {
           setAudience(restoredAudience);
@@ -823,7 +902,7 @@ export default function App() {
     <div className={`min-h-screen text-slate-200 selection:bg-blue-500/30 selection:text-blue-200 ${darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
       {/* Top-right floating buttons — hidden in views that have their own header */}
       {view !== 'admin' && view !== 'learning' && view !== 'quiz' && view !== 'certificateClaim' && view !== 'actas' && view !== 'consent' && (
-        <div className="fixed top-4 right-4 z-[200] flex items-center gap-2">
+        <div data-tour="controles" className="fixed top-4 right-4 z-[200] flex items-center gap-2">
           <InstallAppButton darkMode={darkMode} />
           {userSession && (view === 'dashboard' || view === 'courseDetail') && (
             <button
@@ -986,7 +1065,12 @@ export default function App() {
                 initialChunkIndex={progress.find(p => p.topicId === selectedTopic.id)?.currentChunk || 0}
                 onBack={() => setView('courseDetail')}
                 onFinish={() => handleFinishModule(selectedTopic.id)}
-                onSaveProgress={(idx) => handleSaveProgress(selectedTopic.id, idx)}
+                onSaveProgress={(idx) => {
+                  // Durante el recorrido guiado la lección solo se muestra: no debe
+                  // registrar avance de un curso que el trabajador aún no empezó.
+                  if (showTour) return;
+                  handleSaveProgress(selectedTopic.id, idx);
+                }}
                 onOpenMedia={(url, type) => setMediaOverlay({ url, type })}
               />
             </Suspense>
@@ -1040,6 +1124,11 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Recorrido guiado — visita interactiva por los módulos del trabajador */}
+      {showTour && userSession && ['dashboard', 'courseDetail', 'learning', 'actas'].includes(view) && (
+        <GuidedTour steps={tourSteps} onStage={handleTourStage} onClose={handleTourClose} />
+      )}
+
       {/* Media Overlay — Dramatic 'Lights Out' Effect */}
       <AnimatePresence>
         {mediaOverlay && (() => {
@@ -1061,7 +1150,7 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.4, ease: "easeInOut" }}
-              className="fixed inset-0 bg-black"
+              className="media-overlay fixed inset-0 bg-black"
               style={{ zIndex: 99999 }}
             >
               {/* video: <video> nativo (vía /api/drive-video) en vez del iframe /preview de

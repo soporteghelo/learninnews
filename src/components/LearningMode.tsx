@@ -191,7 +191,11 @@ export default function LearningMode({
       <div className="flex-1 flex flex-col relative h-full overflow-hidden">
         {/* Header - Mobile Only */}
         <header className="lg:hidden flex-shrink-0 px-4 py-3 glass flex items-center justify-between z-30">
-          <button onClick={onBack} className="p-2 -ml-2 text-slate-400">
+          <button
+            onClick={onBack}
+            aria-label="Volver"
+            className="flex-shrink-0 w-10 h-10 rounded-full glass border border-white/10 shadow-md flex items-center justify-center text-slate-300 hover:bg-white/10 active:scale-95 transition-all"
+          >
             <ChevronLeft className="w-6 h-6" />
           </button>
           <div className="text-center flex-1 min-w-0">
@@ -396,7 +400,7 @@ export default function LearningMode({
         </main>
 
 
-        <footer className="flex-shrink-0 px-6 pt-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] glass border-t border-white/5 flex gap-4 z-20">
+        <footer data-tour="leccion-nav" className="flex-shrink-0 px-6 pt-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] glass border-t border-white/5 flex gap-4 z-20">
           <button
             onClick={prevSlide}
             disabled={currentIndex === 0}

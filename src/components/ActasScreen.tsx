@@ -156,6 +156,7 @@ export default function ActasScreen({ userSession, appConfig, documentos, firmas
                 </div>
                 {pendingDocs.length > 0 && (
                   <button onClick={() => setSigning(true)}
+                    data-tour="actas-firmar"
                     className="text-[10px] font-black text-white uppercase tracking-widest bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition-all flex-shrink-0">
                     Firmar
                   </button>
@@ -163,7 +164,7 @@ export default function ActasScreen({ userSession, appConfig, documentos, firmas
               </div>
 
               {/* Lista de documentos: pendientes primero, firmados después, cada grupo separado */}
-              <div className="max-h-[52vh] overflow-y-auto pr-1">
+              <div data-tour="actas-lista" className="max-h-[52vh] overflow-y-auto pr-1">
                 {pendingDocs.length > 0 && (
                   <div className="mb-3">
                     <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest mb-1.5">

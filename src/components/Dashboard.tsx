@@ -123,7 +123,7 @@ export default function Dashboard({
         className="sticky top-0 z-30 glass-strong px-4 py-3 sm:px-6"
       >
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
+          <div data-tour="perfil">
             <h1 className="text-lg font-bold text-white">{APP_CONFIG.name}</h1>
             <div className="flex flex-wrap gap-1 mt-0.5">
               {audience.map(a => {
@@ -158,6 +158,7 @@ export default function Dashboard({
             animate={{ opacity: 1, y: 0 }}
             whileTap={{ scale: 0.99 }}
             onClick={onOpenActas}
+            data-tour="actas"
             className={`w-full glass-card rounded-2xl p-4 text-left border transition-all flex items-center gap-3 group ${
               actasPendientes > 0 ? 'border-amber-500/30 hover:border-amber-500/50' : 'border-emerald-500/20 hover:border-emerald-500/40'
             }`}
@@ -189,6 +190,7 @@ export default function Dashboard({
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
+          data-tour="stats"
           className="grid grid-cols-3 gap-4 md:gap-6"
         >
           <div className="glass-card rounded-2xl p-4 text-center">
@@ -231,6 +233,7 @@ export default function Dashboard({
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
+            data-tour="cursos"
             className="glass-card rounded-2xl p-12 text-center"
           >
             <BookOpen className="w-16 h-16 text-slate-700 mx-auto mb-4" />
@@ -243,6 +246,7 @@ export default function Dashboard({
               const chunkCount = chunkCountMap[topic.id] || 0;
               const quizCount = quizCountMap[topic.id] || 0;
 
+              // El recorrido guiado resalta la primera tarjeta como ejemplo (data-tour)
               return (
                 <motion.button
                   key={topic.id}
@@ -251,6 +255,7 @@ export default function Dashboard({
                   transition={{ delay: 0.15 + index * 0.06 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => onSelectTopic(topic)}
+                  data-tour={index === 0 ? 'cursos' : undefined}
                   className="w-full glass-card rounded-xl p-3.5 text-left border border-white/5
                     hover:border-blue-500/30 hover:bg-white/5 transition-all duration-300 group shadow-lg relative overflow-hidden"
                 >
@@ -412,6 +417,7 @@ export default function Dashboard({
           animate={{ opacity: 1, scale: 1 }}
           whileTap={{ scale: 0.92 }}
           onClick={onPlayTutorial}
+          data-tour="tutorial"
           title="Ver tutorial"
           className="fixed right-6 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 shadow-lg shadow-blue-600/40 border border-white/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
           style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}

@@ -18,7 +18,7 @@ import {
   saveContentToSheets, deleteContentFromSheets,
   saveTopicToSheets, deleteTopicFromSheets,
   testSheetsConnection, testAppsScriptConnection,
-  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, deleteUsuario, updateIngresoProgress, updateAppDynamicConfig,
+  clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, updateUserSelfie, deleteUsuario, updateIngresoProgress, updateAppDynamicConfig,
   fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo, uploadActaArchivo,
   fetchPacProgramas, createPacPrograma, updatePacPrograma, deletePacPrograma, upsertPacPreguntas,
   fetchPacPreguntas, fetchAllPacResultados, deletePacResultado, uploadPacMaterial,
@@ -37,7 +37,7 @@ import { buildPacRoster, type PacRosterStatus } from '../lib/pacRoster';
 import { GUARDIAS } from '../lib/constants';
 import { BarChart, Donut, ProgressBar } from './AdminCharts';
 import html2pdf from 'html2pdf.js';
-import { fetchDriveImageAsBase64 } from '../lib/driveImage';
+import { fetchDriveImageAsBase64, driveThumbnailUrl } from '../lib/driveImage';
 import ActaDistribucionTemplate, { type DistribucionRow } from './ActaDistribucionTemplate';
 import ActaAsistenciaTemplate, { type AsistenciaRow } from './ActaAsistenciaTemplate';
 import PacAsistenciaTemplate, { type PacAsistenciaRow } from './PacAsistenciaTemplate';
@@ -447,7 +447,8 @@ export default function AdminPanel({
   const [progressSearch, setProgressSearch] = useState('');
   const [progressEmpresaFilter, setProgressEmpresaFilter] = useState('');
   const [progressPublicoFilter, setProgressPublicoFilter] = useState('');
-  const [progressWeekFilter, setProgressWeekFilter] = useState('');
+  const [progressWeekFilters, setProgressWeekFilters] = useState<string[]>([]);
+  const [weekFilterOpen, setWeekFilterOpen] = useState(false);
   const [progressExpandedDni, setProgressExpandedDni] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<IngresoRecord | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -462,6 +463,8 @@ export default function AdminPanel({
   });
   const [savingProfile, setSavingProfile] = useState(false);
   const [deletingUser, setDeletingUser] = useState(false);
+  const [photoMenuDni, setPhotoMenuDni] = useState<string | null>(null);
+  const [uploadingPhotoDni, setUploadingPhotoDni] = useState<string | null>(null);
   const [resettingQuizKey, setResettingQuizKey] = useState<string | null>(null);
   // Detalle de preguntas falladas abierto en cada vista (una sola a la vez).
   const [openWrongModuleKey, setOpenWrongModuleKey] = useState<string | null>(null);
@@ -1209,6 +1212,49 @@ export default function AdminPanel({
       showToast('Error al eliminar el usuario', 'error');
     } finally {
       setDeletingUser(false);
+    }
+  };
+
+  /** Sube una nueva foto de perfil para el usuario, reemplazando la anterior si tenía. */
+  const handleReplacePhoto = async (record: IngresoRecord, file: File) => {
+    setUploadingPhotoDni(record.dni);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const result = await updateUserSelfie({ dni: record.dni, selfieBase64: base64 });
+      if (result.success) {
+        setIngresoRecords(prev => prev.map(r => r.dni === record.dni ? { ...r, selfieUrl: result.url ?? r.selfieUrl } : r));
+        showToast('Foto actualizada');
+      } else {
+        showToast(result.message || 'No se pudo actualizar la foto', 'error');
+      }
+    } catch {
+      showToast('Error al subir la foto', 'error');
+    } finally {
+      setUploadingPhotoDni(null);
+    }
+  };
+
+  /** Borra la foto de perfil del usuario. No afecta su consentimiento ya registrado (ver Code.gs:CONSENTIMIENTO_OK). */
+  const handleDeletePhoto = async (record: IngresoRecord) => {
+    if (!window.confirm(`¿Eliminar la foto de ${record.nombres} ${record.apellidos}? El usuario no tendrá que volver a registrarse ni autorizar su firma de nuevo por esto.`)) return;
+    setUploadingPhotoDni(record.dni);
+    try {
+      const result = await updateUserSelfie({ dni: record.dni, clear: true });
+      if (result.success) {
+        setIngresoRecords(prev => prev.map(r => r.dni === record.dni ? { ...r, selfieUrl: '' } : r));
+        showToast('Foto eliminada');
+      } else {
+        showToast(result.message || 'No se pudo eliminar la foto', 'error');
+      }
+    } catch {
+      showToast('Error al eliminar la foto', 'error');
+    } finally {
+      setUploadingPhotoDni(null);
     }
   };
 
@@ -2036,17 +2082,20 @@ ${text}`;
     try { return JSON.parse(json) || []; } catch { return []; }
   };
 
+  // El campo "publico" guarda los perfiles como texto separado por comas
+  const splitPublico = (publico?: string) => (publico || '').split(',').map(p => p.trim()).filter(Boolean);
+
   const filteredIngresos = ingresoRecords.filter(r => {
     const search = progressSearch.toLowerCase();
     if (search && !`${r.nombres} ${r.apellidos} ${r.dni}`.toLowerCase().includes(search)) return false;
     if (progressEmpresaFilter && r.empresa !== progressEmpresaFilter) return false;
-    if (progressPublicoFilter && r.publico !== progressPublicoFilter) return false;
-    if (progressWeekFilter && isoWeekKey(parseInicio(r.inicio)) !== progressWeekFilter) return false;
+    if (progressPublicoFilter && !splitPublico(r.publico).includes(progressPublicoFilter)) return false;
+    if (progressWeekFilters.length > 0 && !progressWeekFilters.includes(isoWeekKey(parseInicio(r.inicio)))) return false;
     return true;
   });
 
   const empresasOptions = [...new Set(ingresoRecords.map(r => r.empresa).filter(Boolean))].sort() as string[];
-  const publicoOptions = [...new Set(ingresoRecords.map(r => r.publico).filter(Boolean))].sort() as string[];
+  const publicoOptions = [...new Set(ingresoRecords.flatMap(r => splitPublico(r.publico)))].sort();
   const weekOptions = (() => {
     const map = new Map<string, string>();
     for (const r of ingresoRecords) {
@@ -2162,6 +2211,7 @@ ${text}`;
         'Último Acceso': r.ultimoAcceso,
         'Correo': r.correo,
         'Celular': r.celular,
+        'Foto': r.selfieUrl || '',
       };
       topics.forEach(topic => {
         const tp = prog.find(p => p.topicId === topic.id);
@@ -3467,7 +3517,10 @@ ${text}`;
                     (min-width:auto). Con una empresa o público de nombre largo la fila
                     se desbordaba fuera de la tarjeta. De ahí el min-w-0 + ancho acotado
                     en cada control, y el flex-wrap para que los botones bajen de línea
-                    en vez de empujar hacia afuera. */}
+                    en vez de empujar hacia afuera.
+                    En celular los dos <select> comparten una fila y los dos botones de
+                    exportación otra; en sm+ los envoltorios pasan a `display:contents`
+                    y todos los controles vuelven a fluir en la fila del padre. */}
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
                   <div className="relative flex-1 min-w-0 sm:min-w-[12rem]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#737781]" />
@@ -3479,52 +3532,91 @@ ${text}`;
                     />
                   </div>
                   {weekOptions.length > 0 && (
-                    <select
-                      value={progressWeekFilter}
-                      onChange={e => setProgressWeekFilter(e.target.value)}
-                      className="w-full sm:w-44 min-w-0 truncate px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
-                    >
-                      <option value="">Todas las semanas</option>
-                      {weekOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                    </select>
+                    <div className="relative w-full sm:w-44 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => setWeekFilterOpen(o => !o)}
+                        className="w-full flex items-center justify-between gap-1 px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                      >
+                        <span className="truncate">
+                          {progressWeekFilters.length === 0
+                            ? 'Todas las semanas'
+                            : progressWeekFilters.length === 1
+                              ? (weekOptions.find(([key]) => key === progressWeekFilters[0])?.[1] || '1 semana')
+                              : `${progressWeekFilters.length} semanas`}
+                        </span>
+                        <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${weekFilterOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {weekFilterOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setWeekFilterOpen(false)} />
+                          <div className="absolute z-50 mt-1 w-56 max-h-72 overflow-y-auto bg-white border border-[#e1e3e4] rounded-xl shadow-lg p-1.5">
+                            <div className="flex items-center justify-between px-2 py-1.5 border-b border-[#f3f4f5] mb-1">
+                              <button type="button" onClick={() => setProgressWeekFilters([])} className="text-[10px] font-bold text-[#1b4d89] hover:underline">Todas</button>
+                              <button type="button" onClick={() => setProgressWeekFilters(weekOptions.map(([key]) => key))} className="text-[10px] font-bold text-[#1b4d89] hover:underline">Seleccionar todas</button>
+                            </div>
+                            {weekOptions.map(([key, label]) => {
+                              const checked = progressWeekFilters.includes(key);
+                              return (
+                                <label key={key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-[#f8f9fa] cursor-pointer text-xs text-[#424750]">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => setProgressWeekFilters(prev => checked ? prev.filter(k => k !== key) : [...prev, key])}
+                                    className="w-3.5 h-3.5 accent-[#1b4d89]"
+                                  />
+                                  {label}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
-                  {empresasOptions.length > 0 && (
-                    <select
-                      value={progressEmpresaFilter}
-                      onChange={e => setProgressEmpresaFilter(e.target.value)}
-                      className="w-full sm:w-44 min-w-0 truncate px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
-                    >
-                      <option value="">Todas las empresas</option>
-                      {empresasOptions.map(e => <option key={e} value={e}>{e}</option>)}
-                    </select>
+                  {(empresasOptions.length > 0 || publicoOptions.length > 0) && (
+                    <div className="flex gap-2 sm:contents">
+                      {empresasOptions.length > 0 && (
+                        <select
+                          value={progressEmpresaFilter}
+                          onChange={e => setProgressEmpresaFilter(e.target.value)}
+                          className="flex-1 min-w-0 sm:flex-none sm:w-44 truncate px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                        >
+                          <option value="">Todas las empresas</option>
+                          {empresasOptions.map(e => <option key={e} value={e}>{e}</option>)}
+                        </select>
+                      )}
+                      {publicoOptions.length > 0 && (
+                        <select
+                          value={progressPublicoFilter}
+                          onChange={e => setProgressPublicoFilter(e.target.value)}
+                          className="flex-1 min-w-0 sm:flex-none sm:w-44 truncate px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                        >
+                          <option value="">Todos los públicos</option>
+                          {publicoOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      )}
+                    </div>
                   )}
-                  {publicoOptions.length > 0 && (
-                    <select
-                      value={progressPublicoFilter}
-                      onChange={e => setProgressPublicoFilter(e.target.value)}
-                      className="w-full sm:w-44 min-w-0 truncate px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-semibold text-[#424750] focus:border-[#1b4d89] outline-none"
+                  <div className="flex gap-2 sm:contents">
+                    <button
+                      onClick={handleExportProgressExcel}
+                      disabled={filteredIngresos.length === 0}
+                      className="flex-1 min-w-0 sm:flex-none flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#006d36] hover:bg-emerald-50 transition-all disabled:opacity-40"
                     >
-                      <option value="">Todos los públicos</option>
-                      {publicoOptions.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  )}
-                  <button
-                    onClick={handleExportProgressExcel}
-                    disabled={filteredIngresos.length === 0}
-                    className="flex items-center gap-2 px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#006d36] hover:bg-emerald-50 transition-all disabled:opacity-40"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    Excel
-                  </button>
-                  <button
-                    onClick={handleExportUsuariosBasico}
-                    disabled={filteredIngresos.length === 0}
-                    title="Exportar: FECHA_INICIO, SEMANA, AREA, CARGO, APELLIDOS Y NOMBRES"
-                    className="flex items-center gap-2 px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#1b4d89] hover:bg-blue-50 transition-all disabled:opacity-40"
-                  >
-                    <Users className="w-4 h-4" />
-                    Usuarios
-                  </button>
+                      <FileSpreadsheet className="w-4 h-4 flex-shrink-0" />
+                      Excel
+                    </button>
+                    <button
+                      onClick={handleExportUsuariosBasico}
+                      disabled={filteredIngresos.length === 0}
+                      title="Exportar: FECHA_INICIO, SEMANA, AREA, CARGO, APELLIDOS Y NOMBRES"
+                      className="flex-1 min-w-0 sm:flex-none flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#1b4d89] hover:bg-blue-50 transition-all disabled:opacity-40"
+                    >
+                      <Users className="w-4 h-4 flex-shrink-0" />
+                      Usuarios
+                    </button>
+                  </div>
                 </div>
 
                 {/* Users list */}
@@ -3608,12 +3700,21 @@ ${text}`;
                                   onClick={(e) => e.stopPropagation()}
                                   title={`Escribir por WhatsApp a ${record.celular}`}
                                   aria-label={`Escribir por WhatsApp a ${record.nombres} ${record.apellidos}`}
-                                  className="group relative w-9 h-9 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm hover:bg-[#25D366] hover:text-white transition-all"
+                                  className="group relative w-9 h-9 rounded-full overflow-hidden bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm"
                                 >
-                                  <span className="group-hover:opacity-0 transition-opacity">
-                                    {(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}
+                                  <span>{(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}</span>
+                                  {record.selfieUrl && (
+                                    <img
+                                      src={driveThumbnailUrl(record.selfieUrl)}
+                                      alt=""
+                                      loading="lazy"
+                                      className="absolute inset-0 w-full h-full object-cover"
+                                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                  )}
+                                  <span className="absolute inset-0 bg-[#25D366]/90 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <MessageCircle className="w-4 h-4 text-white" />
                                   </span>
-                                  <MessageCircle className="w-4 h-4 absolute opacity-0 group-hover:opacity-100 transition-opacity" />
                                   {/* Indicador permanente: en móvil no hay hover, así que el
                                       punto verde es lo que revela que el avatar es accionable. */}
                                   <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-[#25D366] border-2 border-white flex items-center justify-center group-hover:opacity-0 transition-opacity">
@@ -3621,8 +3722,17 @@ ${text}`;
                                   </span>
                                 </a>
                               ) : (
-                                <div className="w-9 h-9 rounded-full bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm">
-                                  {(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}
+                                <div className="relative w-9 h-9 rounded-full overflow-hidden bg-[#1b4d89]/10 flex items-center justify-center flex-shrink-0 text-[#1b4d89] font-bold text-sm">
+                                  <span>{(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}</span>
+                                  {record.selfieUrl && (
+                                    <img
+                                      src={driveThumbnailUrl(record.selfieUrl)}
+                                      alt=""
+                                      loading="lazy"
+                                      className="absolute inset-0 w-full h-full object-cover"
+                                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                  )}
                                 </div>
                               )}
                               {/* Info */}
@@ -3669,22 +3779,103 @@ ${text}`;
                                       </div>
                                     ))}
                                   </div>
-                                  <div className="flex-shrink-0 flex items-center gap-1.5">
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleOpenEditUser(record); }}
-                                      title="Editar todos los datos del usuario"
-                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#1b4d89] hover:bg-blue-50 hover:border-[#1b4d89]/30 transition-all"
-                                    >
-                                      <Edit3 className="w-3 h-3" /> Editar
-                                    </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleDeleteUsuario(record); }}
-                                      disabled={deletingUser}
-                                      title="Eliminar usuario"
-                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e1e3e4] text-[10px] font-bold text-red-500 hover:bg-red-50 hover:border-red-300 transition-all disabled:opacity-50"
-                                    >
-                                      <Trash2 className="w-3 h-3" /> Eliminar
-                                    </button>
+                                  <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                                    {/* Wrapper SIN overflow-hidden: el menú de editar y su spinner deben
+                                        poder pintarse fuera de las esquinas redondeadas de la foto, que
+                                        si no las recortaría (child de un padre con overflow-hidden). */}
+                                    <div className="relative w-20 h-20 flex-shrink-0">
+                                      <div className="w-full h-full rounded-xl overflow-hidden bg-[#1b4d89]/10 flex items-center justify-center text-[#1b4d89] font-bold text-lg">
+                                        <span>{(record.nombres.charAt(0) + record.apellidos.charAt(0)).toUpperCase()}</span>
+                                        {record.selfieUrl && (
+                                          <a
+                                            href={record.selfieUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => e.stopPropagation()}
+                                            title="Ver foto original en Drive"
+                                            className="absolute inset-0"
+                                          >
+                                            <img
+                                              src={driveThumbnailUrl(record.selfieUrl)}
+                                              alt=""
+                                              loading="lazy"
+                                              className="absolute inset-0 w-full h-full object-cover"
+                                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                            />
+                                          </a>
+                                        )}
+                                        {uploadingPhotoDni === record.dni && (
+                                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                            <Loader2 className="w-5 h-5 text-white animate-spin" />
+                                          </div>
+                                        )}
+                                      </div>
+                                      {/* Botón de editar: siempre encima del link a Drive (z-10) para que
+                                          gestionar la foto no dependa de acertarle a un pixel exacto fuera
+                                          del área clickeable del link. */}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setPhotoMenuDni(prev => prev === record.dni ? null : record.dni); }}
+                                        title="Editar foto"
+                                        className="absolute bottom-0.5 right-0.5 z-10 w-5 h-5 rounded-full bg-white border border-[#e1e3e4] flex items-center justify-center shadow-sm hover:bg-[#f3f4f5]"
+                                      >
+                                        <Edit3 className="w-2.5 h-2.5 text-[#1b4d89]" />
+                                      </button>
+                                      {photoMenuDni === record.dni && (
+                                        <>
+                                          <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setPhotoMenuDni(null); }} />
+                                          <div
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="absolute z-40 top-full right-0 mt-1 w-36 bg-white border border-[#e1e3e4] rounded-xl shadow-lg p-1"
+                                          >
+                                            <label
+                                              htmlFor={`photo-input-${record.dni}`}
+                                              className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-[#f8f9fa] cursor-pointer text-xs font-semibold text-[#424750]"
+                                            >
+                                              <Upload className="w-3.5 h-3.5" /> Reemplazar
+                                            </label>
+                                            <input
+                                              id={`photo-input-${record.dni}`}
+                                              type="file"
+                                              accept="image/*"
+                                              className="hidden"
+                                              onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                setPhotoMenuDni(null);
+                                                if (file) handleReplacePhoto(record, file);
+                                                e.target.value = '';
+                                              }}
+                                            />
+                                            {record.selfieUrl && (
+                                              <button
+                                                type="button"
+                                                onClick={() => { setPhotoMenuDni(null); handleDeletePhoto(record); }}
+                                                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-red-50 text-xs font-semibold text-red-500"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" /> Eliminar
+                                              </button>
+                                            )}
+                                          </div>
+                                        </>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleOpenEditUser(record); }}
+                                        title="Editar todos los datos del usuario"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e1e3e4] text-[10px] font-bold text-[#1b4d89] hover:bg-blue-50 hover:border-[#1b4d89]/30 transition-all"
+                                      >
+                                        <Edit3 className="w-3 h-3" /> Editar
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteUsuario(record); }}
+                                        disabled={deletingUser}
+                                        title="Eliminar usuario"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e1e3e4] text-[10px] font-bold text-red-500 hover:bg-red-50 hover:border-red-300 transition-all disabled:opacity-50"
+                                      >
+                                        <Trash2 className="w-3 h-3" /> Eliminar
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
 

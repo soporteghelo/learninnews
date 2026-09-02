@@ -70,7 +70,7 @@ export default function CourseDetail({
           {/* Left Column - Main Content */}
           <div className="lg:col-span-2 space-y-4">
             {/* Summary Section */}
-            <section>
+            <section data-tour="detalle-resumen">
               <div className="flex items-center gap-2 mb-2 text-blue-400">
                 <div className="p-1.5 rounded-lg bg-blue-500/10">
                   <Info className="w-4 h-4" />
@@ -114,7 +114,7 @@ export default function CourseDetail({
             {/* Action Buttons Panel */}
             <div className="glass-card rounded-3xl p-6 sm:p-8 space-y-5 border-t border-white/10 shadow-2xl shadow-blue-500/5">
                <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-2 text-center">Acciones Disponibles</h3>
-               <div className="flex gap-3">
+               <div data-tour="detalle-acciones" className="flex gap-3">
                 <button
                   onClick={onStartLearning}
                   className="flex-1 btn-primary py-4 text-sm shadow-[0_10px_40px_rgba(37,99,235,0.25)] relative group overflow-hidden"
@@ -126,6 +126,7 @@ export default function CourseDetail({
                 <button
                   disabled={!hasQuiz}
                   onClick={onStartQuiz}
+                  data-tour="detalle-evaluacion"
                   className={`
                     flex-1 py-4 text-sm rounded-2xl font-black flex items-center justify-center gap-1.5 transition-all relative overflow-hidden
                     ${hasQuiz
@@ -140,7 +141,7 @@ export default function CourseDetail({
 
               {/* Mostrar Nota Actual */}
               {hasQuiz && (
-                <div className="pt-4 mt-2 border-t border-slate-700/50">
+                <div data-tour="detalle-nota" className="pt-4 mt-2 border-t border-slate-700/50">
                   <div className="flex items-center justify-between glass px-4 py-3 rounded-xl border border-white/5 bg-slate-900/50">
                     <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Nota Actual:</span>
                     <div className="flex items-baseline gap-1">
