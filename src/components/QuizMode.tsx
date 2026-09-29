@@ -24,6 +24,33 @@ interface QuizModeProps {
   userDni?: string;
 }
 
+type AnsweredMap = Record<number, { selected: string; correct: boolean; confidence?: Confidence }>;
+
+/**
+ * Al retomar, reordena las preguntas: primero las ya respondidas (conservando su
+ * respuesta) y luego las pendientes en orden aleatorio. La pregunta en la que se
+ * salió se evita como siguiente, para que no se repita justo después de ver su feedback.
+ * Si no queda ninguna pendiente, apunta a la última respondida (`allAnswered`).
+ */
+function reorderForResume(ordered: QuizQuestion[], answeredMap: AnsweredMap, savedIdx: number) {
+  const answeredIdx = ordered.map((_, i) => i).filter(i => answeredMap[i]);
+  const pendingIdx = ordered.map((_, i) => i).filter(i => !answeredMap[i]);
+  let shuffledPending = shuffleArray(pendingIdx);
+  if (shuffledPending.length > 1 && shuffledPending[0] === savedIdx) {
+    shuffledPending = [...shuffledPending.slice(1), shuffledPending[0]];
+  }
+  const newOrder = [...answeredIdx, ...shuffledPending];
+  const newMap: AnsweredMap = {};
+  answeredIdx.forEach((oldIdx, newIdx) => { newMap[newIdx] = answeredMap[oldIdx]; });
+  const allAnswered = shuffledPending.length === 0;
+  return {
+    activeQuestions: newOrder.map(i => ordered[i]),
+    answeredMap: newMap,
+    currentIdx: allAnswered ? Math.max(0, answeredIdx.length - 1) : answeredIdx.length,
+    allAnswered,
+  };
+}
+
 export default function QuizMode({
   topic,
   questions,
@@ -37,7 +64,8 @@ export default function QuizMode({
   const [initState] = useState<{
     activeQuestions: QuizQuestion[];
     currentIdx: number;
-    answeredMap: Record<number, { selected: string; correct: boolean; confidence?: Confidence }>;
+    answeredMap: AnsweredMap;
+    allAnswered: boolean;
     score: number;
     distractionCount: number;
     isResumed: boolean;
@@ -52,10 +80,12 @@ export default function QuizMode({
           .map(id => qMap.get(id))
           .filter(Boolean) as QuizQuestion[];
         if (ordered.length === filtered.length) {
+          const r = reorderForResume(ordered, p.answeredMap || {}, p.currentIdx);
           return {
-            activeQuestions: ordered,
-            currentIdx: Math.min(p.currentIdx, ordered.length - 1),
-            answeredMap: p.answeredMap || {},
+            activeQuestions: r.activeQuestions,
+            currentIdx: r.currentIdx,
+            answeredMap: r.answeredMap,
+            allAnswered: r.allAnswered,
             score: p.score || 0,
             distractionCount: p.distractionCount || 0,
             isResumed: true,
@@ -67,6 +97,7 @@ export default function QuizMode({
       activeQuestions: shuffleArray(filtered),
       currentIdx: 0,
       answeredMap: {},
+      allAnswered: false,
       score: 0,
       distractionCount: 0,
       isResumed: false,
@@ -77,8 +108,13 @@ export default function QuizMode({
   const [currentIdx, setCurrentIdx] = useState(initState.currentIdx);
   const [answeredMap, setAnsweredMap] = useState(initState.answeredMap);
   const [score, setScore] = useState(initState.score);
-  const [selectedOption, setSelectedOption] = useState<'A' | 'B' | 'C' | 'D' | null>(null);
-  const [showFeedback, setShowFeedback] = useState(false);
+  // Si al retomar ya no quedan pendientes, se muestra el feedback de la última
+  // respondida para que "Siguiente" finalice sin volver a responderla.
+  const resumedLast = initState.allAnswered ? initState.answeredMap[initState.currentIdx] : undefined;
+  const [selectedOption, setSelectedOption] = useState<'A' | 'B' | 'C' | 'D' | null>(
+    (resumedLast?.selected as 'A' | 'B' | 'C' | 'D' | undefined) || null
+  );
+  const [showFeedback, setShowFeedback] = useState(!!resumedLast);
   const [isFinished, setIsFinished] = useState(false);
   const [isLoadingSheets, setIsLoadingSheets] = useState(!!userDni && !initState.isResumed);
   const [timeLeft, setTimeLeft] = useState(QUESTION_TIME);
@@ -104,9 +140,13 @@ export default function QuizMode({
       const qMap = new Map(filtered.map(q => [q.idQuiz, q]));
       const ordered = remote.shuffledIds.map(id => qMap.get(id)).filter(Boolean) as typeof filtered;
       if (ordered.length === filtered.length) {
-        setActiveQuestions(ordered);
-        setCurrentIdx(Math.min(remote.currentIdx, ordered.length - 1));
-        setAnsweredMap(remote.answeredMap || {});
+        const r = reorderForResume(ordered, remote.answeredMap || {}, remote.currentIdx);
+        const last = r.allAnswered ? r.answeredMap[r.currentIdx] : undefined;
+        setActiveQuestions(r.activeQuestions);
+        setCurrentIdx(r.currentIdx);
+        setAnsweredMap(r.answeredMap);
+        setSelectedOption((last?.selected as 'A' | 'B' | 'C' | 'D' | undefined) || null);
+        setShowFeedback(!!last);
         setScore(remote.score || 0);
         distraction.setDistractionCount(remote.distractionCount || 0);
         try { localStorage.setItem(storageKey, JSON.stringify(remote)); } catch { /* ignore */ }
