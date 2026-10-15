@@ -1430,7 +1430,7 @@ export async function saveShortEvalResult(data: {
 // =============================================
 // PAC - PROGRAMA ANUAL DE CAPACITACIONES
 // =============================================
-import type { PacPrograma, PacPregunta, PacResultado, PacEncuesta, PacWrongAnswer } from '../types';
+import type { PacPrograma, PacPregunta, PacResultado, PacEncuesta, PacWrongAnswer, PersonalActivo } from '../types';
 
 export async function fetchPacProgramas(force = false): Promise<PacPrograma[]> {
   if (!force) {
@@ -1573,6 +1573,34 @@ export async function fetchAllPacResultados(force = false): Promise<PacResultado
         error: () => resolve([]),
       });
     });
+  } catch { return []; }
+}
+
+/**
+ * Una persona del padrón "PERSONAL TEMPORAL" por DNI, vía Apps Script
+ * (`Code.gs:getPersonalByDni`). Lo usa la página de evaluación para autollenar
+ * el formulario: el servidor devuelve solo esa fila y sin datos de contacto, así
+ * el padrón completo nunca llega al navegador de un visitante.
+ */
+export async function fetchPersonaPorDni(dni: string): Promise<PersonalActivo | null> {
+  const result = (await postToAppsScript({ action: 'getPersonalByDni', dni })) as { status: string; persona?: PersonalActivo | null };
+  return result.status === 'ok' ? result.persona || null : null;
+}
+
+/**
+ * Personal ACTIVO del padrón, vía Apps Script (`Code.gs:getPersonalActivo`).
+ * Base del cruce por DNI del PAC para saber quién falta rendir cada capacitación.
+ */
+export async function fetchPersonalActivo(force = false): Promise<PersonalActivo[]> {
+  if (!force) {
+    const cached = getSheetCache<PersonalActivo[]>('personalActivo');
+    if (cached) return cached;
+  }
+  try {
+    const result = (await postToAppsScript({ action: 'getPersonalActivo' })) as { status: string; personal?: PersonalActivo[] };
+    if (result.status !== 'ok' || !Array.isArray(result.personal)) return [];
+    setSheetCache('personalActivo', result.personal);
+    return result.personal;
   } catch { return []; }
 }
 

@@ -237,6 +237,20 @@ export interface PacEncuesta {
   sugerencia: string;               // campo abierto
 }
 
+/** Trabajador del padrón externo "PERSONAL TEMPORAL" (base del cruce por DNI del PAC). */
+export interface PersonalActivo {
+  dni: string;
+  nombre: string;            // "APELLIDOS Y NOMBRES" tal cual viene en la hoja
+  estado: string;            // ACTIVO | CESADO | NUEVO (en mayúsculas)
+  empresa: string;
+  guardia: string;
+  cargo: string;
+  area: string;
+  categoria: string;
+  correo?: string;           // datos de contacto: solo llegan en el listado del admin
+  celular?: string;
+}
+
 /** Un intento de evaluación PAC (se registra apruebe o no; firma+foto se piden en cada intento). */
 export interface PacResultado {
   id: string;

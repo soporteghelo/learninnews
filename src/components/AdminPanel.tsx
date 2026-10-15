@@ -21,19 +21,23 @@ import {
   clearSheetCache, fetchAllIngresos, fetchAllCertificates, updateUserProfile, updateUserSelfie, deleteUsuario, updateIngresoProgress, updateAppDynamicConfig,
   fetchActaDocumentos, fetchActaFirmas, saveActaDocumento, deleteActaDocumento, resendActaCorreo, uploadActaArchivo,
   fetchPacProgramas, createPacPrograma, updatePacPrograma, deletePacPrograma, upsertPacPreguntas,
-  fetchPacPreguntas, fetchAllPacResultados, deletePacResultado, uploadPacMaterial,
+  fetchPacPreguntas, fetchAllPacResultados, deletePacResultado, uploadPacMaterial, fetchPersonalActivo,
 } from '../services/sheetsService';
 import type { IngresoRecord } from '../services/sheetsService';
 import type {
   LearnTopic, DataChunk, QuizQuestion, QuizDraft,
   ContentDraft, TopicDraft, AdminTab, ConnectionTestResult, UserProgress,
   ActaDocumento, ActaFirma, ActaItem, AppDynamicConfig,
-  PacPrograma, PacPregunta, PacResultado,
+  PacPrograma, PacPregunta, PacResultado, PersonalActivo,
 } from '../types';
 import { parseInicio, getISOWeek, isoWeekLabel, isoWeekKey } from '../lib/dateUtils';
 import { matchNumericFilter } from '../lib/filterUtils';
 import { buildFirmaRoster, buildItemRoster, type FirmaRosterRow } from '../lib/firmaRoster';
 import { buildPacRoster, type PacRosterStatus } from '../lib/pacRoster';
+import { buildPacPadronRoster } from '../lib/pacPadron';
+import { buildWhatsAppLink } from '../lib/whatsapp';
+import PacPendientesPanel from './PacPendientesPanel';
+import PacRegistroF62Modal from './PacRegistroF62Modal';
 import { GUARDIAS } from '../lib/constants';
 import { BarChart, Donut, ProgressBar } from './AdminCharts';
 import html2pdf from 'html2pdf.js';
@@ -147,22 +151,6 @@ function optionLabel(q: OptionBearer | undefined, letter: string): string {
   if (!q) return clean;
   const text = { A: q.optionA, B: q.optionB, C: q.optionC, D: q.optionD }[clean as 'A' | 'B' | 'C' | 'D'];
   return text ? `${clean}) ${text}` : clean;
-}
-
-/** Código de país por defecto para los celulares de perfil (Perú). */
-const WHATSAPP_COUNTRY_CODE = '51';
-
-/**
- * Arma el enlace wa.me para escribirle a un usuario. Los perfiles guardan el
- * celular en 9 dígitos (formato móvil peruano), así que le anteponemos el
- * código de país; si el número ya vino con código (10+ dígitos) se respeta.
- * Devuelve null cuando no hay un número utilizable, para poder ocultar el botón.
- */
-function buildWhatsAppLink(celular: string | undefined, mensaje: string): string | null {
-  const digits = String(celular || '').replace(/\D/g, '');
-  if (digits.length < 9) return null;
-  const numero = digits.length === 9 ? `${WHATSAPP_COUNTRY_CODE}${digits}` : digits;
-  return `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
 }
 
 function WrongAnswersList({ rows }: { rows: WrongAnswerRow[] }) {
@@ -497,6 +485,11 @@ export default function AdminPanel({
   const [preguntasLoading, setPreguntasLoading] = useState(false);
   const [preguntasSaving, setPreguntasSaving] = useState(false);
   const [selectedProgramaId, setSelectedProgramaId] = useState<string | null>(null);
+  // Padrón de personal ACTIVO (hoja externa) para saber, por DNI, quién falta rendir cada capacitación
+  const [personalActivo, setPersonalActivo] = useState<PersonalActivo[]>([]);
+  const [personalLoading, setPersonalLoading] = useState(false);
+  const [pacPendientesOpenId, setPacPendientesOpenId] = useState<string | null>(null);
+  const [f62Programa, setF62Programa] = useState<PacPrograma | null>(null);
   const [deletingPacResultado, setDeletingPacResultado] = useState<string | null>(null);
   const [pacAsistenciaData, setPacAsistenciaData] = useState<{ programa: PacPrograma; rows: PacAsistenciaRow[] } | null>(null);
   const [downloadingPacAsistencia, setDownloadingPacAsistencia] = useState(false);
@@ -672,8 +665,14 @@ export default function AdminPanel({
     if (pacResultados.length === 0) fetchAllPacResultados().then(setPacResultados).catch(() => {});
   }, [activeTab]);
 
+  const loadPersonalActivo = (force = false) => {
+    setPersonalLoading(true);
+    fetchPersonalActivo(force).then(setPersonalActivo).catch(() => {}).finally(() => setPersonalLoading(false));
+  };
+
   useEffect(() => {
     if (activeTab !== 'pac') return;
+    if (personalActivo.length === 0) loadPersonalActivo();
     if (pacProgramas.length > 0) return;
     setPacLoading(true);
     Promise.all([fetchPacProgramas(), fetchAllPacResultados()]).then(([programas, resultados]) => {
@@ -684,6 +683,7 @@ export default function AdminPanel({
   }, [activeTab]);
 
   const handleRefreshPac = () => {
+    loadPersonalActivo(true);
     setPacLoading(true);
     Promise.all([fetchPacProgramas(true), fetchAllPacResultados(true)]).then(([programas, resultados]) => {
       setPacProgramas(programas);
@@ -2411,7 +2411,8 @@ ${text}`;
         )}
       </AnimatePresence>
 
-      <div className={`max-w-7xl mx-auto px-4 pt-3 pb-8 ${sidebarOpen ? 'lg:ml-72' : ''}`}>
+      {/* Todos los módulos usan el ancho completo disponible (tablas y listados con muchas columnas) */}
+      <div className={`px-4 lg:px-6 pt-3 pb-8 ${sidebarOpen ? 'lg:ml-72' : ''}`}>
         {/* Global Notifications Section - STATIC FOR RELIABILITY */}
         <div className={`space-y-3 ${(error || statusMessage) ? 'mb-4' : ''}`}>
           {error && (
@@ -4178,6 +4179,9 @@ ${text}`;
                           const link = getPacEvalLink(p.id);
                           const roster = buildPacRoster(p, pacResultados, ingresoRecords);
                           const aprobadosCount = roster.filter(r => r.status === 'aprobado').length;
+                          const padron = buildPacPadronRoster(p, pacResultados, personalActivo);
+                          const faltanCount = padron.filter(r => r.status === 'sin_intentos').length;
+                          const pendientesOpen = pacPendientesOpenId === p.id;
                           return (
                             <div key={p.id} className="bg-white rounded-2xl border border-[#e1e3e4] overflow-hidden">
                               <div className="px-4 py-3.5 flex items-start gap-3">
@@ -4200,6 +4204,17 @@ ${text}`;
                                     <span className="mx-1">·</span>
                                     <span className="font-semibold text-emerald-600">{aprobadosCount}</span>/{roster.length} aprobados
                                   </p>
+                                  <button onClick={() => setPacPendientesOpenId(pendientesOpen ? null : p.id)}
+                                    title="Cruce por DNI con el personal ACTIVO de la hoja PERSONAL TEMPORAL"
+                                    className={`mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${pendientesOpen ? 'bg-[#1b4d89] text-white border-[#1b4d89]' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
+                                    {personalLoading && personalActivo.length === 0
+                                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                                      : <Users className="w-3 h-3" />}
+                                    {personalActivo.length > 0
+                                      ? <>Faltan rendir: {faltanCount} de {padron.length} activos</>
+                                      : 'Ver quién falta rendir'}
+                                    {pendientesOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                  </button>
                                   <div className="mt-2 flex items-center gap-2 bg-[#f8f9fa] rounded-lg px-3 py-2 border border-[#e1e3e4]">
                                     <Globe className="w-3.5 h-3.5 text-[#737781] flex-shrink-0" />
                                     <span className="text-[10px] text-[#737781] truncate flex-1 font-mono">{link}</span>
@@ -4219,6 +4234,10 @@ ${text}`;
                                     className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
                                     <HelpCircle className="w-4 h-4 text-[#1b4d89]" />
                                   </button>
+                                  <button onClick={() => setF62Programa(p)} title="Registro de capacitación F62 (imprimible con firmas)"
+                                    className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
+                                    <Printer className="w-4 h-4 text-[#1b4d89]" />
+                                  </button>
                                   <button onClick={() => handleOpenEditPrograma(p)} title="Editar"
                                     className="p-1.5 rounded-lg hover:bg-[#f3f4f5] transition-colors">
                                     <Edit3 className="w-4 h-4 text-[#424750]" />
@@ -4229,6 +4248,11 @@ ${text}`;
                                   </button>
                                 </div>
                               </div>
+                              {pendientesOpen && (
+                                <div className="border-t border-[#e1e3e4] bg-[#fbfbfc] px-4 py-3.5">
+                                  <PacPendientesPanel programa={p} rows={padron} link={link} loading={personalLoading} />
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -4289,6 +4313,12 @@ ${text}`;
                             className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#1b4d89] hover:bg-blue-50 transition-all disabled:opacity-40">
                             {generatingPdfKey === `pac-asistencia-${programaFiltro.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSignature className="w-4 h-4" />}
                             Acta de asistentes (PDF)
+                          </button>
+                        )}
+                        {programaFiltro && (
+                          <button onClick={() => setF62Programa(programaFiltro)}
+                            className="flex items-center gap-2 px-3 py-2 bg-white border border-[#e1e3e4] rounded-xl text-xs font-bold text-[#1b4d89] hover:bg-blue-50 transition-all">
+                            <Printer className="w-4 h-4" /> Registro F62
                           </button>
                         )}
                       </div>
@@ -4678,6 +4708,14 @@ ${text}`;
                     )}
                   </motion.div>
                 </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Modal: Registro F62 (formato imprimible con las firmas de la evaluación) */}
+            <AnimatePresence>
+              {f62Programa && (
+                <PacRegistroF62Modal programa={f62Programa} resultados={pacResultados} appConfig={appConfig ?? null}
+                  onClose={() => setF62Programa(null)} onError={msg => showToast(msg, 'error')} />
               )}
             </AnimatePresence>
 

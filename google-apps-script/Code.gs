@@ -33,6 +33,13 @@ const PAC_PROGRAMAS_SHEET_NAME = 'PAC_PROGRAMAS';
 const PAC_PREGUNTAS_SHEET_NAME = 'PAC_PREGUNTAS';
 const PAC_RESULTADOS_SHEET_NAME = 'PAC_RESULTADOS';
 
+// Padrón de personal: libro externo "PERSONAL TEMPORAL" (pestaña REGISTER). El PAC
+// lo usa para autollenar los datos del trabajador por DNI y para saber quién falta
+// rendir. La cuenta que implementa este script debe tener al menos acceso de
+// lectura a ese libro; así el libro NO necesita estar compartido públicamente.
+const PERSONAL_PADRON_SPREADSHEET_ID = '1OqjJIobnbR7GrsM8AemQNTUtZcX-opcJFq2fh4mzqEI';
+const PERSONAL_PADRON_SHEET_NAME = 'REGISTER';
+
 // =============================================
 // CONFIGURACIÓN DE CARPETAS DE DRIVE
 // =============================================
@@ -123,6 +130,15 @@ function ejecutarDiagnostico() {
       add('config_row', 'CONFIG con datos iniciales', tieneDatos ? 'ok' : 'warn',
         tieneDatos ? 'Fila de configuración presente' : 'CONFIG vacía: la app puede no arrancar. Ejecuta "Crear carpetas y hojas".');
     }
+  }
+
+  // 2b) Padrón de personal (libro externo)
+  try {
+    var padron = getPersonalPadronSheet_();
+    add('personal_padron', 'Padrón de personal (PERSONAL TEMPORAL)', 'ok', (padron.getLastRow() - 1) + ' filas en ' + PERSONAL_PADRON_SHEET_NAME);
+  } catch (e) {
+    add('personal_padron', 'Padrón de personal (PERSONAL TEMPORAL)', 'warn',
+      'No se pudo leer: el autollenado por DNI y el conteo de pendientes del PAC no funcionarán. Comparte el libro con esta cuenta. ' + e);
   }
 
   // 3) Carpeta raíz de Drive
@@ -235,6 +251,10 @@ function doPost(e) {
       return getCertificadosByDni(ss, data);
     } else if (data.action === 'getPacResultadosByDni') {
       return getPacResultadosByDni(ss, data);
+    } else if (data.action === 'getPersonalByDni') {
+      return getPersonalByDni(data);
+    } else if (data.action === 'getPersonalActivo') {
+      return getPersonalActivo();
     } else if (data.action === 'getShortResultadosByEvaluacion') {
       return getShortResultadosByEvaluacion(ss, data);
     } else if (data.action === 'updateUserProfile') {
@@ -687,6 +707,71 @@ function getPacResultadosByDni(ss, data) {
     .map(function (m) { return rowToObject_(m.headers, m.values); })
     .filter(function (r) { return !programaId || String(r.ProgramaId).trim() === programaId; });
   return createResponse({ status: 'ok', resultados: matches });
+}
+
+// =============================================
+// PADRÓN DE PERSONAL (libro externo "PERSONAL TEMPORAL")
+// =============================================
+
+function getPersonalPadronSheet_() {
+  var sheet = SpreadsheetApp.openById(PERSONAL_PADRON_SPREADSHEET_ID).getSheetByName(PERSONAL_PADRON_SHEET_NAME);
+  if (!sheet) throw new Error('No existe la pestaña ' + PERSONAL_PADRON_SHEET_NAME + ' en el padrón de personal');
+  return sheet;
+}
+
+/** Fila del padrón → objeto. `completo` agrega los datos de contacto (solo para el admin). */
+function personalRowToObject_(headers, values, completo) {
+  var row = {};
+  headers.forEach(function (h, i) { row[String(h).trim().toUpperCase()] = values[i]; });
+  var txt = function (k) { return String(row[k] == null ? '' : row[k]).trim(); };
+  var persona = {
+    dni: txt('DNI'),
+    nombre: txt('APELLIDOS Y NOMBRES'),
+    estado: txt('ESTADO').toUpperCase(),
+    empresa: txt('EMPRESA'),
+    guardia: txt('GUARDIA'),
+    cargo: txt('CARGO'),
+    area: txt('AREA'),
+    categoria: txt('CATEGORIA'),
+  };
+  if (completo) {
+    persona.correo = txt('CORREO');
+    persona.celular = txt('CELULAR');
+  }
+  return persona;
+}
+
+/**
+ * Datos de UNA persona del padrón por DNI, para autollenar el formulario de la
+ * evaluación PAC. Devuelve solo lo que el formulario necesita (sin celular,
+ * correo ni fecha de nacimiento). Sheets suele guardar el DNI como número y se
+ * come el cero inicial, así que se busca con y sin ceros a la izquierda; si la
+ * persona aparece más de una vez se prefiere su fila ACTIVO.
+ */
+function getPersonalByDni(data) {
+  var dni = String(data.dni || '').replace(/\D/g, '');
+  if (!dni) return createResponse({ status: 'error', message: 'DNI requerido' });
+  var sheet = getPersonalPadronSheet_();
+  var variantes = [dni, dni.replace(/^0+/, '')].filter(function (v, i, arr) { return v && arr.indexOf(v) === i; });
+  var personas = [];
+  variantes.forEach(function (v) {
+    findRowsByColumnValue_(sheet, 'DNI', v).forEach(function (m) { personas.push(personalRowToObject_(m.headers, m.values, false)); });
+  });
+  if (personas.length === 0) return createResponse({ status: 'ok', persona: null });
+  var activa = personas.filter(function (p) { return p.estado === 'ACTIVO'; })[0];
+  return createResponse({ status: 'ok', persona: activa || personas[0] });
+}
+
+/** Personal ACTIVO del padrón (para el panel "Faltan rendir" del admin). */
+function getPersonalActivo() {
+  var sheet = getPersonalPadronSheet_();
+  if (sheet.getLastRow() < 2) return createResponse({ status: 'ok', personal: [] });
+  var values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  var headers = values.shift();
+  var personal = values
+    .map(function (v) { return personalRowToObject_(headers, v, true); })
+    .filter(function (p) { return p.dni && p.estado === 'ACTIVO'; });
+  return createResponse({ status: 'ok', personal: personal });
 }
 
 /**

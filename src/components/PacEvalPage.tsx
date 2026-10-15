@@ -6,16 +6,17 @@ import html2pdf from 'html2pdf.js';
 import {
   CheckCircle2, XCircle, ArrowRight, Award, Loader2,
   AlertCircle, GraduationCap, User, ChevronRight, Timer,
-  PenTool, Camera, RefreshCw, FileSignature, Ban,
+  PenTool, Camera, RefreshCw, FileSignature, Ban, UserCheck,
 } from 'lucide-react';
 import { shuffleArray } from '../lib/utils';
 import {
   fetchPacProgramas, fetchPacPreguntas, fetchPacResultadosDni, savePacResultado,
-  fetchAppDynamicConfig,
+  fetchAppDynamicConfig, fetchPersonaPorDni,
 } from '../services/sheetsService';
+import { splitApellidosNombres, matchOpcion } from '../lib/pacPadron';
 import { EMPRESAS, AREAS, GUARDIAS } from '../lib/constants';
 import { useFaceCapture } from '../hooks/useFaceCapture';
-import type { PacPrograma, PacPregunta, PacWrongAnswer, PacEncuesta, SatisfaccionRating, AppDynamicConfig } from '../types';
+import type { PacPrograma, PacPregunta, PacWrongAnswer, PacEncuesta, SatisfaccionRating, AppDynamicConfig, PersonalActivo } from '../types';
 import PacConstanciaTemplate from './PacConstanciaTemplate';
 
 type PageState =
@@ -55,6 +56,12 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
   const [area, setArea] = useState('');
   const [consentimiento, setConsentimiento] = useState(false);
   const [entryError, setEntryError] = useState('');
+  // Padrón "PERSONAL TEMPORAL": al escribir el DNI se proponen sus datos (siguen editables)
+  const [autollenadoDni, setAutollenadoDni] = useState<string | null>(null);
+  const [buscandoDni, setBuscandoDni] = useState(false);
+  const dniRef = useRef('');
+  const busquedaTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const personasPorDni = useRef(new Map<string, PersonalActivo | null>());
 
   // Estado previo (para pantallas passed / noAttemptsLeft)
   const [prevNota, setPrevNota] = useState<number | null>(null);
@@ -119,6 +126,49 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
       .catch(() => setPageState('error'));
   }, [evalId]);
 
+  const aplicarPersona = (valorDni: string, persona: PersonalActivo | null) => {
+    if (!persona) { setAutollenadoDni(null); return; }
+    const { apellidos: ap, nombres: nom } = splitApellidosNombres(persona.nombre);
+    setApellidos(ap);
+    setNombres(nom);
+    setGuardia(matchOpcion(persona.guardia, GUARDIAS));
+    setEmpresa(matchOpcion(persona.empresa, EMPRESAS));
+    setArea(matchOpcion(persona.area, AREAS));
+    setAutollenadoDni(valorDni);
+  };
+
+  // Al completar el DNI se consulta al Apps Script solo esa persona del padrón
+  // "PERSONAL TEMPORAL" (con una pausa corta para no consultar por cada dígito).
+  // Si el DNI cambió mientras llegaba la respuesta, la respuesta se descarta.
+  const handleDniChange = (valor: string) => {
+    setDni(valor);
+    const limpio = valor.trim();
+    dniRef.current = limpio;
+    if (busquedaTimer.current) clearTimeout(busquedaTimer.current);
+    setAutollenadoDni(null);
+    if (limpio.length < 8) { setBuscandoDni(false); return; }
+    if (personasPorDni.current.has(limpio)) { aplicarPersona(limpio, personasPorDni.current.get(limpio) ?? null); return; }
+    setBuscandoDni(true);
+    busquedaTimer.current = setTimeout(() => {
+      fetchPersonaPorDni(limpio)
+        .then(persona => {
+          personasPorDni.current.set(limpio, persona);
+          if (dniRef.current === limpio) aplicarPersona(limpio, persona);
+        })
+        .catch(() => {})
+        .finally(() => { if (dniRef.current === limpio) setBuscandoDni(false); });
+    }, 350);
+  };
+
+  useEffect(() => () => { if (busquedaTimer.current) clearTimeout(busquedaTimer.current); }, []);
+
+  // Valores del padrón que no están en las listas fijas (p.ej. guardia "S/G",
+  // área "CABLE BOLTING") se agregan como opción para que el select los muestre.
+  const conValorActual = (lista: readonly string[], valor: string) => (valor && !lista.includes(valor) ? [...lista, valor] : lista);
+  const guardiaOpciones = conValorActual(GUARDIAS, guardia);
+  const empresaOpciones = conValorActual(EMPRESAS, empresa);
+  const areaOpciones = conValorActual(AREAS, area);
+
   const handleEntry = async () => {
     setEntryError('');
     if (!dni.trim() || !apellidos.trim() || !nombres.trim() || !guardia || !empresa || !area) {
@@ -127,10 +177,6 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
     }
     if (!/^\d{6,12}$/.test(dni.trim())) {
       setEntryError('DNI inválido (solo dígitos, 6–12 caracteres).');
-      return;
-    }
-    if (!consentimiento) {
-      setEntryError('Debes aceptar el tratamiento de tus datos para continuar.');
       return;
     }
     if (preguntas.length === 0) {
@@ -252,6 +298,7 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
 
   const handleFirmaContinue = () => {
     if (!hasDrawn) { setFirmaError('Por favor, firma antes de continuar.'); return; }
+    if (!consentimiento) { setFirmaError('Marca la casilla de conformidad para continuar.'); return; }
     const finalSig = sigCanvas.current?.getCanvas().toDataURL('image/png') ?? signatureData;
     setSignatureData(finalSig);
     setFirmaError('');
@@ -432,8 +479,18 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
           <div className="space-y-3">
             <div>
               <label className="block text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1">DNI</label>
-              <input type="number" value={dni} onChange={e => setDni(e.target.value)} placeholder="Ingresa tu DNI"
+              <input type="number" value={dni} onChange={e => handleDniChange(e.target.value)} placeholder="Ingresa tu DNI"
                 className="w-full px-4 py-3 rounded-xl border border-[#e1e3e4] text-sm font-semibold text-[#191c1d] focus:outline-none focus:border-[#1b4d89] focus:ring-2 focus:ring-[#1b4d89]/10 bg-[#f8f9fa]" />
+              {buscandoDni && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-[#737781]">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando tus datos…
+                </p>
+              )}
+              {!buscandoDni && autollenadoDni && autollenadoDni === dni.trim() && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700">
+                  <UserCheck className="w-3.5 h-3.5" /> Encontramos tus datos. Revísalos y corrígelos si algo no coincide.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-[10px] font-bold text-[#737781] uppercase tracking-wide mb-1">Apellidos</label>
@@ -451,7 +508,7 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
                 <select value={guardia} onChange={e => setGuardia(e.target.value)}
                   className="w-full px-3 py-3 rounded-xl border border-[#e1e3e4] text-sm font-semibold text-[#191c1d] focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]">
                   <option value="">--</option>
-                  {GUARDIAS.map(g => <option key={g} value={g}>{g}</option>)}
+                  {guardiaOpciones.map(g => <option key={g} value={g}>{g}</option>)}
                 </select>
               </div>
               <div>
@@ -459,7 +516,7 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
                 <select value={empresa} onChange={e => setEmpresa(e.target.value)}
                   className="w-full px-3 py-3 rounded-xl border border-[#e1e3e4] text-sm font-semibold text-[#191c1d] focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]">
                   <option value="">--</option>
-                  {EMPRESAS.map(e => <option key={e} value={e}>{e}</option>)}
+                  {empresaOpciones.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
               </div>
             </div>
@@ -468,19 +525,10 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
               <select value={area} onChange={e => setArea(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl border border-[#e1e3e4] text-sm font-semibold text-[#191c1d] focus:outline-none focus:border-[#1b4d89] bg-[#f8f9fa]">
                 <option value="">Selecciona tu área</option>
-                {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+                {areaOpciones.map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
 
-            <button type="button" onClick={() => setConsentimiento(c => !c)}
-              className={`w-full flex items-start gap-3 border rounded-xl px-3.5 py-3 text-left transition-all ${consentimiento ? 'bg-emerald-50 border-emerald-300' : 'bg-[#f8f9fa] border-[#e1e3e4]'}`}>
-              <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border-2 mt-0.5 transition-colors ${consentimiento ? 'bg-emerald-500 border-emerald-500' : 'border-[#c3c6d1]'}`}>
-                {consentimiento && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
-              </div>
-              <p className="text-[#424750] text-xs font-medium leading-snug">
-                Acepto el tratamiento de mis datos personales y la confidencialidad de esta evaluación.
-              </p>
-            </button>
 
             {entryError && (
               <div className="flex items-center gap-2 px-3 py-2.5 bg-red-50 rounded-xl border border-red-200">
@@ -634,12 +682,21 @@ export default function PacEvalPage({ evalId }: PacEvalPageProps) {
             <PenTool className="w-5 h-5 text-[#1b4d89]" />
             <h2 className="text-lg font-black text-[#00366b]">Tu firma</h2>
           </div>
-          <p className="text-xs text-[#737781] mb-4">Firma dentro del recuadro para confirmar tu evaluación.</p>
+          <p className="text-xs text-[#737781] mb-4">Firma dentro del recuadro. Tu firma se registrará en la lista de asistencia de esta capacitación.</p>
           <div ref={sigContainerRef} className="bg-[#f8f9fa] rounded-2xl overflow-hidden mb-4 border-2 border-[#e1e3e4]" style={{ height: '200px' }}>
             <SignatureCanvas ref={sigCanvas} penColor="#111827"
               canvasProps={{ style: { width: '100%', height: '100%', cursor: 'crosshair', display: 'block' } }}
               onBegin={() => { setHasDrawn(true); setFirmaError(''); }} onEnd={saveSig} />
           </div>
+          <button type="button" onClick={() => { setConsentimiento(c => !c); setFirmaError(''); }}
+            className={`w-full flex items-start gap-3 border rounded-xl px-3.5 py-3 text-left transition-all mb-4 ${consentimiento ? 'bg-emerald-50 border-emerald-300' : 'bg-[#f8f9fa] border-[#e1e3e4]'}`}>
+            <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border-2 mt-0.5 transition-colors ${consentimiento ? 'bg-emerald-500 border-emerald-500' : 'border-[#c3c6d1]'}`}>
+              {consentimiento && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+            </div>
+            <p className="text-[#424750] text-xs font-medium leading-snug">
+              Declaro haber participado en esta capacitación y autorizo el uso de mi firma y mis datos en el registro de asistencia.
+            </p>
+          </button>
           {firmaError && (
             <div className="flex items-center gap-2 px-3 py-2.5 bg-red-50 rounded-xl border border-red-200 mb-4">
               <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
