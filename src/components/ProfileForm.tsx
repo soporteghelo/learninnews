@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Building2, Briefcase, Phone,
-  Users, ArrowRight, AlertCircle, User,
+  Users, ArrowRight, AlertCircle, User, LogOut,
 } from 'lucide-react';
 import type { UserSession } from '../types';
 import { EMPRESAS, AREAS } from '../lib/constants';
@@ -36,9 +36,10 @@ export interface ProfileFormData {
 interface ProfileFormProps {
   userSession: UserSession;
   onComplete: (data: ProfileFormData) => void | Promise<void>;
+  onLogout: () => void;
 }
 
-export default function ProfileForm({ userSession, onComplete }: ProfileFormProps) {
+export default function ProfileForm({ userSession, onComplete, onLogout }: ProfileFormProps) {
   const [empresa, setEmpresa] = useState('AESA');
   const [empresaOtro, setEmpresaOtro] = useState('');
   const [area, setArea] = useState('');
@@ -126,9 +127,19 @@ export default function ProfileForm({ userSession, onComplete }: ProfileFormProp
 
       <div className="w-full max-w-xl relative pb-12">
         {/* Header */}
-        <div className="mb-6">
-          <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Completa tu Perfil</h2>
-          <p className="text-slate-500 text-xs font-bold tracking-widest">INFORMACIÓN REQUERIDA</p>
+        <div className="flex items-center justify-between mb-6">
+          <div className="min-w-0">
+            <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Completa tu Perfil</h2>
+            <p className="text-slate-500 text-xs font-bold tracking-widest">INFORMACIÓN REQUERIDA</p>
+          </div>
+          <button
+            onClick={onLogout}
+            className="w-10 h-10 rounded-full bg-slate-900 border border-white/5 flex items-center justify-center hover:bg-slate-800 transition-colors flex-shrink-0"
+            title="Cerrar sesión"
+            aria-label="Cerrar sesión"
+          >
+            <LogOut className="w-4 h-4 text-slate-400" />
+          </button>
         </div>
 
         {/* User badge */}

@@ -957,6 +957,7 @@ export default function App() {
             <ProfileForm
               userSession={userSession}
               onComplete={handleProfileComplete}
+              onLogout={handleLogout}
             />
           </motion.div>
         )}
